@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "164217598709",
+    "project_id": "stock-manager-510eb",
+    "storage_bucket": "stock-manager-510eb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:164217598709:android:9089704fc44e1a79fb0bbc",
+        "android_client_info": {
+          "package_name": "com.stock.manager.stock_manager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDferFOFRHzTcoPluQiKWwcVZh7GH4Y1Pc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
