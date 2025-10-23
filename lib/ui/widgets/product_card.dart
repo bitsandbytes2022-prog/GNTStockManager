@@ -1,8 +1,7 @@
 import 'dart:convert';
-
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-
-import '../../../models/product_model.dart';
+import '../../models/product_model.dart';
 
 class ProductCard extends StatelessWidget {
   final Product product;
@@ -16,215 +15,294 @@ class ProductCard extends StatelessWidget {
     required this.product,
     required this.onDelete,
     required this.onTap,
-    required this.showPurchasePrice,
+    this.showPurchasePrice = false,
     this.showSalesInfo = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final profitColor = product.profitMargin >= 0 ? Colors.green : Colors.red;
+    final bool isLowStock = product.stock < 5;
+    final bool isOutOfStock = product.stock == 0;
 
     return Card(
-      color: Colors.white,
-      margin: const EdgeInsets.only(bottom: 12),
+      elevation: kIsWeb ? 1 : 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isOutOfStock
+              ? Colors.red.shade100
+              : isLowStock
+              ? Colors.orange.shade100
+              : Colors.grey.shade100,
+          width: isOutOfStock || isLowStock ? 2 : 1,
+        ),
+      ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Image
-              Container(
-                width: double.infinity,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: product.imageBase64 != null
-                      ? GestureDetector(
-                    onTap: () {
-                      showDialog(
-                        builder: (c) {
-                          return Dialog(
-                            child: Image.memory(
-                              base64Decode(product.imageBase64!),
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Icon(
-                                  Icons.broken_image,
-                                  size: 40,
-                                  color: Colors.grey[400],
-                                );
-                              },
-                            ),
-                          );
-                        },
-                        barrierDismissible: true,
-                        context: context,
-                      );
-                    },
-                    child: Image.memory(
-                      base64Decode(product.imageBase64!),
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Icon(
-                          Icons.broken_image,
-                          size: 40,
-                          color: Colors.grey[400],
-                        );
-                      },
-                    ),
-                  )
-                      : Icon(
-                    Icons.inventory_2,
-                    size: 40,
-                    color: Colors.grey[400],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // Product Name and Size
-              Text(
-                "${product.name} ${product.size}",
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-
-              // Stock info
-              Row(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image section
+            Expanded(
+              flex: 3,
+              child: Stack(
                 children: [
-                  Icon(
-                    Icons.inventory,
-                    size: 14,
-                    color: product.stock < 10 ? Colors.red : Colors.grey[600],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Stock: ${product.stock}',
-                    style: TextStyle(
-                      color: product.stock < 10 ? Colors.red : Colors.grey[600],
-                      fontSize: 12,
-                      fontWeight: product.stock < 10 ? FontWeight.bold : null,
-                    ),
-                  ),
+                  _buildImage(),
+                  _buildStockBadge(),
+                  if (showSalesInfo && product.totalSold > 0)
+                    _buildSalesBadge(),
                 ],
               ),
-              const SizedBox(height: 4),
+            ),
 
-              // Sales info (when sorting by best sellers)
-              if (showSalesInfo && product.totalSold > 0) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.orange.shade200),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.local_fire_department,
-                        size: 12,
-                        color: Colors.orange.shade700,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Sold: ${product.totalSold} (${product.saleCount}x)',
-                        style: TextStyle(
-                          color: Colors.orange.shade700,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
+            // Info section
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Name and size
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          product.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-
-              const Spacer(),
-
-              // Price
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  if (showPurchasePrice)
-                    _InfoChip(
-                      label: '',
-                      value: '₹${product.purchasePrice.toStringAsFixed(0)}',
-                      color: Colors.orange,
-                      fontSize: 11,
+                        const SizedBox(height: 2),
+                        Text(
+                          product.size,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
-                  _InfoChip(
-                    label: '',
-                    value: '₹${product.salePrice.toStringAsFixed(0)}',
-                    color: Colors.blue,
-                    fontSize: 14,
-                  ),
-                ],
-              ),
 
-              // Profit margin (when showing purchase prices)
-              if (showPurchasePrice) ...[
-                const SizedBox(height: 4),
-                Text(
-                  '₹${product.profitMargin.toStringAsFixed(0)} (${product.profitPercentage.toStringAsFixed(1)}%)',
-                  style: TextStyle(
-                    color: profitColor,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
-                  ),
+                    // Prices and stock
+                    Column(
+                      children: [
+                        if (showPurchasePrice) ...[
+                          _buildPriceRow(
+                            'Cost',
+                            product.purchasePrice,
+                            Colors.grey.shade700,
+                            Icons.shopping_cart_outlined,
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                        _buildPriceRow(
+                          'Sale',
+                          product.salePrice,
+                          Colors.green.shade700,
+                          Icons.currency_rupee,
+                        ),
+                        if (showSalesInfo && product.totalSold > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.trending_up,
+                                    size: 14,
+                                    color: Colors.blue.shade700,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${product.totalSold} sold',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.blue.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
-              ],
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
-}
 
-class _InfoChip extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final double fontSize;
-
-  const _InfoChip({
-    required this.label,
-    required this.value,
-    required this.color,
-    this.fontSize = 12,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildImage() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      width: double.infinity,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        '$label $value',
-        style: TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontWeight: FontWeight.w600,
+        color: Colors.grey.shade100,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
         ),
       ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+        child: product.imageBase64 != null
+            ? Image.memory(
+          base64Decode(product.imageBase64!),
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildPlaceholder();
+          },
+        )
+            : _buildPlaceholder(),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Center(
+      child: Icon(
+        Icons.inventory_2_outlined,
+        size: 48,
+        color: Colors.grey.shade400,
+      ),
+    );
+  }
+
+  Widget _buildStockBadge() {
+    return Positioned(
+      top: 8,
+      right: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: product.stock == 0
+              ? Colors.red.shade500
+              : product.stock < 5
+              ? Colors.orange.shade500
+              : Colors.green.shade500,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              product.stock == 0
+                  ? Icons.warning_rounded
+                  : Icons.inventory_2,
+              size: 14,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${product.stock}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalesBadge() {
+    return Positioned(
+      top: 8,
+      left: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade700,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.local_fire_department,
+              size: 12,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${product.totalSold}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPriceRow(
+      String label,
+      double price,
+      Color color,
+      IconData icon,
+      ) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: color,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        Text(
+          '₹${price.toStringAsFixed(0)}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }

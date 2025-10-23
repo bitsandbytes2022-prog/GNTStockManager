@@ -1,5 +1,5 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
 import '../widgets/product_card.dart';
@@ -12,6 +12,8 @@ enum ProductSortOption {
 }
 
 class ProductListScreen extends StatefulWidget {
+  const ProductListScreen({super.key});
+
   @override
   State<ProductListScreen> createState() => _ProductListScreenState();
 }
@@ -19,6 +21,8 @@ class ProductListScreen extends StatefulWidget {
 class _ProductListScreenState extends State<ProductListScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
   String _searchQuery = '';
   bool _useStreamMode = true;
   bool showPurchasePrices = false;
@@ -34,6 +38,24 @@ class _ProductListScreenState extends State<ProductListScreen> {
     });
   }
 
+  // Responsive grid columns
+  int _getCrossAxisCount(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    if (kIsWeb) {
+      if (width > 1400) return 6;
+      if (width > 1200) return 5;
+      if (width > 900) return 4;
+      if (width > 600) return 3;
+      return 2;
+    } else {
+      return width > 600 ? 3 : 2;
+    }
+  }
+
+  double _getGridSpacing(BuildContext context) {
+    return kIsWeb ? 20 : 16;
+  }
+
   List<Product> _filterProducts(List<Product> products) {
     if (_searchQuery.isEmpty) return products;
 
@@ -42,8 +64,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return products.where((product) {
       final name = product.name.toLowerCase();
       final size = product.size.toLowerCase();
-
-      // Check if every word exists in either name or size
       return queryWords.every((word) => name.contains(word) || size.contains(word));
     }).toList();
   }
@@ -55,26 +75,19 @@ class _ProductListScreenState extends State<ProductListScreen> {
       case ProductSortOption.newest:
         sortedList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
         break;
-
       case ProductSortOption.lowStock:
         sortedList.sort((a, b) {
-          // First sort by stock (ascending)
           final stockCompare = a.stock.compareTo(b.stock);
           if (stockCompare != 0) return stockCompare;
-          // If stock is equal, sort by newest
           return b.createdAt.compareTo(a.createdAt);
         });
         break;
-
       case ProductSortOption.highSelling:
         sortedList.sort((a, b) {
-          // First sort by total sold (descending)
           final soldCompare = b.totalSold.compareTo(a.totalSold);
           if (soldCompare != 0) return soldCompare;
-          // If total sold is equal, sort by sale count (descending)
           final countCompare = b.saleCount.compareTo(a.saleCount);
           if (countCompare != 0) return countCompare;
-          // If still equal, sort by sales frequency (descending)
           return b.salesFrequency.compareTo(a.salesFrequency);
         });
         break;
@@ -86,7 +99,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Future<void> _navigateToAddProduct() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => AddProductScreen()),
+      MaterialPageRoute(builder: (_) => const AddProductScreen()),
     );
   }
 
@@ -100,9 +113,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error deleting product: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting product: $e')),
+        );
       }
     }
   }
@@ -115,11 +128,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
   String _getSortOptionLabel(ProductSortOption option) {
     switch (option) {
       case ProductSortOption.newest:
-        return 'Sort: Newest First';
+        return 'Newest First';
       case ProductSortOption.lowStock:
-        return 'Sort: Low Stock';
+        return 'Low Stock';
       case ProductSortOption.highSelling:
-        return 'Sort: Best Sellers';
+        return 'Best Sellers';
     }
   }
 
@@ -136,245 +149,209 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width >= 1200;
+
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       body: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Search products...',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => _searchController.clear(),
-                      )
-                          : null,
-                    ),
-                  ),
+          // Modern header with search and filters
+          Container(
+            padding: EdgeInsets.all(isDesktop ? 24 : 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
                 ),
-              ),
-              PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == 'mode') {
-                    setState(() {
-                      _useStreamMode = !_useStreamMode;
-                    });
-                  } else if (value == 'refresh') {
-                    _refreshProducts();
-                  } else if (value == 'prices') {
-                    setState(() {
-                      showPurchasePrices = !showPurchasePrices;
-                    });
-                  } else if (value.startsWith('sort_')) {
-                    final sortOption = value.replaceFirst('sort_', '');
-                    setState(() {
-                      if (sortOption == 'newest') {
-                        _currentSortOption = ProductSortOption.newest;
-                      } else if (sortOption == 'lowStock') {
-                        _currentSortOption = ProductSortOption.lowStock;
-                      } else if (sortOption == 'highSelling') {
-                        _currentSortOption = ProductSortOption.highSelling;
-                      }
-                    });
-                  }
-                },
-                itemBuilder: (context) => [
-                  // Sort options section
-                  PopupMenuItem(
-                    enabled: false,
-                    child: Text(
-                      'Sort By',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[700],
-                        fontSize: 12,
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    // Search bar
+                    Expanded(
+                      child: Container(
+                        constraints: BoxConstraints(
+                          maxWidth: isDesktop ? 500 : double.infinity,
+                        ),
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Search products...',
+                            prefixIcon: const Icon(Icons.search, size: 22),
+                            suffixIcon: _searchController.text.isNotEmpty
+                                ? IconButton(
+                              icon: const Icon(Icons.clear, size: 20),
+                              onPressed: () => _searchController.clear(),
+                            )
+                                : null,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[100],
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  PopupMenuItem(
-                    value: 'sort_newest',
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.schedule,
-                          size: 20,
-                          color: _currentSortOption == ProductSortOption.newest
-                              ? Colors.blue
-                              : Colors.grey[600],
+                    const SizedBox(width: 12),
+
+                    // Filter button
+                    PopupMenuButton<String>(
+                      icon: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Newest First',
-                          style: TextStyle(
-                            color: _currentSortOption == ProductSortOption.newest
-                                ? Colors.blue
-                                : null,
-                            fontWeight:
-                            _currentSortOption == ProductSortOption.newest
-                                ? FontWeight.bold
-                                : null,
+                        child: const Icon(Icons.filter_list),
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      onSelected: (value) {
+                        if (value == 'mode') {
+                          setState(() {
+                            _useStreamMode = !_useStreamMode;
+                          });
+                        } else if (value == 'refresh') {
+                          _refreshProducts();
+                        } else if (value == 'prices') {
+                          setState(() {
+                            showPurchasePrices = !showPurchasePrices;
+                          });
+                        } else if (value.startsWith('sort_')) {
+                          final sortOption = value.replaceFirst('sort_', '');
+                          setState(() {
+                            if (sortOption == 'newest') {
+                              _currentSortOption = ProductSortOption.newest;
+                            } else if (sortOption == 'lowStock') {
+                              _currentSortOption = ProductSortOption.lowStock;
+                            } else if (sortOption == 'highSelling') {
+                              _currentSortOption = ProductSortOption.highSelling;
+                            }
+                          });
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          enabled: false,
+                          child: Text(
+                            'Sort By',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        _buildSortMenuItem('newest', ProductSortOption.newest),
+                        _buildSortMenuItem('lowStock', ProductSortOption.lowStock),
+                        _buildSortMenuItem('highSelling', ProductSortOption.highSelling),
+                        const PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'prices',
+                          child: Row(
+                            children: [
+                              Icon(
+                                showPurchasePrices
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                showPurchasePrices
+                                    ? 'Hide Purchase Prices'
+                                    : 'Show Purchase Prices',
+                              ),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'refresh',
+                          child: Row(
+                            children: [
+                              const Icon(Icons.refresh, size: 20),
+                              const SizedBox(width: 12),
+                              const Text('Refresh'),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  PopupMenuItem(
-                    value: 'sort_lowStock',
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.trending_down,
-                          size: 20,
-                          color: _currentSortOption == ProductSortOption.lowStock
-                              ? Colors.blue
-                              : Colors.grey[600],
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Low Stock',
-                          style: TextStyle(
-                            color: _currentSortOption == ProductSortOption.lowStock
-                                ? Colors.blue
-                                : null,
-                            fontWeight:
-                            _currentSortOption == ProductSortOption.lowStock
-                                ? FontWeight.bold
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'sort_highSelling',
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.trending_up,
-                          size: 20,
-                          color:
-                          _currentSortOption == ProductSortOption.highSelling
-                              ? Colors.blue
-                              : Colors.grey[600],
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Best Sellers',
-                          style: TextStyle(
-                            color:
-                            _currentSortOption == ProductSortOption.highSelling
-                                ? Colors.blue
-                                : null,
-                            fontWeight:
-                            _currentSortOption == ProductSortOption.highSelling
-                                ? FontWeight.bold
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuDivider(),
-                  // Other options
-                  PopupMenuItem(
-                    value: 'mode',
-                    child: Row(
-                      children: [
-                        Icon(Icons.sync, size: 20, color: Colors.grey[600]),
-                        const SizedBox(width: 12),
-                        Text(
-                          _useStreamMode
-                              ? 'Switch to Cached mode'
-                              : 'Switch to Real-time mode',
-                        ),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'refresh',
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh, size: 20, color: Colors.grey[600]),
-                        const SizedBox(width: 12),
-                        const Text('Refresh'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'prices',
-                    child: Row(
-                      children: [
-                        Icon(
-                          !showPurchasePrices
-                              ? Icons.visibility
-                              : Icons.visibility_off,
-                          size: 20,
-                          color: Colors.grey[600],
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          !showPurchasePrices
-                              ? 'Show Purchase Prices'
-                              : 'Hide Purchase Prices',
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          // Sort indicator chip
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.blue.shade200),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
+                  ],
+                ),
+
+                // Active sort indicator
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    Chip(
+                      avatar: Icon(
                         _getSortOptionIcon(_currentSortOption),
                         size: 16,
-                        color: Colors.blue.shade700,
                       ),
-                      const SizedBox(width: 6),
-                      Text(
+                      label: Text(
                         _getSortOptionLabel(_currentSortOption),
-                        style: TextStyle(
-                          color: Colors.blue.shade700,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: const TextStyle(fontSize: 12),
                       ),
-                    ],
-                  ),
+                      backgroundColor: Colors.blue.shade50,
+                      side: BorderSide(color: Colors.blue.shade200),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
+
+          // Product grid
           Expanded(
             child: _useStreamMode ? _buildStreamView() : _buildCachedView(),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: kIsWeb
+          ? null // Hide on web
+          : FloatingActionButton.extended(
         onPressed: _navigateToAddProduct,
         icon: const Icon(Icons.add),
         label: const Text('Add Product'),
+        backgroundColor: Colors.blue,
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _buildSortMenuItem(String value, ProductSortOption option) {
+    final isSelected = _currentSortOption == option;
+    return PopupMenuItem(
+      value: 'sort_$value',
+      child: Row(
+        children: [
+          Icon(
+            _getSortOptionIcon(option),
+            size: 20,
+            color: isSelected ? Colors.blue : Colors.grey[600],
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _getSortOptionLabel(option),
+            style: TextStyle(
+              color: isSelected ? Colors.blue : null,
+              fontWeight: isSelected ? FontWeight.bold : null,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -393,7 +370,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
         final filteredProducts = _filterProducts(snapshot.data ?? []);
         final sortedProducts = _sortProducts(filteredProducts);
-        return _buildProductList(sortedProducts);
+        return _buildProductGrid(sortedProducts);
       },
     );
   }
@@ -412,46 +389,71 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
         final filteredProducts = _filterProducts(snapshot.data ?? []);
         final sortedProducts = _sortProducts(filteredProducts);
-        return _buildProductList(sortedProducts);
+        return _buildProductGrid(sortedProducts);
       },
     );
   }
 
-  Widget _buildProductList(List<Product> products) {
+  Widget _buildProductGrid(List<Product> products) {
     if (products.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
+            Icon(
+              Icons.inventory_2_outlined,
+              size: 80,
+              color: Colors.grey[400],
+            ),
             const SizedBox(height: 16),
             Text(
               _searchQuery.isEmpty ? 'No products yet' : 'No products found',
               style: TextStyle(fontSize: 18, color: Colors.grey[600]),
             ),
+            if (!kIsWeb && _searchQuery.isEmpty) ...[
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _navigateToAddProduct,
+                icon: const Icon(Icons.add),
+                label: const Text('Add Your First Product'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       );
     }
 
+    final crossAxisCount = _getCrossAxisCount(context);
+    final spacing = _getGridSpacing(context);
+
     return GridView.builder(
-      padding:   EdgeInsets.all(16),
+      controller: _scrollController,
+      padding: EdgeInsets.all(spacing),
       itemCount: products.length,
-      gridDelegate:   SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio:showPurchasePrices?0.65:  0.70,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: spacing,
+        childAspectRatio: showPurchasePrices ? 0.65 : 0.70,
       ),
       itemBuilder: (context, index) {
         final product = products[index];
         return Dismissible(
           key: ValueKey(product.id),
-          direction: DismissDirection.startToEnd,
+          direction: kIsWeb ? DismissDirection.none : DismissDirection.startToEnd,
           background: Container(
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            color: Colors.red,
+            decoration: BoxDecoration(
+              color: Colors.red,
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: const Icon(Icons.delete, color: Colors.white),
           ),
           confirmDismiss: (direction) async {
@@ -470,10 +472,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
                     ),
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(true),
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(color: Colors.red),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.red,
                       ),
+                      child: const Text('Delete'),
                     ),
                   ],
                 );
@@ -488,7 +490,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
             onDelete: () => _deleteProduct(product),
             showPurchasePrice: showPurchasePrices,
             showSalesInfo: _currentSortOption == ProductSortOption.highSelling,
-            onTap: () => Navigator.push(
+            onTap: kIsWeb
+                ? () {} // View only on web
+                : () => Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (_) => AddProductScreen(product: product),
@@ -503,6 +507,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 }

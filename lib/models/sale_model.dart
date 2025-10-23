@@ -83,6 +83,27 @@ class SaleItem {
       imageBase64: map['imageBase64'],
     );
   }
+
+  // Added copyWith for SaleItem
+  SaleItem copyWith({
+    String? productId,
+    String? productName,
+    String? productSize,
+    double? salePrice,
+    int? quantity,
+    double? purchasePrice,
+    String? imageBase64,
+  }) {
+    return SaleItem(
+      productId: productId ?? this.productId,
+      productName: productName ?? this.productName,
+      productSize: productSize ?? this.productSize,
+      purchasePrice: purchasePrice ?? this.purchasePrice,
+      salePrice: salePrice ?? this.salePrice,
+      quantity: quantity ?? this.quantity,
+      imageBase64: imageBase64 ?? this.imageBase64,
+    );
+  }
 }
 
 class Sale {
@@ -91,7 +112,7 @@ class Sale {
   final double totalAmount;
   final DateTime createdAt;
   final String? notes;
-  final PaymentMethod paymentMethod; // New field
+  final PaymentMethod paymentMethod;
 
   Sale({
     required this.id,
@@ -99,7 +120,7 @@ class Sale {
     required this.totalAmount,
     DateTime? createdAt,
     this.notes,
-    this.paymentMethod = PaymentMethod.cash, // Default to cash
+    this.paymentMethod = PaymentMethod.cash,
   }) : createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toFirestore() => {
@@ -107,7 +128,7 @@ class Sale {
     'totalAmount': totalAmount,
     'createdAt': Timestamp.fromDate(createdAt),
     'notes': notes,
-    'paymentMethod': paymentMethod.value, // Store as string
+    'paymentMethod': paymentMethod.value,
   };
 
   factory Sale.fromFirestore(DocumentSnapshot doc) {
@@ -124,6 +145,25 @@ class Sale {
       paymentMethod: data['paymentMethod'] != null
           ? PaymentMethodExtension.fromString(data['paymentMethod'])
           : PaymentMethod.cash,
+    );
+  }
+
+  // Added copyWith method for Sale
+  Sale copyWith({
+    String? id,
+    List<SaleItem>? items,
+    double? totalAmount,
+    DateTime? createdAt,
+    String? notes,
+    PaymentMethod? paymentMethod,
+  }) {
+    return Sale(
+      id: id ?? this.id,
+      items: items ?? this.items,
+      totalAmount: totalAmount ?? this.totalAmount,
+      createdAt: createdAt ?? this.createdAt,
+      notes: notes ?? this.notes,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
     );
   }
 }

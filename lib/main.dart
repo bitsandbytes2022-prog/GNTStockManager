@@ -1,20 +1,36 @@
-// main.dart - Using base64 images in Firestore
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:inventory_manager/ui/screens/dashboard_screen.dart';
-import 'package:inventory_manager/ui/screens/product_list_screen.dart';
-import 'dart:io';
-import 'dart:convert';
-import 'dart:typed_data';
-import 'package:path_provider/path_provider.dart';
+
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  // ==========================================
+  // Platform-aware offline persistence
+  // ==========================================
+  if (!kIsWeb) {
+    // Mobile/Desktop: Full offline persistence
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
+    debugPrint('✅ Mobile: Full offline persistence enabled');
+  } else {
+    // Web: Basic persistence (IndexedDB)
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+    );
+    debugPrint('✅ Web: Basic persistence enabled');
+  }
+
   runApp(const InventoryApp());
 }
 
@@ -24,7 +40,7 @@ class InventoryApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Inventory Manager',
+      title: 'GNT Stock Manager',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -39,16 +55,7 @@ class InventoryApp extends StatelessWidget {
           filled: true,
         ),
       ),
-      home:  DashboardScreen(),
+      home: DashboardScreen(),
     );
   }
 }
-
-
-
-
-
-
-
-
-

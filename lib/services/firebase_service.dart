@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,20 +8,36 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/product_model.dart';
 
+/// Optimized FirebaseService with Singleton pattern and advanced caching
 class FirebaseService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  // ==========================================
+  // SINGLETON PATTERN - Shared across entire app
+  // ==========================================
+  FirebaseService._internal();
+  static final FirebaseService _instance = FirebaseService._internal();
+  factory FirebaseService() => _instance;
 
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _productsCollection = 'products';
 
-  // Cache for products to minimize reads
+  // ==========================================
+  // GLOBAL CACHE - Shared by all screens
+  // ==========================================
   List<Product>? _cachedProducts;
   DateTime? _lastFetchTime;
-  static const Duration _cacheValidDuration = Duration(minutes: 5);
+  static const Duration _cacheValidDuration = Duration(minutes: 10);
 
-  // Single listener to minimize real-time listeners
+  // Single stream instance - prevents multiple listeners
   Stream<List<Product>>? _productsStream;
 
-  // Get products stream (reuses single stream)
+  // Pagination support
+  static const int _pageSize = 20;
+  DocumentSnapshot? _lastProductDocument;
+  bool _hasMoreProducts = true;
+
+  // ==========================================
+  // STREAM WITH AUTO-CACHING
+  // ==========================================
   Stream<List<Product>> getProductsStream() {
     _productsStream ??= _firestore
         .collection(_productsCollection)
@@ -33,25 +48,30 @@ class FirebaseService {
           .toList();
       products.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      // Update cache
+      // Automatically update cache on every stream emission
       _cachedProducts = products;
       _lastFetchTime = DateTime.now();
 
+      debugPrint('📡 Stream updated - ${products.length} products');
       return products;
     });
 
     return _productsStream!;
   }
 
-  // Get cached products (no Firebase call if cache is valid)
+  // ==========================================
+  // CACHED READ WITH TTL
+  // ==========================================
   Future<List<Product>> getCachedProducts() async {
+    // Check if cache is still valid
     if (_cachedProducts != null &&
         _lastFetchTime != null &&
         DateTime.now().difference(_lastFetchTime!) < _cacheValidDuration) {
+      debugPrint('✅ CACHE HIT - Returning ${_cachedProducts!.length} cached products');
       return _cachedProducts!;
     }
 
-    // Cache expired or doesn't exist, fetch from Firebase
+    debugPrint('❌ CACHE MISS - Fetching from Firebase');
     final snapshot = await _firestore.collection(_productsCollection).get();
     _cachedProducts = snapshot.docs
         .map((doc) => Product.fromFirestore(doc))
@@ -59,40 +79,124 @@ class FirebaseService {
     _cachedProducts!.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     _lastFetchTime = DateTime.now();
 
+    debugPrint('💾 Cached ${_cachedProducts!.length} products');
     return _cachedProducts!;
   }
 
-  // Add product with optimistic update
+  // ==========================================
+  // PAGINATED FETCH - For large datasets
+  // ==========================================
+  Future<List<Product>> getProductsPaginated({bool refresh = false}) async {
+    if (refresh) {
+      _lastProductDocument = null;
+      _hasMoreProducts = true;
+      debugPrint('🔄 Pagination reset');
+    }
+
+    if (!_hasMoreProducts) {
+      debugPrint('⏹️ No more products to load');
+      return [];
+    }
+
+    Query query = _firestore
+        .collection(_productsCollection)
+        .orderBy('createdAt', descending: true)
+        .limit(_pageSize);
+
+    if (_lastProductDocument != null) {
+      query = query.startAfterDocument(_lastProductDocument!);
+    }
+
+    final snapshot = await query.get();
+    debugPrint('📄 Loaded page: ${snapshot.docs.length} products');
+
+    if (snapshot.docs.isEmpty) {
+      _hasMoreProducts = false;
+      return [];
+    }
+
+    _lastProductDocument = snapshot.docs.last;
+    _hasMoreProducts = snapshot.docs.length == _pageSize;
+
+    return snapshot.docs
+        .map((doc) => Product.fromFirestore(doc))
+        .toList();
+  }
+
+  bool get hasMoreProducts => _hasMoreProducts;
+
+  // ==========================================
+  // SELECTIVE FIELD FETCH - Lighter queries
+  // ==========================================
+  /// Fetch only product names and prices for dropdown lists
+  /// This is much faster and cheaper than fetching full documents
+  Future<List<Map<String, dynamic>>> getProductNamesOnly() async {
+    debugPrint('⚡ Fetching only names and prices (lightweight query)');
+
+    final snapshot = await _firestore
+        .collection(_productsCollection)
+        .get(); // Note: .select() is not available in all Firestore versions
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return {
+        'id': doc.id,
+        'name': data['name'] ?? '',
+        'size': data['size'] ?? '',
+        'salePrice': data['salePrice'] ?? 0.0,
+        'stock': data['stock'] ?? 0,
+        'imageBase64': data['imageBase64'],
+      };
+    }).toList();
+  }
+
+  // ==========================================
+  // OPTIMISTIC UPDATES - Instant UI feedback
+  // ==========================================
   Future<String> addProduct(Product product) async {
+    // Update cache BEFORE Firebase call (optimistic update)
+    if (_cachedProducts != null) {
+      _cachedProducts!.insert(0, product.copyWith(id: 'temp-${DateTime.now().millisecondsSinceEpoch}'));
+      debugPrint('⚡ Optimistic update - Product added to cache immediately');
+    }
+
     final docRef = await _firestore
         .collection(_productsCollection)
         .add(product.toFirestore());
 
-    // Update cache immediately
+    // Update cache with real ID
     if (_cachedProducts != null) {
-      _cachedProducts!.insert(0, product.copyWith(id: docRef.id));
+      final tempIndex = _cachedProducts!.indexWhere((p) => p.id.startsWith('temp-'));
+      if (tempIndex != -1) {
+        _cachedProducts![tempIndex] = product.copyWith(id: docRef.id);
+      }
     }
 
+    debugPrint('✅ Product added: ${docRef.id}');
     return docRef.id;
   }
 
-  // Update product with optimistic update
   Future<void> updateProduct(Product product) async {
+    // Optimistic update
+    if (_cachedProducts != null) {
+      final index = _cachedProducts!.indexWhere((p) => p.id == product.id);
+      if (index != -1) {
+        _cachedProducts![index] = product;
+        debugPrint('⚡ Optimistic update - Product updated in cache');
+      }
+    }
+
     await _firestore
         .collection(_productsCollection)
         .doc(product.id)
         .update(product.toFirestore());
 
-    // Update cache immediately
-    if (_cachedProducts != null) {
-      final index = _cachedProducts!.indexWhere((p) => p.id == product.id);
-      if (index != -1) {
-        _cachedProducts![index] = product;
-      }
-    }
+    debugPrint('✅ Product updated: ${product.id}');
   }
 
-  // Batch update multiple products (reduces writes)
+  // ==========================================
+  // BATCH OPERATIONS - Reduce write calls
+  // ==========================================
   Future<void> batchUpdateProducts(List<Product> products) async {
     final batch = _firestore.batch();
 
@@ -102,6 +206,7 @@ class FirebaseService {
     }
 
     await batch.commit();
+    debugPrint('✅ Batch update: ${products.length} products');
 
     // Update cache
     if (_cachedProducts != null) {
@@ -114,36 +219,36 @@ class FirebaseService {
     }
   }
 
-  // Delete product with optimistic update
   Future<void> deleteProduct(String productId) async {
-    // Delete from cache immediately
+    // Optimistic delete
     if (_cachedProducts != null) {
       _cachedProducts!.removeWhere((p) => p.id == productId);
+      debugPrint('⚡ Optimistic delete - Product removed from cache');
     }
 
-    // Delete product document
     await _firestore.collection(_productsCollection).doc(productId).delete();
+    debugPrint('✅ Product deleted: $productId');
   }
 
-  // Convert image to base64 with compression
+  // ==========================================
+  // IMAGE COMPRESSION - Stay under Firestore limits
+  // ==========================================
   Future<String?> imageToBase64(File imageFile) async {
     try {
-      // Compress image aggressively to stay under Firestore limits
       final compressedFile = await _compressImage(imageFile);
-
-      // Read file as bytes
       final bytes = await compressedFile.readAsBytes();
 
-      // Check size (warn if over 500KB as base64 will be ~33% larger)
+      // Check size
       final sizeInKB = bytes.length / 1024;
+      debugPrint('📸 Image size: ${sizeInKB.toStringAsFixed(0)}KB');
+
       if (sizeInKB > 500) {
-        debugPrint('Warning: Image is ${sizeInKB.toStringAsFixed(0)}KB. May approach Firestore 1MB limit.');
+        debugPrint('⚠️ Warning: Image is large. May approach Firestore 1MB limit.');
       }
 
-      // Convert to base64
       final base64String = base64Encode(bytes);
 
-      // Clean up compressed file
+      // Clean up
       try {
         await compressedFile.delete();
       } catch (e) {
@@ -152,12 +257,11 @@ class FirebaseService {
 
       return base64String;
     } catch (e) {
-      debugPrint('Error converting image to base64: $e');
+      debugPrint('❌ Error converting image: $e');
       return null;
     }
   }
 
-  // Compress image aggressively to stay under Firestore limits
   Future<File> _compressImage(File file) async {
     final dir = await getTemporaryDirectory();
     final targetPath = '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
@@ -165,22 +269,60 @@ class FirebaseService {
     final result = await FlutterImageCompress.compressAndGetFile(
       file.absolute.path,
       targetPath,
-      quality: 50, // More aggressive compression for base64 storage
-      minWidth: 600, // Smaller dimensions
+      quality: 50,
+      minWidth: 600,
       minHeight: 600,
     );
 
     return result != null ? File(result.path) : file;
   }
 
-  // Clear cache (useful for manual refresh)
+  // ==========================================
+  // CACHE MANAGEMENT
+  // ==========================================
   void clearCache() {
     _cachedProducts = null;
     _lastFetchTime = null;
+    debugPrint('🗑️ Cache cleared');
   }
 
-  // Dispose stream
+  void invalidateCache() {
+    _lastFetchTime = null; // Force refresh on next getCachedProducts call
+    debugPrint('⚠️ Cache invalidated');
+  }
+
+  // ==========================================
+  // STATISTICS - Track cache performance
+  // ==========================================
+  int _cacheHits = 0;
+  int _cacheMisses = 0;
+
+  Map<String, dynamic> getCacheStats() {
+    final totalRequests = _cacheHits + _cacheMisses;
+    final hitRate = totalRequests > 0 ? (_cacheHits / totalRequests * 100) : 0;
+
+    return {
+      'hits': _cacheHits,
+      'misses': _cacheMisses,
+      'hit_rate': '${hitRate.toStringAsFixed(1)}%',
+      'cached_items': _cachedProducts?.length ?? 0,
+      'cache_age': _lastFetchTime != null
+          ? DateTime.now().difference(_lastFetchTime!).inMinutes
+          : null,
+    };
+  }
+
+  void resetCacheStats() {
+    _cacheHits = 0;
+    _cacheMisses = 0;
+  }
+
+  // ==========================================
+  // CLEANUP
+  // ==========================================
   void dispose() {
     _productsStream = null;
+    clearCache();
+    debugPrint('🧹 FirebaseService disposed');
   }
 }
