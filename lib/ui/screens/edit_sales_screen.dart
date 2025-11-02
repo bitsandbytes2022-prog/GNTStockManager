@@ -1,8 +1,3 @@
-// KEY CHANGES:
-// 1. Wrapped _buildCartBottomSheet() with StatefulBuilder
-// 2. Added setModalState(() {}) calls to all callbacks in the bottom sheet
-// 3. Added didUpdateWidget to _CartItem to sync controllers with parent state
-
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -14,14 +9,16 @@ import '../../models/sale_model.dart';
 import '../../services/firebase_service.dart';
 import '../../services/sales_service.dart';
 
-class RecordSaleScreen extends StatefulWidget {
-  const RecordSaleScreen({super.key});
+class EditSaleScreen extends StatefulWidget {
+  final Sale sale;
+
+  const EditSaleScreen({super.key, required this.sale});
 
   @override
-  State<RecordSaleScreen> createState() => _RecordSaleScreenState();
+  State<EditSaleScreen> createState() => _EditSaleScreenState();
 }
 
-class _RecordSaleScreenState extends State<RecordSaleScreen> {
+class _EditSaleScreenState extends State<EditSaleScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final SalesService _salesService = SalesService();
   final TextEditingController _searchController = TextEditingController();
@@ -31,6 +28,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   List<Product> _filteredProducts = [];
   Map<String, int> _selectedQuantities = {};
   Map<String, double> _customPrices = {};
+  Map<String, int> _originalQuantities = {}; // To track stock changes
   String _searchQuery = '';
   bool _isLoading = true;
   bool _isSaving = false;
@@ -42,8 +40,22 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   @override
   void initState() {
     super.initState();
+    _initializeFromSale();
     _loadProducts();
     _searchController.addListener(_filterProducts);
+  }
+
+  void _initializeFromSale() {
+    // Initialize from existing sale
+    _paymentMethod = widget.sale.paymentMethod?.label ?? 'Cash';
+    _notesController.text = widget.sale.notes ?? '';
+
+    // Populate selected items
+    for (final item in widget.sale.items) {
+      _selectedQuantities[item.productId] = item.quantity;
+      _customPrices[item.productId] = item.salePrice;
+      _originalQuantities[item.productId] = item.quantity;
+    }
   }
 
   Future<void> _loadProducts() async {
@@ -133,7 +145,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         .toList();
   }
 
-  Future<void> _completeSale() async {
+  Future<void> _updateSale() async {
     if (_selectedQuantities.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select at least one product')),
@@ -162,7 +174,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final saleItems = _selectedProducts.map((product) {
+      // Create updated sale items
+      final updatedSaleItems = _selectedProducts.map((product) {
         return SaleItem(
           productId: product.id,
           productName: product.name,
@@ -191,28 +204,33 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       }
 
       // Calculate total
-      final total = saleItems.fold<double>(
+      final total = updatedSaleItems.fold<double>(
         0.0,
             (sum, item) => sum + (item.salePrice * item.quantity),
       );
 
-      // Create sale object
-      final sale = Sale(
-        id: '', // Will be set by Firestore
-        items: saleItems,
+      // Create updated sale object
+      final updatedSale = Sale(
+        id: widget.sale.id,
+        items: updatedSaleItems,
         totalAmount: total,
-        createdAt: DateTime.now(),
+        createdAt: widget.sale.createdAt, // Keep original creation date
         paymentMethod: paymentMethodEnum,
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       );
 
-      await _salesService.createSale(sale);
+      // Update sale with stock adjustments
+      await _salesService.updateSale(
+        widget.sale,
+        updatedSale,
+        _originalQuantities,
+      );
 
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context, true); // Return true to indicate success
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Sale recorded successfully!'),
+            content: Text('Sale updated successfully!'),
             backgroundColor: Colors.green,
           ),
         );
@@ -221,7 +239,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error recording sale: $e'),
+            content: Text('Error updating sale: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -245,7 +263,16 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   Widget _buildDesktopLayout() {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Record Sale'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Edit Sale'),
+            Text(
+              'Sale from ${DateFormat('MMM dd, yyyy hh:mm a').format(widget.sale.createdAt)}',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
         elevation: 0,
       ),
       body: Row(
@@ -260,7 +287,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           Container(
             width: 400,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Colors.grey[50],
               border: Border(
                 left: BorderSide(color: Colors.grey.shade200),
               ),
@@ -275,29 +302,21 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   Widget _buildMobileLayout() {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Record Sale'),
-        elevation: 0,
-        actions: [
-          if (_selectedQuantities.isNotEmpty)
-            IconButton(
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => _buildCartBottomSheet(),
-                );
-              },
-              icon: Badge(
-                label: Text('${_selectedQuantities.length}'),
-                child: const Icon(Icons.shopping_cart),
-              ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Edit Sale'),
+            Text(
+              DateFormat('MMM dd, yyyy').format(widget.sale.createdAt),
+              style: const TextStyle(fontSize: 12),
             ),
-        ],
+          ],
+        ),
+        elevation: 0,
       ),
       body: _buildProductList(),
-      bottomNavigationBar: _selectedQuantities.isNotEmpty
-          ? _buildMobileBottomBar()
+      bottomSheet: _selectedQuantities.isNotEmpty
+          ? _buildCartBottomSheet()
           : null,
     );
   }
@@ -306,40 +325,23 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     return Column(
       children: [
         // Search bar
-        Container(
-          padding: EdgeInsets.all(_isDesktop ? 24 : 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+        Padding(
+          padding: const EdgeInsets.all(16),
           child: TextField(
             controller: _searchController,
             decoration: InputDecoration(
               hintText: 'Search products...',
               prefixIcon: const Icon(Icons.search),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                icon: const Icon(Icons.clear),
-                onPressed: () => _searchController.clear(),
-              )
-                  : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
               ),
               filled: true,
-              fillColor: Colors.grey[100],
+              fillColor: Colors.white,
             ),
           ),
         ),
 
-        // Products grid
+        // Product grid
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -348,11 +350,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.search_off,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
+                Icon(Icons.search_off,
+                    size: 64, color: Colors.grey[400]),
                 const SizedBox(height: 16),
                 Text(
                   'No products found',
@@ -365,12 +364,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ),
           )
               : GridView.builder(
-            padding: EdgeInsets.all(_isDesktop ? 24 : 16),
+            padding: const EdgeInsets.all(16),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: _isDesktop ? 4 : (_isTablet ? 3 : 2),
+              childAspectRatio: 0.75,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
-              childAspectRatio: 0.75,
             ),
             itemCount: _filteredProducts.length,
             itemBuilder: (context, index) {
@@ -380,9 +379,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               return _ProductCard(
                 product: product,
                 isSelected: isSelected,
-                quantity: _selectedQuantities[product.id] ?? 0,
                 onTap: () => _toggleProduct(product),
-                onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
               );
             },
           ),
@@ -396,36 +393,24 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       children: [
         // Cart header
         Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.blue.shade50,
+            color: Colors.white,
             border: Border(
               bottom: BorderSide(color: Colors.grey.shade200),
             ),
           ),
           child: Row(
             children: [
-              const Icon(Icons.shopping_cart, color: Colors.blue),
-              const SizedBox(width: 12),
+              const Icon(Icons.shopping_cart, size: 20),
+              const SizedBox(width: 8),
               Text(
-                'Cart (${_selectedProducts.length})',
+                'Cart (${_selectedQuantities.length})',
                 style: const TextStyle(
-                  fontSize: 18,
+                  fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const Spacer(),
-              if (_selectedProducts.isNotEmpty)
-                TextButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _selectedQuantities.clear();
-                      _customPrices.clear();
-                    });
-                  },
-                  icon: const Icon(Icons.clear_all, size: 18),
-                  label: const Text('Clear'),
-                ),
             ],
           ),
         ),
@@ -437,25 +422,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.shopping_cart_outlined,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
+                Icon(Icons.shopping_cart_outlined,
+                    size: 64, color: Colors.grey[400]),
                 const SizedBox(height: 16),
                 Text(
-                  'Cart is empty',
+                  'No items selected',
                   style: TextStyle(
                     fontSize: 16,
                     color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Add products to get started',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[500],
                   ),
                 ),
               ],
@@ -479,14 +453,78 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           ),
         ),
 
-        // Payment method and total
+        // Payment method and notes
         Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
             border: Border(
               top: BorderSide(color: Colors.grey.shade200),
             ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Payment Method',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: _paymentMethod,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                ),
+                items: ['Cash', 'UPI', 'Card', 'Other']
+                    .map((method) => DropdownMenuItem(
+                  value: method,
+                  child: Text(method),
+                ))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _paymentMethod = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Notes (Optional)',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _notesController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Add any notes...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Total and complete button
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.05),
@@ -496,33 +534,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ],
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Payment method
-              const Text(
-                'Payment Method',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                children: ['Cash', 'UPI', 'Card', 'Other'].map((method) {
-                  final isSelected = _paymentMethod == method;
-                  return ChoiceChip(
-                    label: Text(method),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      setState(() => _paymentMethod = method);
-                    },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-
-              // Total
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -544,27 +556,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-
-              // Complete button
               SizedBox(
                 width: double.infinity,
-                child: FilledButton(
-                  onPressed: _isSaving ? null : _completeSale,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  child: _isSaving
+                child: FilledButton.icon(
+                  onPressed: _isSaving || _selectedQuantities.isEmpty
+                      ? null
+                      : _updateSale,
+                  icon: _isSaving
                       ? const SizedBox(
-                    height: 20,
                     width: 20,
+                    height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       color: Colors.white,
                     ),
                   )
-                      : const Text(
-                    'Complete Sale',
-                    style: TextStyle(fontSize: 16),
+                      : const Icon(Icons.check),
+                  label: Text(_isSaving ? 'Updating...' : 'Update Sale'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.all(16),
+                    backgroundColor: Colors.green,
                   ),
                 ),
               ),
@@ -575,83 +586,129 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  // ✅ FIXED: Using StatefulBuilder to allow bottom sheet to rebuild
   Widget _buildCartBottomSheet() {
     return StatefulBuilder(
       builder: (BuildContext context, StateSetter setModalState) {
         return Container(
-          margin: const EdgeInsets.all(16),
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.shopping_cart),
+                  title: Text('${_selectedQuantities.length} items'),
+                  trailing: Text(
+                    '₹${_totalAmount.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue,
+                    ),
+                  ),
+                  onTap: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (context) => _buildCartModal(),
+                    );
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _isSaving || _selectedQuantities.isEmpty
+                          ? null
+                          : _updateSale,
+                      icon: _isSaving
+                          ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                          : const Icon(Icons.check),
+                      label: Text(_isSaving ? 'Updating...' : 'Update Sale'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.all(16),
+                        backgroundColor: Colors.green,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCartModal() {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (context, scrollController) {
+        return Container(
           decoration: const BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
-              // Cart header
+              // Handle bar
               Container(
-                padding: const EdgeInsets.all(20),
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  border: Border(
-                    bottom: BorderSide(color: Colors.grey.shade200),
-                  ),
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
                 ),
+              ),
+
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    const Icon(Icons.shopping_cart, color: Colors.blue),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Cart (${_selectedProducts.length})',
-                      style: const TextStyle(
-                        fontSize: 18,
+                    const Text(
+                      'Cart Items',
+                      style: TextStyle(
+                        fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const Spacer(),
-                    if (_selectedProducts.isNotEmpty)
-                      TextButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _selectedQuantities.clear();
-                            _customPrices.clear();
-                          });
-                          setModalState(() {}); // Update modal
-                          Navigator.pop(context); // Close modal if empty
-                        },
-                        icon: const Icon(Icons.clear_all, size: 18),
-                        label: const Text('Clear'),
-                      ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
                   ],
                 ),
               ),
 
+              const Divider(height: 1),
+
               // Cart items
               Expanded(
-                child: _selectedProducts.isEmpty
-                    ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.shopping_cart_outlined,
-                        size: 64,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Cart is empty',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-                    : ListView.builder(
+                child: ListView.builder(
+                  controller: scrollController,
                   padding: const EdgeInsets.all(16),
                   itemCount: _selectedProducts.length,
                   itemBuilder: (context, index) {
@@ -661,16 +718,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       quantity: _selectedQuantities[product.id]!,
                       price: _customPrices[product.id]!,
                       onQuantityChanged: (qty) {
-                        _updateQuantity(product.id, qty);
-                        setModalState(() {}); // Update modal state
+                        setState(() => _updateQuantity(product.id, qty));
                       },
                       onPriceChanged: (price) {
-                        _updatePrice(product.id, price);
-                        setModalState(() {}); // Update modal state
+                        setState(() => _updatePrice(product.id, price));
                       },
                       onRemove: () {
-                        _toggleProduct(product);
-                        setModalState(() {}); // Update modal state
+                        setState(() => _toggleProduct(product));
                       },
                       minimumPrice: _getMinimumPrice(product),
                     );
@@ -678,14 +732,63 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 ),
               ),
 
-              // Payment method and total
+              // Payment and notes section
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Colors.grey[50],
                   border: Border(
                     top: BorderSide(color: Colors.grey.shade200),
                   ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: _paymentMethod,
+                      decoration: InputDecoration(
+                        labelText: 'Payment Method',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      items: ['Cash', 'UPI', 'Card', 'Other']
+                          .map((method) => DropdownMenuItem(
+                        value: method,
+                        child: Text(method),
+                      ))
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _paymentMethod = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _notesController,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        labelText: 'Notes (Optional)',
+                        hintText: 'Add any notes...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Total and button
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.05),
@@ -695,34 +798,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   ],
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Payment method
-                    const Text(
-                      'Payment Method',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      children: ['Cash', 'UPI', 'Card', 'Other'].map((method) {
-                        final isSelected = _paymentMethod == method;
-                        return ChoiceChip(
-                          label: Text(method),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            setState(() => _paymentMethod = method);
-                            setModalState(() {}); // Update modal state
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Total
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -744,27 +820,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    // Complete button
                     SizedBox(
                       width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _isSaving ? null : _completeSale,
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: _isSaving
+                      child: FilledButton.icon(
+                        onPressed: _isSaving || _selectedQuantities.isEmpty
+                            ? null
+                            : _updateSale,
+                        icon: _isSaving
                             ? const SizedBox(
-                          height: 20,
                           width: 20,
+                          height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: Colors.white,
                           ),
                         )
-                            : const Text(
-                          'Complete Sale',
-                          style: TextStyle(fontSize: 16),
+                            : const Icon(Icons.check),
+                        label: Text(_isSaving ? 'Updating...' : 'Update Sale'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.all(16),
+                          backgroundColor: Colors.green,
                         ),
                       ),
                     ),
@@ -778,61 +853,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  Widget _buildMobileBottomBar() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${_selectedQuantities.length} items',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  Text(
-                    '₹${_totalAmount.toStringAsFixed(0)}',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            FilledButton(
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => _buildCartBottomSheet(),
-                );
-              },
-              child: const Text('View Cart'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _searchController.dispose();
@@ -841,158 +861,89 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   }
 }
 
-// Product Card Widget (unchanged)
+// Product Card Widget
 class _ProductCard extends StatelessWidget {
   final Product product;
   final bool isSelected;
-  final int quantity;
   final VoidCallback onTap;
-  final Function(int) onQuantityChanged;
 
   const _ProductCard({
     required this.product,
     required this.isSelected,
-    required this.quantity,
     required this.onTap,
-    required this.onQuantityChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isOutOfStock = product.stock == 0;
-    final isLowStock = product.stock < 5 && product.stock > 0;
-
     return Card(
-      elevation: isSelected ? 4 : 0,
+      elevation: isSelected ? 8 : 2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isSelected
-              ? Colors.blue
-              : isOutOfStock
-              ? Colors.red.shade200
-              : Colors.grey.shade200,
+          color: isSelected ? Colors.blue : Colors.grey.shade200,
           width: isSelected ? 2 : 1,
         ),
       ),
       child: InkWell(
-        onTap: isOutOfStock ? null : onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
           children: [
-            // Image
-            Expanded(
-              child: Stack(
-                children: [
-                  Container(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Product image
+                Expanded(
+                  child: Container(
                     width: double.infinity,
                     decoration: BoxDecoration(
                       color: Colors.grey[100],
                       borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(16),
+                        top: Radius.circular(12),
                       ),
                     ),
-                    child: ClipRRect(
+                    child: product.imageBase64 != null
+                        ? ClipRRect(
                       borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(16),
+                        top: Radius.circular(12),
                       ),
-                      child: product.imageBase64 != null
-                          ? Image.memory(
+                      child: Image.memory(
                         base64Decode(product.imageBase64!),
                         fit: BoxFit.cover,
-                      )
-                          : SizedBox.expand(
-                        child: Container(
-                          color: Colors.grey[100],
-                          child: Center(
-                            child: Icon(
-                              Icons.inventory_2_outlined,
-                              size: 80,
-                              color: Colors.grey[300],
-                            ),
-                          ),
-                        ),
                       ),
+                    )
+                        : Icon(
+                      Icons.inventory_2_outlined,
+                      size: 48,
+                      color: Colors.grey[400],
                     ),
                   ),
+                ),
 
-                  // Stock badge
-                  if (isOutOfStock || isLowStock)
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isOutOfStock
-                              ? Colors.red
-                              : Colors.orange,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          isOutOfStock ? 'Out of Stock' : 'Low Stock',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  // Selected badge
-                  if (isSelected)
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            // Product info
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    product.size,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                // Product info
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        product.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        product.size,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       Text(
                         '₹${product.salePrice.toStringAsFixed(0)}',
                         style: const TextStyle(
@@ -1001,20 +952,30 @@ class _ProductCard extends StatelessWidget {
                           color: Colors.blue,
                         ),
                       ),
-                      if (!isOutOfStock)
-                        Text(
-                          'Stock: ${product.stock}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.blue.shade700,
-                          ),
-                        ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+
+            // Selected indicator
+            if (isSelected)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.blue,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1022,7 +983,7 @@ class _ProductCard extends StatelessWidget {
   }
 }
 
-// Cart Item Widget
+// Cart Item Widget (reusing from RecordSaleScreen)
 class _CartItem extends StatefulWidget {
   final Product product;
   final int quantity;
@@ -1061,7 +1022,6 @@ class _CartItemState extends State<_CartItem> {
     );
   }
 
-  // ✅ ADDED: Sync controllers when parent state updates
   @override
   void didUpdateWidget(_CartItem oldWidget) {
     super.didUpdateWidget(oldWidget);

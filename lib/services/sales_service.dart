@@ -16,7 +16,8 @@ class SalesService {
 
   static const String _salesCollection = 'sales';
   static const String _productsCollection = 'products';
-  static const String _statsCollection = 'stats'; // NEW: For aggregated stats
+  static const String _statsCollection = 'stats'; // For aggregated stats
+  static const String _returnsCollection = 'returns'; // NEW: For tracking returns
 
   // ==========================================
   // GLOBAL CACHE
@@ -57,7 +58,7 @@ class SalesService {
       });
     }
 
-    // 3. NEW: Update global revenue counter (for analytics optimization)
+    // 3. Update global revenue counter (for analytics optimization)
     final statsRef = _firestore.collection(_statsCollection).doc('revenue');
     batch.set(
       statsRef,
@@ -81,7 +82,7 @@ class SalesService {
       totalProfit += itemProfit;
     }
 
-    // 4. NEW: Update profit counter
+    // 4. Update profit counter
     final profitStatsRef = _firestore.collection(_statsCollection).doc('profit');
     batch.set(
       profitStatsRef,
@@ -111,6 +112,160 @@ class SalesService {
 
     debugPrint('✅ Sale created: ${saleRef.id}, Revenue: ₹${sale.totalAmount}');
     return saleRef.id;
+  }
+
+  // ==========================================
+  // PROCESS RETURN - Update sale and restore stock
+  // ==========================================
+  /// Process item returns from a sale
+  /// - Updates sale record with returned items
+  /// - Restores stock quantities
+  /// - Updates revenue/profit counters
+  /// - Creates return record for tracking
+  Future<void> processReturn({
+    required String saleId,
+    required Map<String, int> returnQuantities, // productId -> quantity to return
+    String? reason,
+  }) async {
+    // Remove items with 0 returns
+    returnQuantities.removeWhere((key, value) => value == 0);
+
+    if (returnQuantities.isEmpty) {
+      throw Exception('No items selected for return');
+    }
+
+    // Get the original sale
+    final saleDoc = await _firestore.collection(_salesCollection).doc(saleId).get();
+    if (!saleDoc.exists) {
+      throw Exception('Sale not found');
+    }
+
+    final sale = Sale.fromFirestore(saleDoc);
+    final batch = _firestore.batch();
+
+    // Calculate refund amounts and new sale items
+    double refundAmount = 0;
+    double refundedCost = 0;
+    double refundedProfit = 0;
+    final List<SaleItem> updatedItems = [];
+    final List<Map<String, dynamic>> returnedItems = [];
+
+    for (final item in sale.items) {
+      final returnQty = returnQuantities[item.productId] ?? 0;
+
+      if (returnQty > 0) {
+        if (returnQty > item.quantity) {
+          throw Exception('Cannot return more than purchased quantity for ${item.productName}');
+        }
+
+        // Calculate refund for this item
+        final itemRefund = item.salePrice * returnQty;
+        final itemCost = item.purchasePrice * returnQty;
+        final itemProfit = (item.salePrice - item.purchasePrice) * returnQty;
+
+        refundAmount += itemRefund;
+        refundedCost += itemCost;
+        refundedProfit += itemProfit;
+
+        // Track returned item
+        returnedItems.add({
+          'productId': item.productId,
+          'productName': item.productName,
+          'productSize': item.productSize,
+          'quantity': returnQty,
+          'salePrice': item.salePrice,
+          'purchasePrice': item.purchasePrice,
+          'refundAmount': itemRefund,
+        });
+
+        // Update product stock and counters
+        final productRef = _firestore.collection(_productsCollection).doc(item.productId);
+        batch.update(productRef, {
+          'stock': FieldValue.increment(returnQty), // Restore stock
+          'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
+        });
+
+        // If not all quantity is returned, keep the item with reduced quantity
+        final remainingQty = item.quantity - returnQty;
+        if (remainingQty > 0) {
+          updatedItems.add(item.copyWith(quantity: remainingQty));
+        }
+      } else {
+        // Keep item as is
+        updatedItems.add(item);
+      }
+    }
+
+    // Update the sale record
+    final newTotalAmount = sale.totalAmount - refundAmount;
+
+    final saleRef = _firestore.collection(_salesCollection).doc(saleId);
+    batch.update(saleRef, {
+      'items': updatedItems.map((item) => item.toMap()).toList(),
+      'totalAmount': newTotalAmount,
+      'returnedAmount': FieldValue.increment(refundAmount),
+      'hasReturns': true,
+      'lastReturnedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Update global revenue counter
+    final statsRef = _firestore.collection(_statsCollection).doc('revenue');
+    batch.set(
+      statsRef,
+      {
+        'totalRevenue': FieldValue.increment(-refundAmount),
+        'totalReturns': FieldValue.increment(refundAmount),
+        'paymentMethods.${sale.paymentMethod.value}': FieldValue.increment(-refundAmount),
+      },
+      SetOptions(merge: true),
+    );
+
+    // Update profit counter
+    final profitStatsRef = _firestore.collection(_statsCollection).doc('profit');
+    batch.set(
+      profitStatsRef,
+      {
+        'totalProfit': FieldValue.increment(-refundedProfit),
+        'totalCost': FieldValue.increment(-refundedCost),
+      },
+      SetOptions(merge: true),
+    );
+
+    // Create return record for audit trail
+    final returnRef = _firestore.collection(_returnsCollection).doc();
+    batch.set(returnRef, {
+      'returnId': returnRef.id,
+      'saleId': saleId,
+      'originalSaleDate': Timestamp.fromDate(sale.createdAt),
+      'returnDate': FieldValue.serverTimestamp(),
+      'returnedItems': returnedItems,
+      'refundAmount': refundAmount,
+      'reason': reason ?? 'No reason provided',
+      'paymentMethod': sale.paymentMethod.value,
+    });
+
+    // Commit all changes
+    await batch.commit();
+
+    // Clear cache to force refresh
+    invalidateCache();
+
+    debugPrint('✅ Return processed: $saleId');
+    debugPrint('   Refund: ₹$refundAmount');
+    debugPrint('   Items returned: ${returnedItems.length}');
+  }
+
+  // ==========================================
+  // GET RETURN HISTORY
+  // ==========================================
+  Future<List<Map<String, dynamic>>> getReturnHistory({int limit = 50}) async {
+    final snapshot = await _firestore
+        .collection(_returnsCollection)
+        .orderBy('returnDate', descending: true)
+        .limit(limit)
+        .get();
+
+    return snapshot.docs.map((doc) => doc.data()).toList();
   }
 
   // ==========================================
@@ -192,6 +347,81 @@ class SalesService {
 
     return snapshot.docs.map((doc) => Sale.fromFirestore(doc)).toList();
   }
+
+  Future<void> updateSale(
+      Sale oldSale,
+      Sale newSale,
+      Map<String, int> originalQuantities,
+      ) async {
+    try {
+      final batch = _firestore.batch();
+
+      // Calculate stock adjustments
+      final Map<String, int> stockAdjustments = {};
+
+      // Process old items - restore stock for removed/reduced items
+      for (final oldItem in oldSale.items) {
+        final productId = oldItem.productId;
+        final oldQty = oldItem.quantity;
+
+        // Find corresponding item in new sale
+        final newItem = newSale.items.firstWhere(
+              (item) => item.productId == productId,
+          orElse: () => SaleItem(
+            productId: '',
+            productName: '',
+            productSize: '',
+            quantity: 0,
+            salePrice: 0,
+            purchasePrice: 0,
+          ),
+        );
+
+        final newQty = newItem.productId.isEmpty ? 0 : newItem.quantity;
+        final difference = oldQty - newQty;
+
+        if (difference != 0) {
+          stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) + difference;
+        }
+      }
+
+      // Process new items - deduct stock for added/increased items
+      for (final newItem in newSale.items) {
+        final productId = newItem.productId;
+        if (!oldSale.items.any((item) => item.productId == productId)) {
+          // New item added
+          stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) - newItem.quantity;
+        }
+      }
+
+      // Apply stock adjustments
+      for (final entry in stockAdjustments.entries) {
+        final productId = entry.key;
+        final adjustment = entry.value;
+
+        if (adjustment != 0) {
+          final productRef = _firestore.collection('products').doc(productId);
+          batch.update(productRef, {
+            'stock': FieldValue.increment(adjustment),
+          });
+        }
+      }
+
+      // Update the sale document
+      final saleRef = _firestore.collection('sales').doc(newSale.id);
+      batch.update(saleRef, newSale.toFirestore());
+
+      // Commit all changes
+      await batch.commit();
+
+      // Clear cache to force refresh
+      clearCache();
+    } catch (e) {
+      throw Exception('Failed to update sale: $e');
+    }
+  }
+
+
 
   bool get hasMoreSales => _hasMoreSales;
 
@@ -301,6 +531,7 @@ class SalesService {
     return {
       'totalSales': revenueData['totalSales'] ?? 0,
       'totalRevenue': revenueData['totalRevenue'] ?? 0.0,
+      'totalReturns': revenueData['totalReturns'] ?? 0.0,
       'totalProfit': profitData['totalProfit'] ?? 0.0,
       'totalCost': profitData['totalCost'] ?? 0.0,
       'lastUpdated': revenueData['lastSaleDate'],

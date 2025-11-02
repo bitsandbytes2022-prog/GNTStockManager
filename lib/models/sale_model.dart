@@ -167,3 +167,28 @@ class Sale {
     );
   }
 }
+
+// Add this extension to your sale_model.dart file
+
+extension SaleItemExtension on SaleItem {
+  /// Create a copy of this SaleItem with some fields replaced
+  SaleItem copyWith({
+    String? productId,
+    String? productName,
+    String? productSize,
+    int? quantity,
+    double? salePrice,
+    double? purchasePrice,
+    String? imageBase64,
+  }) {
+    return SaleItem(
+      productId: productId ?? this.productId,
+      productName: productName ?? this.productName,
+      productSize: productSize ?? this.productSize,
+      quantity: quantity ?? this.quantity,
+      salePrice: salePrice ?? this.salePrice,
+      purchasePrice: purchasePrice ?? this.purchasePrice,
+      imageBase64: imageBase64 ?? this.imageBase64,
+    );
+  }
+}

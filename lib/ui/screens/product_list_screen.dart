@@ -1,15 +1,13 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
 import '../widgets/product_card.dart';
 import 'add_product_screen.dart';
+import 'add_product_web_screen.dart';
 
-enum ProductSortOption {
-  newest,
-  lowStock,
-  highSelling,
-}
+enum ProductSortOption { newest, lowStock, highSelling }
 
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({super.key});
@@ -59,12 +57,17 @@ class _ProductListScreenState extends State<ProductListScreen> {
   List<Product> _filterProducts(List<Product> products) {
     if (_searchQuery.isEmpty) return products;
 
-    final queryWords = _searchQuery.toLowerCase().split(' ').where((w) => w.isNotEmpty);
+    final queryWords = _searchQuery
+        .toLowerCase()
+        .split(' ')
+        .where((w) => w.isNotEmpty);
 
     return products.where((product) {
       final name = product.name.toLowerCase();
       final size = product.size.toLowerCase();
-      return queryWords.every((word) => name.contains(word) || size.contains(word));
+      return queryWords.every(
+        (word) => name.contains(word) || size.contains(word),
+      );
     }).toList();
   }
 
@@ -99,7 +102,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Future<void> _navigateToAddProduct() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const AddProductScreen()),
+      MaterialPageRoute(
+        builder: (_) => kIsWeb ? AddProductWebScreen() : AddProductScreen(),
+      ),
     );
   }
 
@@ -113,9 +118,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting product: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting product: $e')));
       }
     }
   }
@@ -186,9 +191,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
                             prefixIcon: const Icon(Icons.search, size: 22),
                             suffixIcon: _searchController.text.isNotEmpty
                                 ? IconButton(
-                              icon: const Icon(Icons.clear, size: 20),
-                              onPressed: () => _searchController.clear(),
-                            )
+                                    icon: const Icon(Icons.clear, size: 20),
+                                    onPressed: () => _searchController.clear(),
+                                  )
                                 : null,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -238,26 +243,49 @@ class _ProductListScreenState extends State<ProductListScreen> {
                             } else if (sortOption == 'lowStock') {
                               _currentSortOption = ProductSortOption.lowStock;
                             } else if (sortOption == 'highSelling') {
-                              _currentSortOption = ProductSortOption.highSelling;
+                              _currentSortOption =
+                                  ProductSortOption.highSelling;
                             }
                           });
                         }
                       },
                       itemBuilder: (context) => [
+                        // Sort options section
                         const PopupMenuItem(
                           enabled: false,
                           child: Text(
-                            'Sort By',
+                            'SORT BY',
                             style: TextStyle(
-                              fontWeight: FontWeight.bold,
                               fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
                             ),
                           ),
                         ),
                         _buildSortMenuItem('newest', ProductSortOption.newest),
-                        _buildSortMenuItem('lowStock', ProductSortOption.lowStock),
-                        _buildSortMenuItem('highSelling', ProductSortOption.highSelling),
+                        _buildSortMenuItem(
+                          'lowStock',
+                          ProductSortOption.lowStock,
+                        ),
+                        _buildSortMenuItem(
+                          'highSelling',
+                          ProductSortOption.highSelling,
+                        ),
+
                         const PopupMenuDivider(),
+
+                        // Settings section
+                        const PopupMenuItem(
+                          enabled: false,
+                          child: Text(
+                            'SETTINGS',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
                         PopupMenuItem(
                           value: 'prices',
                           child: Row(
@@ -267,6 +295,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                     ? Icons.visibility_off
                                     : Icons.visibility,
                                 size: 20,
+                                color: Colors.grey[600],
                               ),
                               const SizedBox(width: 12),
                               Text(
@@ -278,12 +307,36 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           ),
                         ),
                         PopupMenuItem(
+                          value: 'mode',
+                          child: Row(
+                            children: [
+                              Icon(
+                                _useStreamMode
+                                    ? Icons.refresh
+                                    : Icons.cloud_off,
+                                size: 20,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _useStreamMode
+                                    ? 'Use Cached Data'
+                                    : 'Use Real-time Data',
+                              ),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
                           value: 'refresh',
                           child: Row(
                             children: [
-                              const Icon(Icons.refresh, size: 20),
+                              Icon(
+                                Icons.refresh,
+                                size: 20,
+                                color: Colors.grey[600],
+                              ),
                               const SizedBox(width: 12),
-                              const Text('Refresh'),
+                              const Text('Refresh Products'),
                             ],
                           ),
                         ),
@@ -291,24 +344,39 @@ class _ProductListScreenState extends State<ProductListScreen> {
                     ),
                   ],
                 ),
-
-                // Active sort indicator
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
+                // Sort indicator chip
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: [
                     Chip(
                       avatar: Icon(
                         _getSortOptionIcon(_currentSortOption),
                         size: 16,
+                        color: Colors.blue,
                       ),
                       label: Text(
                         _getSortOptionLabel(_currentSortOption),
                         style: const TextStyle(fontSize: 12),
                       ),
-                      backgroundColor: Colors.blue.shade50,
-                      side: BorderSide(color: Colors.blue.shade200),
+                      backgroundColor: Colors.blue.withOpacity(0.1),
+                      side: BorderSide.none,
                     ),
+                    if (showPurchasePrices)
+                      Chip(
+                        avatar: const Icon(
+                          Icons.currency_rupee,
+                          size: 16,
+                          color: Colors.green,
+                        ),
+                        label: const Text(
+                          'Purchase Prices',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        backgroundColor: Colors.green.withOpacity(0.1),
+                        side: BorderSide.none,
+                      ),
                   ],
                 ),
               ],
@@ -317,22 +385,30 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
           // Product grid
           Expanded(
-            child: _useStreamMode ? _buildStreamView() : _buildCachedView(),
+            child: RefreshIndicator(
+              onRefresh: _refreshProducts,
+              child: _useStreamMode ? _buildStreamView() : _buildCachedView(),
+            ),
           ),
         ],
       ),
-      floatingActionButton: kIsWeb
-          ? null // Hide on web
-          : FloatingActionButton.extended(
-        onPressed: _navigateToAddProduct,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Product'),
-        backgroundColor: Colors.blue,
-      ),
+      floatingActionButton:
+          // kIsWeb
+          //     ? null // Hide on web
+          //     :
+          FloatingActionButton.extended(
+            onPressed: _navigateToAddProduct,
+            icon: const Icon(Icons.add),
+            label: const Text('Add Product'),
+            backgroundColor: Colors.blue,
+          ),
     );
   }
 
-  PopupMenuItem<String> _buildSortMenuItem(String value, ProductSortOption option) {
+  PopupMenuItem<String> _buildSortMenuItem(
+    String value,
+    ProductSortOption option,
+  ) {
     final isSelected = _currentSortOption == option;
     return PopupMenuItem(
       value: 'sort_$value',
@@ -400,11 +476,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.inventory_2_outlined,
-              size: 80,
-              color: Colors.grey[400],
-            ),
+            Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
               _searchQuery.isEmpty ? 'No products yet' : 'No products found',
@@ -440,13 +512,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
         crossAxisCount: crossAxisCount,
         crossAxisSpacing: spacing,
         mainAxisSpacing: spacing,
-        childAspectRatio: showPurchasePrices ? 0.65 : 0.70,
+        childAspectRatio: _calculatePreciseAspectRatio(context),
       ),
       itemBuilder: (context, index) {
         final product = products[index];
         return Dismissible(
           key: ValueKey(product.id),
-          direction: kIsWeb ? DismissDirection.none : DismissDirection.startToEnd,
+          direction:   DismissDirection.startToEnd,
           background: Container(
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -472,9 +544,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                     ),
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(true),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.red,
-                      ),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
                       child: const Text('Delete'),
                     ),
                   ],
@@ -490,18 +560,77 @@ class _ProductListScreenState extends State<ProductListScreen> {
             onDelete: () => _deleteProduct(product),
             showPurchasePrice: showPurchasePrices,
             showSalesInfo: _currentSortOption == ProductSortOption.highSelling,
-            onTap: kIsWeb
-                ? () {} // View only on web
-                : () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => AddProductScreen(product: product),
-              ),
-            ),
+            onTap:  () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => kIsWeb?AddProductWebScreen(product: product):AddProductScreen(product: product),
+                    ),
+                  ),
           ),
         );
       },
     );
+  }
+
+  /// Calculates precise aspect ratio for grid items based on visible content
+  ///
+  /// This method dynamically adjusts the card height based on:
+  /// - Base card dimensions (image + info sections)
+  /// - Additional content (purchase prices, sales info)
+  /// - Screen width and column count
+  double _calculatePreciseAspectRatio(BuildContext context) {
+    // Measured heights from ProductCard layout
+    const double imageHeight = 180.0; // Image section height
+    const double baseInfoHeight = 120.0; // Base info section height
+    const double cardPadding = 8.0; // Card padding and borders
+
+    // Calculate additional height based on visible options
+    double additionalHeight = 0;
+
+    if (showPurchasePrices) {
+      // Purchase price row: text + icon + spacing
+      // Increased from 20.0 to 28.0 to prevent overflow
+      additionalHeight += 60.0;
+    }
+
+    if (_currentSortOption == ProductSortOption.highSelling) {
+      // Sales info row: text + spacing
+      additionalHeight += 20.0;
+    }
+
+    // Calculate total card height
+    final totalHeight =
+        imageHeight + baseInfoHeight + additionalHeight + cardPadding;
+
+    // Calculate card width based on screen dimensions
+    final screenWidth = MediaQuery.of(context).size.width;
+    final crossAxisCount = _getCrossAxisCount(context);
+    final spacing = _getGridSpacing(context);
+
+    // Account for padding and spacing
+    final horizontalPadding = spacing * 2;
+    final totalSpacing = spacing * (crossAxisCount - 1);
+    final availableWidth = screenWidth - horizontalPadding - totalSpacing;
+    final cardWidth = availableWidth / crossAxisCount;
+
+    // Calculate and return aspect ratio
+    final aspectRatio = cardWidth / totalHeight;
+
+    // Debug output for troubleshooting
+    debugPrint('📐 Grid Layout Calculation:');
+    debugPrint('   Screen Width: ${screenWidth.toInt()}px');
+    debugPrint('   Columns: $crossAxisCount');
+    debugPrint('   Card Width: ${cardWidth.toInt()}px');
+    debugPrint('   Base Height: ${imageHeight + baseInfoHeight}px');
+    debugPrint('   Additional Height: ${additionalHeight.toInt()}px');
+    debugPrint('   Total Height: ${totalHeight.toInt()}px');
+    debugPrint('   Aspect Ratio: ${aspectRatio.toStringAsFixed(3)}');
+    debugPrint('   Show Purchase: $showPurchasePrices');
+    debugPrint(
+      '   Show Sales: ${_currentSortOption == ProductSortOption.highSelling}',
+    );
+
+    return aspectRatio;
   }
 
   @override

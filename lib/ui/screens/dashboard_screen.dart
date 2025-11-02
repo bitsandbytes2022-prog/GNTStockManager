@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:inventory_manager/ui/screens/add_product_screen.dart';
 import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
 import 'package:inventory_manager/ui/screens/data_sync_screen.dart';
 import 'package:inventory_manager/ui/screens/product_list_screen.dart';
@@ -44,8 +45,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ];
 
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
-  bool get _isTablet => MediaQuery.of(context).size.width >= 768 &&
+
+  bool get _isTablet =>
+      MediaQuery.of(context).size.width >= 768 &&
       MediaQuery.of(context).size.width < 1200;
+
   bool get _isMobile => MediaQuery.of(context).size.width < 768;
 
   @override
@@ -54,9 +58,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       canPop: false,
       child: SafeArea(
         top: !kIsWeb, // No safe area on web
-        child: Scaffold(
-          body: _buildBody(),
-        ),
+        child: Scaffold(body: _buildBody()),
       ),
     );
   }
@@ -73,9 +75,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               setState(() => _selectedIndex = index);
             },
           ),
-          Expanded(
-            child: _buildPage(),
-          ),
+          Expanded(child: _buildPage()),
         ],
       );
     } else if (_isTablet && kIsWeb) {
@@ -90,75 +90,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             },
           ),
           const VerticalDivider(width: 1),
-          Expanded(
-            child: _buildPage(),
-          ),
+          Expanded(child: _buildPage()),
         ],
       );
     } else {
       // Mobile: Bottom navigation
       return Scaffold(
-        appBar: _buildAppBar(),
         body: _buildPage(),
         bottomNavigationBar: _buildBottomNav(),
         floatingActionButton: _buildFAB(),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       );
     }
-  }
-
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      elevation: 0,
-      backgroundColor: Colors.white,
-      foregroundColor: Colors.black87,
-      title: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.inventory_2,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            'GNT Stock Manager',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 18,
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        if (_selectedIndex == 0 && !kIsWeb)
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Add Product',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const RecordSaleScreen(),
-                ),
-              );
-            },
-          ),
-        IconButton(
-          icon: const Icon(Icons.search),
-          onPressed: () {
-            // Implement global search
-          },
-        ),
-      ],
-    );
   }
 
   Widget _buildBottomNav() {
@@ -170,11 +113,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       destinations: _navItems
           .map(
             (item) => NavigationDestination(
-          icon: Icon(item.icon),
-          selectedIcon: Icon(item.selectedIcon),
-          label: item.label,
-        ),
-      )
+              icon: Icon(item.icon),
+              selectedIcon: Icon(item.selectedIcon),
+              label: item.label,
+            ),
+          )
           .toList(),
     );
   }
@@ -184,21 +127,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Show FAB only on Products tab and not on web
       return null; // FAB is handled in ProductListScreen
     }
-    if (_selectedIndex == 1) {
-      // Sales tab
-      return FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const RecordSaleScreen(),
-            ),
-          );
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('New Sale'),
-      );
-    }
+
     return null;
   }
 
@@ -228,9 +157,7 @@ class _DesktopSidebar extends StatelessWidget {
       width: 280,
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-          right: BorderSide(color: Colors.grey[200]!),
-        ),
+        border: Border(right: BorderSide(color: Colors.grey[200]!)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,10 +196,7 @@ class _DesktopSidebar extends StatelessWidget {
                       ),
                       Text(
                         'Manager',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey,
-                        ),
+                        style: TextStyle(fontSize: 14, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -346,10 +270,7 @@ class _DesktopSidebar extends StatelessWidget {
               children: [
                 CircleAvatar(
                   backgroundColor: Colors.grey.shade200,
-                  child: Icon(
-                    Icons.person,
-                    color: Colors.grey.shade600,
-                  ),
+                  child: Icon(Icons.person, color: Colors.grey.shade600),
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -366,10 +287,7 @@ class _DesktopSidebar extends StatelessWidget {
                       ),
                       Text(
                         'View Profile',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -417,20 +335,17 @@ class _TabletNavigationRail extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: const Icon(
-            Icons.inventory_2,
-            color: Colors.white,
-          ),
+          child: const Icon(Icons.inventory_2, color: Colors.white),
         ),
       ),
       destinations: items
           .map(
             (item) => NavigationRailDestination(
-          icon: Icon(item.icon),
-          selectedIcon: Icon(item.selectedIcon),
-          label: Text(item.label),
-        ),
-      )
+              icon: Icon(item.icon),
+              selectedIcon: Icon(item.selectedIcon),
+              label: Text(item.label),
+            ),
+          )
           .toList(),
     );
   }
