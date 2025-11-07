@@ -162,7 +162,7 @@ class FirebaseService {
 
     final docRef = await _firestore
         .collection(_productsCollection)
-        .add(product.toFirestore());
+        .add(product.toMap());
 
     // Update cache with real ID
     if (_cachedProducts != null) {
@@ -189,7 +189,7 @@ class FirebaseService {
     await _firestore
         .collection(_productsCollection)
         .doc(product.id)
-        .update(product.toFirestore());
+        .update(product.toMap());
 
     debugPrint('✅ Product updated: ${product.id}');
   }
@@ -202,7 +202,7 @@ class FirebaseService {
 
     for (final product in products) {
       final docRef = _firestore.collection(_productsCollection).doc(product.id);
-      batch.update(docRef, product.toFirestore());
+      batch.update(docRef, product.toMap());
     }
 
     await batch.commit();
@@ -316,6 +316,139 @@ class FirebaseService {
     _cacheHits = 0;
     _cacheMisses = 0;
   }
+
+
+  // Add these methods to your FirebaseService class
+
+  /// Get all categories from Firestore
+  Future<List<String>> getCategories() async {
+    try {
+      final doc = await _firestore.collection('settings').doc('categories').get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        final categories = List<String>.from(data['list'] ?? []);
+        return categories;
+      }
+
+      // If document doesn't exist, create it with default categories
+      final defaultCategories = ['PPR', 'CPVC', 'PVC', 'Paints'];
+      await _firestore.collection('settings').doc('categories').set({
+        'list': defaultCategories,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      return defaultCategories;
+    } catch (e) {
+      print('Error getting categories: $e');
+      // Return default categories on error
+      return ['PPR', 'CPVC', 'PVC', 'Paints'];
+    }
+  }
+
+  /// Add a new category to Firestore
+  Future<void> addCategory(String category) async {
+    try {
+      final categoryTrimmed = category.trim();
+
+      if (categoryTrimmed.isEmpty) {
+        throw Exception('Category name cannot be empty');
+      }
+
+      await _firestore.collection('settings').doc('categories').update({
+        'list': FieldValue.arrayUnion([categoryTrimmed]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      print('Category added successfully: $categoryTrimmed');
+    } catch (e) {
+      // If document doesn't exist, create it
+      if (e.toString().contains('NOT_FOUND')) {
+        await _firestore.collection('settings').doc('categories').set({
+          'list': [category.trim()],
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        throw Exception('Error adding category: $e');
+      }
+    }
+  }
+
+  /// Delete a category from Firestore
+  Future<void> deleteCategory(String category) async {
+    try {
+      await _firestore.collection('settings').doc('categories').update({
+        'list': FieldValue.arrayRemove([category]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      print('Category deleted successfully: $category');
+    } catch (e) {
+      throw Exception('Error deleting category: $e');
+    }
+  }
+
+  /// Update category name
+  Future<void> updateCategory(String oldCategory, String newCategory) async {
+    try {
+      final newCategoryTrimmed = newCategory.trim();
+
+      if (newCategoryTrimmed.isEmpty) {
+        throw Exception('Category name cannot be empty');
+      }
+
+      // Remove old and add new in a batch
+      final batch = _firestore.batch();
+
+      final categoryRef = _firestore.collection('settings').doc('categories');
+      batch.update(categoryRef, {
+        'list': FieldValue.arrayRemove([oldCategory]),
+      });
+      batch.update(categoryRef, {
+        'list': FieldValue.arrayUnion([newCategoryTrimmed]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      // Update all products with the old category to the new category
+      final productsSnapshot = await _firestore
+          .collection('products')
+          .where('category', isEqualTo: oldCategory)
+          .get();
+
+      if (productsSnapshot.docs.isNotEmpty) {
+        final productBatch = _firestore.batch();
+        for (final doc in productsSnapshot.docs) {
+          productBatch.update(doc.reference, {'category': newCategoryTrimmed});
+        }
+        await productBatch.commit();
+      }
+
+      print('Category updated successfully: $oldCategory -> $newCategoryTrimmed');
+    } catch (e) {
+      throw Exception('Error updating category: $e');
+    }
+  }
+
+  /// Get products by category
+  Future<List<Product>> getProductsByCategory(String category) async {
+    try {
+      final snapshot = await _firestore
+          .collection('products')
+          .where('category', isEqualTo: category)
+          .orderBy('name')
+          .get();
+
+      return snapshot.docs
+          .map((doc) => Product.fromMap({...doc.data(), 'id': doc.id}))
+          .toList();
+    } catch (e) {
+      throw Exception('Error getting products by category: $e');
+    }
+  }
+
+
 
   // ==========================================
   // CLEANUP

@@ -29,17 +29,22 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
   final _purchasePriceController = TextEditingController();
   final _salePriceController = TextEditingController();
   final _stockController = TextEditingController();
+  final _gstController = TextEditingController(text: '18'); // Default 18%
 
   File? _selectedImage;
   bool _isLoading = false;
 
-  static const double gstRate = 0.18; // 18% GST
+  // Category management - Hardware as default
+  String? _selectedCategory;
+  List<String> _categories = ['Hardware', 'PPR', 'CPVC', 'PVC', 'Paints'];
 
   bool get isEditing => widget.product != null;
 
   @override
   void initState() {
     super.initState();
+    _loadCategories();
+
     if (isEditing) {
       // When editing, populate direct values
       _nameController.text = widget.product!.name;
@@ -47,11 +52,43 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
       _purchasePriceController.text = widget.product!.purchasePrice.toString();
       _salePriceController.text = widget.product!.salePrice.toString();
       _stockController.text = widget.product!.stock.toString();
+
+      // Set category - default to 'Hardware' if not set or empty
+      _selectedCategory = (widget.product!.category.isEmpty || widget.product!.category == 'Uncategorized')
+          ? 'CPVC'
+          : widget.product!.category;
+
+      // If product has GST value, populate it
+      if (widget.product!.gst != null) {
+        _gstController.text = widget.product!.gst.toString();
+      }
     } else {
-      // When adding new product, setup auto-calculation listeners
+      // When adding new product, set default category to Hardware
+      _selectedCategory = 'CPVC';
+
+      // Setup auto-calculation listeners
       _billPriceController.addListener(_calculatePrices);
       _discountReceivedController.addListener(_calculatePrices);
       _sellingDiscountController.addListener(_calculatePrices);
+      _gstController.addListener(_calculatePrices);
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await _firebaseService.getCategories();
+      setState(() {
+        _categories = categories;
+        // Ensure Hardware is in the list
+        if (!_categories.contains('CPVC')) {
+          _categories.insert(2, 'CPVC');
+        }
+      });
+    } catch (e) {
+      // Use default categories if loading fails
+      setState(() {
+        _categories = ['Hardware', 'PPR', 'CPVC', 'PVC', 'Paints'];
+      });
     }
   }
 
@@ -59,14 +96,15 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
     final billPrice = double.tryParse(_billPriceController.text) ?? 0.0;
     final discountReceived = double.tryParse(_discountReceivedController.text) ?? 0.0;
     final sellingDiscount = double.tryParse(_sellingDiscountController.text) ?? 0.0;
+    final gstRate = (double.tryParse(_gstController.text) ?? 18.0) / 100; // Convert % to decimal
 
-    // Calculate Purchase Price: (Bill Price - Discount Received%) + GST 18%
+    // Calculate Purchase Price: (Bill Price - Discount Received%) + GST
     if (billPrice > 0) {
       final priceAfterDiscount = billPrice - (billPrice * discountReceived / 100);
       final purchasePrice = priceAfterDiscount + (priceAfterDiscount * gstRate);
       _purchasePriceController.text = purchasePrice.toStringAsFixed(2);
 
-      // Calculate Sale Price: (Bill Price - Selling Discount%) + GST 18%
+      // Calculate Sale Price: (Bill Price - Selling Discount%) + GST
       final priceAfterSellingDiscount = billPrice - (billPrice * sellingDiscount / 100);
       final salePrice = priceAfterSellingDiscount + (priceAfterSellingDiscount * gstRate);
       _salePriceController.text = salePrice.toStringAsFixed(2);
@@ -76,12 +114,75 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
     }
   }
 
+  Future<void> _showAddCategoryDialog() async {
+    final TextEditingController categoryController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Add New Category'),
+        content: TextField(
+          controller: categoryController,
+          decoration: const InputDecoration(
+            labelText: 'Category Name',
+            hintText: 'e.g., Adhesives',
+            border: OutlineInputBorder(),
+          ),
+          textCapitalization: TextCapitalization.words,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (categoryController.text.trim().isNotEmpty) {
+                Navigator.pop(context, categoryController.text.trim());
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      try {
+        await _firebaseService.addCategory(result);
+        setState(() {
+          _categories.add(result);
+          _selectedCategory = result;
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Category "$result" added successfully')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error adding category: $e')),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _saveProduct() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Set default category to Hardware if none selected
+    final categoryToSave = _selectedCategory ?? 'CPVC';
 
     setState(() => _isLoading = true);
 
     try {
+      final gstValue = double.tryParse(_gstController.text);
+
       final product = Product(
         id: isEditing ? widget.product!.id : '',
         name: _nameController.text.trim(),
@@ -89,8 +190,13 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         purchasePrice: double.parse(_purchasePriceController.text),
         salePrice: double.parse(_salePriceController.text),
         stock: int.tryParse(_stockController.text) ?? 0,
-        imageBase64: '',
+        imageBase64: isEditing?widget.product?.imageBase64:'',
         createdAt: isEditing ? widget.product!.createdAt : DateTime.now(),
+        category: categoryToSave,
+        gst: gstValue,
+        totalSold: isEditing ? widget.product!.totalSold : 0,
+        saleCount: isEditing ? widget.product!.saleCount : 0,
+        salesFrequency: isEditing ? widget.product!.salesFrequency : 0.0,
       );
 
       if (isEditing) {
@@ -134,6 +240,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // Product Name
             TextFormField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -144,6 +251,8 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
               value?.isEmpty ?? true ? 'Required' : null,
             ),
             const SizedBox(height: 16),
+
+            // Size
             TextFormField(
               controller: _sizeController,
               decoration: const InputDecoration(
@@ -152,6 +261,44 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
               ),
               validator: (value) =>
               value?.isEmpty ?? true ? 'Required' : null,
+            ),
+            const SizedBox(height: 16),
+
+            // Category Selection
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedCategory,
+                    decoration: InputDecoration(
+                      labelText: 'Category',
+                      prefixIcon: const Icon(Icons.category),
+                      border: const OutlineInputBorder(),
+                      helperText: 'Default: CPVC',
+                      helperStyle: TextStyle(color: Colors.grey.shade600),
+                    ),
+                    items: _categories.map((category) {
+                      return DropdownMenuItem(
+                        value: category,
+                        child: Text(category),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() => _selectedCategory = value);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.outlined(
+                  onPressed: _showAddCategoryDialog,
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add New Category',
+                  style: IconButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                    side: const BorderSide(color: Colors.blue),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
 
@@ -189,6 +336,31 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
               ),
               const SizedBox(height: 16),
 
+              // GST Field (Optional)
+              TextFormField(
+                controller: _gstController,
+                decoration: InputDecoration(
+                  labelText: 'GST (%)',
+                  prefixIcon: const Icon(Icons.receipt),
+                  suffixText: '%',
+                  helperText: 'GST percentage (default: 18%)',
+                  filled: true,
+                  fillColor: Colors.blue.shade50,
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                ],
+                validator: (value) {
+                  if (value?.isEmpty ?? true) return null; // Optional
+                  final number = double.tryParse(value!);
+                  if (number == null) return 'Invalid number';
+                  if (number < 0 || number > 100) return 'Must be 0-100%';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+
               // Discount Received
               TextFormField(
                 controller: _discountReceivedController,
@@ -219,11 +391,11 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
                   labelText: 'Purchase Price (Auto-calculated)',
                   prefixIcon: const Icon(Icons.shopping_cart),
                   prefixText: '₹ ',
-                  helperText: 'Bill Price - Discount + GST (18%)',
+                  helperText: 'Bill Price - Discount + GST',
                   filled: true,
                   fillColor: Colors.grey.shade100,
                 ),
-                readOnly: true,
+                readOnly: false,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.green.shade700,
@@ -270,7 +442,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
                   labelText: 'Sale Price (Auto-calculated)',
                   prefixIcon: const Icon(Icons.currency_rupee),
                   prefixText: '₹ ',
-                  helperText: 'Bill Price - Selling Discount + GST (18%)',
+                  helperText: 'Bill Price - Selling Discount + GST',
                   filled: true,
                   fillColor: Colors.grey.shade100,
                 ),
@@ -287,6 +459,31 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
             // EDITING MODE: Simple direct price input
             // ========================================
             if (isEditing) ...[
+              // GST Field (Optional, for editing)
+              TextFormField(
+                controller: _gstController,
+                decoration: InputDecoration(
+                  labelText: 'GST (%) - Optional',
+                  prefixIcon: const Icon(Icons.receipt),
+                  suffixText: '%',
+                  helperText: 'GST percentage applied',
+                  filled: true,
+                  fillColor: Colors.blue.shade50,
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                ],
+                validator: (value) {
+                  if (value?.isEmpty ?? true) return null; // Optional
+                  final number = double.tryParse(value!);
+                  if (number == null) return 'Invalid number';
+                  if (number < 0 || number > 100) return 'Must be 0-100%';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+
               // Purchase Price (Editable)
               TextFormField(
                 controller: _purchasePriceController,
@@ -378,6 +575,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
     _purchasePriceController.dispose();
     _salePriceController.dispose();
     _stockController.dispose();
+    _gstController.dispose();
     super.dispose();
   }
 }

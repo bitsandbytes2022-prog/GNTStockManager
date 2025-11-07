@@ -1,7 +1,8 @@
 // KEY CHANGES:
-// 1. Wrapped _buildCartBottomSheet() with StatefulBuilder
-// 2. Added setModalState(() {}) calls to all callbacks in the bottom sheet
-// 3. Added didUpdateWidget to _CartItem to sync controllers with parent state
+// 1. Changed _selectedQuantities from Map<String, int> to Map<String, double>
+// 2. Added TextField for manual decimal quantity input (supports 0.5, 1.5, 2.3, etc.)
+// 3. Quantity can now be any decimal number, not just integers
+// 4. Updated all quantity-related logic to work with doubles
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -29,7 +30,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
-  Map<String, int> _selectedQuantities = {};
+  Map<String, int> _selectedQuantities = {}; // Changed to double for decimal support
   Map<String, double> _customPrices = {};
   String _searchQuery = '';
   bool _isLoading = true;
@@ -89,7 +90,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _selectedQuantities.remove(product.id);
         _customPrices.remove(product.id);
       } else {
-        _selectedQuantities[product.id] = 1;
+        _selectedQuantities[product.id] = 1; // Default quantity as double
         _customPrices[product.id] = product.salePrice;
       }
     });
@@ -141,11 +142,35 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       return;
     }
 
+    // Validate quantities
+    for (final entry in _selectedQuantities.entries) {
+      if (entry.value <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Quantity must be greater than 0'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
     // Validate prices
     for (final product in _selectedProducts) {
-      final currentPrice = _customPrices[product.id]!;
-      final minPrice = _getMinimumPrice(product);
+      final currentPrice = _customPrices[product.id];
+      if (currentPrice == null || currentPrice <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${product.name}: Please enter a valid price',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
 
+      final minPrice = _getMinimumPrice(product);
       if (currentPrice < minPrice) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -191,10 +216,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       }
 
       // Calculate total
-      final total = saleItems.fold<double>(
-        0.0,
-            (sum, item) => sum + (item.salePrice * item.quantity),
-      );
+      final total = _totalAmount;
 
       // Create sale object
       final sale = Sale(
@@ -382,7 +404,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 isSelected: isSelected,
                 quantity: _selectedQuantities[product.id] ?? 0,
                 onTap: () => _toggleProduct(product),
-                onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
               );
             },
           ),
@@ -534,7 +555,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     ),
                   ),
                   Text(
-                    '₹${_totalAmount.toStringAsFixed(0)}',
+                    '₹${_totalAmount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -575,7 +596,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  // ✅ FIXED: Using StatefulBuilder to allow bottom sheet to rebuild
   Widget _buildCartBottomSheet() {
     return StatefulBuilder(
       builder: (BuildContext context, StateSetter setModalState) {
@@ -618,8 +638,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             _selectedQuantities.clear();
                             _customPrices.clear();
                           });
-                          setModalState(() {}); // Update modal
-                          Navigator.pop(context); // Close modal if empty
+                          setModalState(() {});
+                          Navigator.pop(context);
                         },
                         icon: const Icon(Icons.clear_all, size: 18),
                         label: const Text('Clear'),
@@ -662,15 +682,15 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       price: _customPrices[product.id]!,
                       onQuantityChanged: (qty) {
                         _updateQuantity(product.id, qty);
-                        setModalState(() {}); // Update modal state
+                        setModalState(() {});
                       },
                       onPriceChanged: (price) {
                         _updatePrice(product.id, price);
-                        setModalState(() {}); // Update modal state
+                        setModalState(() {});
                       },
                       onRemove: () {
                         _toggleProduct(product);
-                        setModalState(() {}); // Update modal state
+                        setModalState(() {});
                       },
                       minimumPrice: _getMinimumPrice(product),
                     );
@@ -715,7 +735,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           selected: isSelected,
                           onSelected: (selected) {
                             setState(() => _paymentMethod = method);
-                            setModalState(() {}); // Update modal state
+                            setModalState(() {});
                           },
                         );
                       }).toList(),
@@ -734,7 +754,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           ),
                         ),
                         Text(
-                          '₹${_totalAmount.toStringAsFixed(0)}',
+                          '₹${_totalAmount.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -807,7 +827,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     ),
                   ),
                   Text(
-                    '₹${_totalAmount.toStringAsFixed(0)}',
+                    '₹${_totalAmount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -841,21 +861,59 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   }
 }
 
-// Product Card Widget (unchanged)
+// Product Card Widget - Updated to match ProductListScreen design
 class _ProductCard extends StatelessWidget {
   final Product product;
   final bool isSelected;
   final int quantity;
   final VoidCallback onTap;
-  final Function(int) onQuantityChanged;
 
   const _ProductCard({
     required this.product,
     required this.isSelected,
     required this.quantity,
     required this.onTap,
-    required this.onQuantityChanged,
   });
+
+  /// Get category color based on category name
+  Color getCategoryColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'ppr':
+        return Colors.green.shade700;
+      case 'cpvc':
+        return const Color(0xFFF5DEB3); // Wheat/Cream color
+      case 'pvc':
+        return Colors.lightBlue.shade400;
+      case 'gi':
+      case 'galvanized':
+        return Colors.grey.shade500;
+      case 'paints':
+        return Colors.purple.shade400;
+      case 'hardware':
+        return Colors.orange.shade700;
+      case 'adhesives':
+        return Colors.amber.shade700;
+      case 'fittings':
+        return Colors.teal.shade600;
+      case 'electrical':
+        return Colors.yellow.shade700;
+      case 'plumbing':
+        return Colors.blue.shade800;
+      default:
+        return Colors.blueGrey.shade600;
+    }
+  }
+
+  /// Get text color for category chip
+  Color getCategoryTextColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'cpvc':
+      case 'electrical':
+        return Colors.black87;
+      default:
+        return Colors.white;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -863,15 +921,17 @@ class _ProductCard extends StatelessWidget {
     final isLowStock = product.stock < 5 && product.stock > 0;
 
     return Card(
-      elevation: isSelected ? 4 : 0,
+      elevation: isSelected ? 4 : 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: isSelected
               ? Colors.blue
               : isOutOfStock
-              ? Colors.red.shade200
-              : Colors.grey.shade200,
+              ? Colors.red.shade100
+              : isLowStock
+              ? Colors.orange.shade100
+              : Colors.grey.shade100,
           width: isSelected ? 2 : 1,
         ),
       ),
@@ -881,138 +941,58 @@ class _ProductCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image
+            // Image section
             Expanded(
+              flex: 3,
               child: Stack(
                 children: [
-                  Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(16),
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(16),
-                      ),
-                      child: product.imageBase64 != null
-                          ? Image.memory(
-                        base64Decode(product.imageBase64!),
-                        fit: BoxFit.cover,
-                      )
-                          : SizedBox.expand(
-                        child: Container(
-                          color: Colors.grey[100],
-                          child: Center(
-                            child: Icon(
-                              Icons.inventory_2_outlined,
-                              size: 80,
-                              color: Colors.grey[300],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Stock badge
-                  if (isOutOfStock || isLowStock)
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isOutOfStock
-                              ? Colors.red
-                              : Colors.orange,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          isOutOfStock ? 'Out of Stock' : 'Low Stock',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  // Selected badge
-                  if (isSelected)
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
+                  _buildImage(),
+                  _buildStockBadge(isOutOfStock, isLowStock),
+                  _buildCategoryChip(),
+                  if (isSelected) _buildSelectedBadge(),
                 ],
               ),
             ),
 
-            // Product info
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    product.size,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '₹${product.salePrice.toStringAsFixed(0)}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue,
-                        ),
-                      ),
-                      if (!isOutOfStock)
+            // Info section
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Name and size
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          'Stock: ${product.stock}',
-                          style: TextStyle(
-                            fontSize: 11,
+                          product.name,
+                          style: const TextStyle(
                             fontWeight: FontWeight.w600,
-                            color: Colors.blue.shade700,
+                            fontSize: 14,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(height: 2),
+                        Text(
+                          product.size,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+
+                    // Price row
+                    _buildPriceRow(),
+                  ],
+                ),
               ),
             ),
           ],
@@ -1020,9 +1000,196 @@ class _ProductCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildImage() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+        child: product.imageBase64 != null
+            ? Image.memory(
+          base64Decode(product.imageBase64!),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildPlaceholder();
+          },
+        )
+            : _buildPlaceholder(),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Center(
+      child: Icon(
+        Icons.inventory_2_outlined,
+        size: 48,
+        color: Colors.grey.shade400,
+      ),
+    );
+  }
+
+  Widget _buildStockBadge(bool isOutOfStock, bool isLowStock) {
+    return Positioned(
+      top: 8,
+      right: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isOutOfStock
+              ? Colors.red.shade500
+              : isLowStock
+              ? Colors.orange.shade500
+              : Colors.green.shade500,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isOutOfStock ? Icons.warning_rounded : Icons.inventory_2,
+              size: 14,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${product.stock}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryChip() {
+    final categoryColor = getCategoryColor(product.category);
+    final textColor = getCategoryTextColor(product.category);
+
+    return Positioned(
+      top: 8,
+      left: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: categoryColor,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.category,
+              size: 12,
+              color: textColor,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              product.category.toUpperCase(),
+              style: TextStyle(
+                color: textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectedBadge() {
+    return Positioned(
+      bottom: 8,
+      left: 8,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.blue,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.check,
+          color: Colors.white,
+          size: 16,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPriceRow() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.currency_rupee,
+              size: 12,
+              color: Colors.green.shade700,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'Sale',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.green.shade700,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        Text(
+          '₹${product.salePrice.toStringAsFixed(2)}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: Colors.green.shade700,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-// Cart Item Widget
+// Cart Item Widget with Decimal Quantity Input
 class _CartItem extends StatefulWidget {
   final Product product;
   final int quantity;
@@ -1049,28 +1216,43 @@ class _CartItem extends StatefulWidget {
 class _CartItemState extends State<_CartItem> {
   late TextEditingController _priceController;
   late TextEditingController _qtyController;
+  late FocusNode _qtyFocusNode;
+  late FocusNode _priceFocusNode;
 
   @override
   void initState() {
     super.initState();
     _priceController = TextEditingController(
-      text: widget.price.toStringAsFixed(0),
+      text: widget.price.toStringAsFixed(2),
     );
     _qtyController = TextEditingController(
-      text: widget.quantity.toString(),
+      text: _formatQuantity(widget.quantity),
     );
+    _qtyFocusNode = FocusNode();
+    _priceFocusNode = FocusNode();
   }
 
-  // ✅ ADDED: Sync controllers when parent state updates
   @override
   void didUpdateWidget(_CartItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.price != widget.price) {
-      _priceController.text = widget.price.toStringAsFixed(0);
+    if (oldWidget.price != widget.price && !_priceFocusNode.hasFocus) {
+      _priceController.text = widget.price.toStringAsFixed(2);
     }
-    if (oldWidget.quantity != widget.quantity) {
-      _qtyController.text = widget.quantity.toString();
+    if (oldWidget.quantity != widget.quantity && !_qtyFocusNode.hasFocus) {
+      _qtyController.text = _formatQuantity(widget.quantity);
     }
+  }
+
+  String _formatQuantity(int quantity) {
+    // Remove unnecessary decimal zeros
+    if (quantity == quantity.toInt()) {
+      return quantity.toInt().toString();
+    }
+    return quantity.toString();
+  }
+
+  double get _subtotal {
+    return widget.price * widget.quantity;
   }
 
   @override
@@ -1151,7 +1333,7 @@ class _CartItemState extends State<_CartItem> {
             // Quantity and price controls
             Row(
               children: [
-                // Quantity
+                // Quantity with +/- buttons and text field
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1166,37 +1348,61 @@ class _CartItemState extends State<_CartItem> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
+                          // Minus button
                           IconButton(
                             onPressed: () {
-                              if (widget.quantity > 1) {
-                                widget.onQuantityChanged(widget.quantity - 1);
+                              final newQty = widget.quantity - 1;
+                              if (newQty > 0) {
+                                widget.onQuantityChanged(newQty);
                               }
                             },
                             icon: const Icon(Icons.remove, size: 18),
                             style: IconButton.styleFrom(
                               backgroundColor: Colors.grey[100],
+                              padding: const EdgeInsets.all(8),
+                              minimumSize: const Size(36, 36),
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          // Quantity text field
                           Expanded(
-                            child: Text(
-                              '${widget.quantity}',
+                            child: TextField(
+                              controller: _qtyController,
+                              focusNode: _qtyFocusNode,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 12,
+                                ),
                               ),
+                              onChanged: (value) {
+                                final qty = int.tryParse(value);
+                                if (qty != null && qty > 0) {
+                                  widget.onQuantityChanged(qty);
+                                }
+                              },
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          // Plus button
                           IconButton(
                             onPressed: () {
-                              if (widget.quantity < widget.product.stock) {
-                                widget.onQuantityChanged(widget.quantity + 1);
+                              final newQty = widget.quantity+1 ;
+                              if (newQty <= widget.product.stock) {
+                                widget.onQuantityChanged(newQty);
                               }
                             },
                             icon: const Icon(Icons.add, size: 18),
                             style: IconButton.styleFrom(
                               backgroundColor: Colors.blue.shade50,
                               foregroundColor: Colors.blue,
+                              padding: const EdgeInsets.all(8),
+                              minimumSize: const Size(36, 36),
                             ),
                           ),
                         ],
@@ -1221,7 +1427,8 @@ class _CartItemState extends State<_CartItem> {
                       const SizedBox(height: 4),
                       TextField(
                         controller: _priceController,
-                        keyboardType: TextInputType.number,
+                        focusNode: _priceFocusNode,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         decoration: InputDecoration(
                           prefixText: '₹',
                           border: OutlineInputBorder(
@@ -1245,6 +1452,20 @@ class _CartItemState extends State<_CartItem> {
               ],
             ),
 
+            // Minimum price warning
+            if (widget.price < widget.minimumPrice)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Min price: ₹${widget.minimumPrice.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.red,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+
             // Subtotal
             const SizedBox(height: 12),
             Row(
@@ -1258,7 +1479,7 @@ class _CartItemState extends State<_CartItem> {
                   ),
                 ),
                 Text(
-                  '₹${(widget.price * widget.quantity).toStringAsFixed(0)}',
+                  '₹${_subtotal.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1276,6 +1497,8 @@ class _CartItemState extends State<_CartItem> {
   void dispose() {
     _priceController.dispose();
     _qtyController.dispose();
+    _qtyFocusNode.dispose();
+    _priceFocusNode.dispose();
     super.dispose();
   }
 }

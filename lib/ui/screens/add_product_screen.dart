@@ -1,5 +1,3 @@
-
-
 import 'dart:convert';
 import 'dart:io';
 
@@ -35,11 +33,17 @@ class _AddProductScreenState extends State<AddProductScreen> {
   String? _existingImageBase64;
   bool _isLoading = false;
 
+  // Category management
+  String? _selectedCategory;
+  List<String> _categories = ['PPR', 'CPVC', 'PVC', 'Paints'];
+
   bool get isEditing => widget.product != null;
 
   @override
   void initState() {
     super.initState();
+    _loadCategories();
+
     if (isEditing) {
       _nameController.text = widget.product!.name;
       _sizeController.text = widget.product!.size;
@@ -47,6 +51,21 @@ class _AddProductScreenState extends State<AddProductScreen> {
       _salePriceController.text = widget.product!.salePrice.toString();
       _stockController.text = widget.product!.stock.toString();
       _existingImageBase64 = widget.product!.imageBase64;
+      _selectedCategory = widget.product!.category;
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await _firebaseService.getCategories();
+      setState(() {
+        _categories = categories;
+      });
+    } catch (e) {
+      // Use default categories if loading fails
+      setState(() {
+        _categories = ['PPR', 'CPVC', 'PVC', 'Paints'];
+      });
     }
   }
 
@@ -129,8 +148,73 @@ class _AddProductScreenState extends State<AddProductScreen> {
     }
   }
 
+  Future<void> _showAddCategoryDialog() async {
+    final TextEditingController categoryController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Add New Category'),
+        content: TextField(
+          controller: categoryController,
+          decoration: const InputDecoration(
+            labelText: 'Category Name',
+            hintText: 'e.g., Adhesives',
+            border: OutlineInputBorder(),
+          ),
+          textCapitalization: TextCapitalization.words,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (categoryController.text.trim().isNotEmpty) {
+                Navigator.pop(context, categoryController.text.trim());
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      try {
+        await _firebaseService.addCategory(result);
+        setState(() {
+          _categories.add(result);
+          _selectedCategory = result;
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Category "$result" added successfully')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error adding category: $e')),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _saveProduct() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a category')),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -155,6 +239,11 @@ class _AddProductScreenState extends State<AddProductScreen> {
         stock: int.tryParse(_stockController.text) ?? 0,
         imageBase64: imageBase64,
         createdAt: isEditing ? widget.product!.createdAt : DateTime.now(),
+        category: _selectedCategory!,
+        totalSold: isEditing ? widget.product!.totalSold : 0,
+        gst: isEditing ? widget.product!.gst : null,
+        saleCount: isEditing ? widget.product!.saleCount : 0,
+        salesFrequency: isEditing ? widget.product!.salesFrequency : 0.0,
       );
 
       if (isEditing) {
@@ -267,6 +356,44 @@ class _AddProductScreenState extends State<AddProductScreen> {
               value?.isEmpty ?? true ? 'Required' : null,
             ),
             const SizedBox(height: 16),
+
+            // Category Selection
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedCategory,
+                    decoration: const InputDecoration(
+                      labelText: 'Category',
+                      prefixIcon: Icon(Icons.category),
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _categories.map((category) {
+                      return DropdownMenuItem(
+                        value: category,
+                        child: Text(category),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() => _selectedCategory = value);
+                    },
+                    validator: (value) => value == null ? 'Required' : null,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.outlined(
+                  onPressed: _showAddCategoryDialog,
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add New Category',
+                  style: IconButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                    side: const BorderSide(color: Colors.blue),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
             TextFormField(
               controller: _purchasePriceController,
               decoration: const InputDecoration(
