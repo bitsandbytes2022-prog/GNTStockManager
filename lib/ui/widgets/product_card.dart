@@ -117,6 +117,7 @@ class ProductCard extends StatelessWidget {
                   _buildImage(context),
                   _buildStockBadge(),
                   _buildCategoryChip(),
+                  _buildDiscountChip(),
                   if (showSalesInfo && product.totalSold > 0)
                     _buildSalesBadge(),
                 ],
@@ -140,9 +141,9 @@ class ProductCard extends StatelessWidget {
                           product.name,
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
-                            fontSize: 14,
+                            fontSize: 10,
                           ),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
@@ -366,6 +367,87 @@ class ProductCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+  Widget _buildDiscountChip() {
+
+
+    return Positioned(
+      top: 32,
+      left:16,
+      child: product.discountReceived!=null && product.sellingDiscount!=null?Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Text(
+              product.discountReceived?.toString()??'',
+              style: TextStyle(
+                color:Colors.white ,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          SizedBox(width: 4,),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.red,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Text(
+              product.sellingDiscount?.toString()??'',
+              style: TextStyle(
+                color:Colors.white ,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
+      ):Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.purple,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Text(
+          product.margin?.toString()??'',
+          style: TextStyle(
+            color:Colors.white ,
+            fontWeight: FontWeight.bold,
+            fontSize: 10,
+            letterSpacing: 0.5,
+          ),
         ),
       ),
     );

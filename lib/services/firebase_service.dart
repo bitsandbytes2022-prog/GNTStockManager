@@ -44,7 +44,12 @@ class FirebaseService {
         .snapshots()
         .map((snapshot) {
       final products = snapshot.docs
-          .map((doc) => Product.fromFirestore(doc))
+          .map((doc) {
+        final data = doc.data();
+        return Product.fromMap({
+          ...data,
+        }, doc.id);
+      })
           .toList();
       products.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
@@ -74,7 +79,12 @@ class FirebaseService {
     debugPrint('❌ CACHE MISS - Fetching from Firebase');
     final snapshot = await _firestore.collection(_productsCollection).get();
     _cachedProducts = snapshot.docs
-        .map((doc) => Product.fromFirestore(doc))
+        .map((doc) {
+      final data = doc.data();
+      return Product.fromMap({
+        ...data,
+      }, doc.id);
+    })
         .toList();
     _cachedProducts!.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     _lastFetchTime = DateTime.now();
@@ -119,7 +129,12 @@ class FirebaseService {
     _hasMoreProducts = snapshot.docs.length == _pageSize;
 
     return snapshot.docs
-        .map((doc) => Product.fromFirestore(doc))
+        .map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return Product.fromMap({
+        ...data,
+      }, doc.id);
+    })
         .toList();
   }
 
@@ -431,6 +446,45 @@ class FirebaseService {
     }
   }
 
+  /// Get the default category from Firestore
+  Future<String?> getDefaultCategory() async {
+    try {
+      final doc = await _firestore.collection('settings').doc('categories').get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        return data['defaultCategory'] as String?;
+      }
+
+      return null;
+    } catch (e) {
+      print('Error getting default category: $e');
+      return null;
+    }
+  }
+
+  /// Set the default category in Firestore
+  Future<void> setDefaultCategory(String category) async {
+    try {
+      await _firestore.collection('settings').doc('categories').update({
+        'defaultCategory': category,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      print('Default category set successfully: $category');
+    } catch (e) {
+      // If document doesn't exist, create it
+      if (e.toString().contains('NOT_FOUND')) {
+        await _firestore.collection('settings').doc('categories').set({
+          'list': ['PPR', 'CPVC', 'PVC', 'Paints'],
+          'defaultCategory': category,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        throw Exception('Error setting default category: $e');
+      }
+    }
+  }
+
   /// Get products by category
   Future<List<Product>> getProductsByCategory(String category) async {
     try {
@@ -441,7 +495,12 @@ class FirebaseService {
           .get();
 
       return snapshot.docs
-          .map((doc) => Product.fromMap({...doc.data(), 'id': doc.id}))
+          .map((doc) {
+        final data = doc.data();
+        return Product.fromMap({
+          ...data,
+        }, doc.id);
+      })
           .toList();
     } catch (e) {
       throw Exception('Error getting products by category: $e');

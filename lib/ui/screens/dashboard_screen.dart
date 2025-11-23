@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:inventory_manager/ui/screens/add_product_screen.dart';
 import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
-import 'package:inventory_manager/ui/screens/data_sync_screen.dart';
-import 'package:inventory_manager/ui/screens/product_list_screen.dart';
+import 'package:inventory_manager/ui/screens/category_settings_screen.dart';
+ import 'package:inventory_manager/ui/screens/product_list_screen.dart';
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
 import 'package:inventory_manager/ui/screens/sales_list_screen.dart';
 
@@ -40,7 +40,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       icon: Icons.settings_outlined,
       selectedIcon: Icons.settings,
       label: 'Settings',
-      page: const DataSyncScreen(),
+      page: const CategorySettingsScreen(),
     ),
   ];
 

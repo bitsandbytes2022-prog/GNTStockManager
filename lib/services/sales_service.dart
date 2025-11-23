@@ -99,6 +99,7 @@ class SalesService {
     // Update cache optimistically
     if (_cachedSales != null) {
       final newSale = Sale(
+         invoiceNumber: sale.invoiceNumber,
         id: saleRef.id,
         items: sale.items,
         totalAmount: sale.totalAmount,

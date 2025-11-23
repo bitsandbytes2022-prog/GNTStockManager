@@ -4,6 +4,7 @@ enum PaymentMethod {
   cash,
   upi,
   card,
+  credit,
   other,
 }
 
@@ -16,6 +17,8 @@ extension PaymentMethodExtension on PaymentMethod {
         return 'UPI';
       case PaymentMethod.card:
         return 'Card';
+      case PaymentMethod.credit:
+        return 'Credit';
       case PaymentMethod.other:
         return 'Other';
     }
@@ -33,6 +36,8 @@ extension PaymentMethodExtension on PaymentMethod {
         return PaymentMethod.upi;
       case 'card':
         return PaymentMethod.card;
+      case 'credit':
+        return PaymentMethod.credit;
       case 'other':
         return PaymentMethod.other;
       default:
@@ -108,6 +113,7 @@ class SaleItem {
 
 class Sale {
   final String id;
+  final int invoiceNumber;
   final List<SaleItem> items;
   final double totalAmount;
   final DateTime createdAt;
@@ -116,6 +122,7 @@ class Sale {
 
   Sale({
     required this.id,
+    required this.invoiceNumber,
     required this.items,
     required this.totalAmount,
     DateTime? createdAt,
@@ -135,6 +142,7 @@ class Sale {
     final data = doc.data() as Map<String, dynamic>;
     return Sale(
       id: doc.id,
+      invoiceNumber: data['invoiceNumber']??0,
       items: (data['items'] as List?)
           ?.map((item) => SaleItem.fromMap(item as Map<String, dynamic>))
           .toList() ??
@@ -159,6 +167,7 @@ class Sale {
   }) {
     return Sale(
       id: id ?? this.id,
+      invoiceNumber: invoiceNumber ?? this.invoiceNumber,
       items: items ?? this.items,
       totalAmount: totalAmount ?? this.totalAmount,
       createdAt: createdAt ?? this.createdAt,

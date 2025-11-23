@@ -211,6 +211,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
       // Create updated sale object
       final updatedSale = Sale(
+        invoiceNumber: widget.sale.invoiceNumber,
         id: widget.sale.id,
         items: updatedSaleItems,
         totalAmount: total,

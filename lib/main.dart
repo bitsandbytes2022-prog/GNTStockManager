@@ -2,12 +2,21 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:inventory_manager/ui/screens/dashboard_screen.dart';
 
 import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize SharedPreferences early (especially important for web)
+  try {
+    await SharedPreferences.getInstance();
+    debugPrint('✅ SharedPreferences initialized');
+  } catch (e) {
+    debugPrint('⚠️  Warning: SharedPreferences initialization failed: $e');
+  }
 
   // Initialize Firebase
   await Firebase.initializeApp(

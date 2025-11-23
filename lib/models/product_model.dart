@@ -1,3 +1,5 @@
+// Updated Product Model with discount and margin fields
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Product {
@@ -8,12 +10,15 @@ class Product {
   final double salePrice;
   final int stock;
   final String? imageBase64;
-  final DateTime createdAt;
+  final dynamic createdAt; // Can be DateTime or Timestamp
+  final String category;
+  final double? gst; // GST percentage
+  final double? discountReceived; // Discount received from supplier (%)
+  final double? sellingDiscount; // Discount offered to customers (%)
+  final double? margin; // Profit margin percentage
   final int totalSold;
-  final String category;        // Required: PPR, CPVC, PVC, Paints, etc.
-  final double? gst;            // Optional: GST percentage (e.g., 18.0 for 18%)
-  final int saleCount;          // Number of times this product was sold (transaction count)
-  final double salesFrequency;  // Sales frequency metric (e.g., sales per day/week)
+  final int saleCount;
+  final double salesFrequency;
 
   Product({
     required this.id,
@@ -22,16 +27,19 @@ class Product {
     required this.purchasePrice,
     required this.salePrice,
     required this.stock,
-    this.imageBase64,
+    required this.imageBase64,
     required this.createdAt,
-    this.totalSold = 0,
-    required this.category,
+    this.category = 'Uncategorized',
     this.gst,
+    this.discountReceived,
+    this.sellingDiscount,
+    this.margin,
+    this.totalSold = 0,
     this.saleCount = 0,
     this.salesFrequency = 0.0,
   });
 
-  /// Convert Product to Map for Firestore
+  // Convert Product to Map for Firebase
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -41,87 +49,59 @@ class Product {
       'salePrice': salePrice,
       'stock': stock,
       'imageBase64': imageBase64,
-      'createdAt': createdAt.toIso8601String(),
-      'totalSold': totalSold,
+      'createdAt': createdAt is DateTime
+          ? Timestamp.fromDate(createdAt as DateTime)
+          : createdAt, // Already a Timestamp
       'category': category,
       'gst': gst,
+      'discountReceived': discountReceived,
+      'sellingDiscount': sellingDiscount,
+      'margin': margin,
+      'totalSold': totalSold,
       'saleCount': saleCount,
       'salesFrequency': salesFrequency,
     };
   }
 
-  /// Create Product from Map
-  factory Product.fromMap(Map<String, dynamic> map) {
+  // Create Product from Firebase Map
+  factory Product.fromMap(Map<String, dynamic> map, String documentId) {
+    // Handle createdAt which can be Timestamp, String, or null
+    dynamic createdAtValue;
+    if (map['createdAt'] is Timestamp) {
+      createdAtValue = (map['createdAt'] as Timestamp).toDate();
+    } else if (map['createdAt'] is String) {
+      createdAtValue = DateTime.parse(map['createdAt']);
+    } else {
+      createdAtValue = DateTime.now();
+    }
+
     return Product(
-      id: map['id'] ?? '',
+      id: documentId,
       name: map['name'] ?? '',
       size: map['size'] ?? '',
       purchasePrice: (map['purchasePrice'] ?? 0).toDouble(),
       salePrice: (map['salePrice'] ?? 0).toDouble(),
       stock: map['stock'] ?? 0,
       imageBase64: map['imageBase64'],
-      createdAt: map['createdAt'] != null
-          ? DateTime.parse(map['createdAt'])
-          : DateTime.now(),
-      totalSold: map['totalSold'] ?? 0,
+      createdAt: createdAtValue,
       category: map['category'] ?? 'Uncategorized',
-      gst: map['gst']?.toDouble(),
+      gst: map['gst'] != null ? (map['gst'] as num).toDouble() : null,
+      discountReceived: map['discountReceived'] != null
+          ? (map['discountReceived'] as num).toDouble()
+          : null,
+      sellingDiscount: map['sellingDiscount'] != null
+          ? (map['sellingDiscount'] as num).toDouble()
+          : null,
+      margin: map['margin'] != null
+          ? (map['margin'] as num).toDouble()
+          : null,
+      totalSold: map['totalSold'] ?? 0,
       saleCount: map['saleCount'] ?? 0,
       salesFrequency: (map['salesFrequency'] ?? 0.0).toDouble(),
     );
   }
 
-  /// Create Product from Firestore DocumentSnapshot
-  factory Product.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-
-    return Product(
-      id: doc.id,
-      name: data['name'] ?? '',
-      size: data['size'] ?? '',
-      purchasePrice: (data['purchasePrice'] ?? 0).toDouble(),
-      salePrice: (data['salePrice'] ?? 0).toDouble(),
-      stock: data['stock'] ?? 0,
-      imageBase64: data['imageBase64'],
-      createdAt: data['createdAt'] != null
-          ? (data['createdAt'] is Timestamp
-          ? (data['createdAt'] as Timestamp).toDate()
-          : DateTime.parse(data['createdAt']))
-          : DateTime.now(),
-      totalSold: data['totalSold'] ?? 0,
-      category: data['category'] ?? 'Uncategorized',
-      gst: data['gst']?.toDouble(),
-      saleCount: data['saleCount'] ?? 0,
-      salesFrequency: (data['salesFrequency'] ?? 0.0).toDouble(),
-    );
-  }
-
-  /// Create Product from Firestore QueryDocumentSnapshot
-  factory Product.fromFirestoreQuery(QueryDocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-
-    return Product(
-      id: doc.id,
-      name: data['name'] ?? '',
-      size: data['size'] ?? '',
-      purchasePrice: (data['purchasePrice'] ?? 0).toDouble(),
-      salePrice: (data['salePrice'] ?? 0).toDouble(),
-      stock: data['stock'] ?? 0,
-      imageBase64: data['imageBase64'],
-      createdAt: data['createdAt'] != null
-          ? (data['createdAt'] is Timestamp
-          ? (data['createdAt'] as Timestamp).toDate()
-          : DateTime.parse(data['createdAt']))
-          : DateTime.now(),
-      totalSold: data['totalSold'] ?? 0,
-      category: data['category'] ?? 'Uncategorized',
-      gst: data['gst']?.toDouble(),
-      saleCount: data['saleCount'] ?? 0,
-      salesFrequency: (data['salesFrequency'] ?? 0.0).toDouble(),
-    );
-  }
-
-  /// Copy with method for creating modified copies
+  // Copy with method for easy updates
   Product copyWith({
     String? id,
     String? name,
@@ -130,10 +110,13 @@ class Product {
     double? salePrice,
     int? stock,
     String? imageBase64,
-    DateTime? createdAt,
-    int? totalSold,
+    dynamic createdAt,
     String? category,
     double? gst,
+    double? discountReceived,
+    double? sellingDiscount,
+    double? margin,
+    int? totalSold,
     int? saleCount,
     double? salesFrequency,
   }) {
@@ -146,60 +129,40 @@ class Product {
       stock: stock ?? this.stock,
       imageBase64: imageBase64 ?? this.imageBase64,
       createdAt: createdAt ?? this.createdAt,
-      totalSold: totalSold ?? this.totalSold,
       category: category ?? this.category,
       gst: gst ?? this.gst,
+      discountReceived: discountReceived ?? this.discountReceived,
+      sellingDiscount: sellingDiscount ?? this.sellingDiscount,
+      margin: margin ?? this.margin,
+      totalSold: totalSold ?? this.totalSold,
       saleCount: saleCount ?? this.saleCount,
       salesFrequency: salesFrequency ?? this.salesFrequency,
     );
   }
 
-  /// Calculate sales frequency based on product age
-  /// Returns sales per day
-  double calculateSalesFrequency() {
-    final now = DateTime.now();
-    final daysSinceCreation = now.difference(createdAt).inDays;
-
-    if (daysSinceCreation == 0) {
-      return totalSold.toDouble(); // Same day sales
+  // Get DateTime from createdAt (handles both Timestamp and DateTime)
+  DateTime get createdAtDateTime {
+    if (createdAt is Timestamp) {
+      return (createdAt as Timestamp).toDate();
+    } else if (createdAt is DateTime) {
+      return createdAt as DateTime;
+    } else if (createdAt is String) {
+      return DateTime.parse(createdAt as String);
     }
-
-    return totalSold / daysSinceCreation;
+    return DateTime.now();
   }
 
-  /// Convert to JSON string
-  String toJson() {
-    return '''
-    {
-      "id": "$id",
-      "name": "$name",
-      "size": "$size",
-      "purchasePrice": $purchasePrice,
-      "salePrice": $salePrice,
-      "stock": $stock,
-      "imageBase64": ${imageBase64 != null ? '"$imageBase64"' : 'null'},
-      "createdAt": "${createdAt.toIso8601String()}",
-      "totalSold": $totalSold,
-      "category": "$category",
-      "gst": ${gst ?? 'null'},
-      "saleCount": $saleCount,
-      "salesFrequency": $salesFrequency
-    }
-    ''';
-  }
+  // Calculate profit per unit
+  double get profitPerUnit => salePrice - purchasePrice;
 
-  @override
-  String toString() {
-    return 'Product(id: $id, name: $name, size: $size, category: $category, purchasePrice: $purchasePrice, salePrice: $salePrice, stock: $stock, totalSold: $totalSold, saleCount: $saleCount, salesFrequency: $salesFrequency, gst: $gst)';
-  }
+  // Calculate profit percentage
+  double get profitPercentage =>
+      purchasePrice > 0 ? ((profitPerUnit / purchasePrice) * 100) : 0;
 
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
+  // Check if product is low in stock (less than 10)
+  bool get isLowStock => stock < 10;
 
-    return other is Product && other.id == id;
-  }
-
-  @override
-  int get hashCode => id.hashCode;
+  // Get display price with rupee symbol
+  String get displayPurchasePrice => '₹${purchasePrice.toStringAsFixed(2)}';
+  String get displaySalePrice => '₹${salePrice.toStringAsFixed(2)}';
 }
