@@ -156,6 +156,32 @@ class ProductCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (product.subcategory != null &&
+                            product.subcategory!.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.account_tree_outlined,
+                                size: 11,
+                                color: Colors.blueGrey.shade400,
+                              ),
+                              const SizedBox(width: 2),
+                              Flexible(
+                                child: Text(
+                                  product.subcategory!,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.blueGrey.shade500,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
 

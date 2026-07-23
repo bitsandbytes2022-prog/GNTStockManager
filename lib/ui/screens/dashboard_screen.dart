@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:inventory_manager/ui/screens/add_product_screen.dart';
 import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
 import 'package:inventory_manager/ui/screens/category_settings_screen.dart';
+import 'package:inventory_manager/ui/screens/earnings_screen.dart';
  import 'package:inventory_manager/ui/screens/product_list_screen.dart';
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
 import 'package:inventory_manager/ui/screens/sales_list_screen.dart';
+import 'package:inventory_manager/ui/screens/top_selling_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -31,10 +33,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       page: const SalesListScreen(),
     ),
     _NavItem(
+      icon: Icons.account_balance_wallet_outlined,
+      selectedIcon: Icons.account_balance_wallet,
+      label: 'Earnings',
+      page: const EarningsScreen(),
+    ),
+    _NavItem(
       icon: Icons.analytics_outlined,
       selectedIcon: Icons.analytics,
       label: 'Analytics',
       page: const AnalyticsDashboardScreen(),
+    ),
+    _NavItem(
+      icon: Icons.leaderboard_outlined,
+      selectedIcon: Icons.leaderboard,
+      label: 'Top Sellers',
+      page: const TopSellingScreen(),
     ),
     _NavItem(
       icon: Icons.settings_outlined,

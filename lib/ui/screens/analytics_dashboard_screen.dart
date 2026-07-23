@@ -82,7 +82,7 @@ class _TimingAnalyticsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Sale>>(
-      future: _salesService.getCachedSales(),
+      future: _salesService.getCachedRealSales(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -285,7 +285,7 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Sale>>(
-      future: _salesService.getCachedSales(),
+      future: _salesService.getCachedRealSales(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -581,7 +581,7 @@ class _PaymentMethodTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Sale>>(
-      future: _salesService.getCachedSales(),
+      future: _salesService.getCachedRealSales(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());

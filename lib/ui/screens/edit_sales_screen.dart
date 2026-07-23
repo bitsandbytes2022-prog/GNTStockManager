@@ -22,6 +22,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final SalesService _salesService = SalesService();
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _cartSearchController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
   List<Product> _allProducts = [];
@@ -30,6 +31,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   Map<String, double> _customPrices = {};
   Map<String, int> _originalQuantities = {}; // To track stock changes
   String _searchQuery = '';
+  String _cartSearchQuery = '';
   bool _isLoading = true;
   bool _isSaving = false;
   String _paymentMethod = 'Cash';
@@ -43,6 +45,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _initializeFromSale();
     _loadProducts();
     _searchController.addListener(_filterProducts);
+    _cartSearchController.addListener(_filterCartProducts);
+  }
+
+  void _filterCartProducts() {
+    setState(() {
+      _cartSearchQuery = _cartSearchController.text.toLowerCase();
+    });
   }
 
   void _initializeFromSale() {
@@ -145,6 +154,21 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         .toList();
   }
 
+  List<Product> get _filteredCartProducts {
+    if (_cartSearchQuery.isEmpty) {
+      return _selectedProducts;
+    }
+
+    final queryWords = _cartSearchQuery.split(' ').where((w) => w.isNotEmpty);
+
+    return _selectedProducts.where((product) {
+      final name = product.name.toLowerCase();
+      final size = product.size.toLowerCase();
+
+      return queryWords.every((word) => name.contains(word) || size.contains(word));
+    }).toList();
+  }
+
   Future<void> _updateSale() async {
     if (_selectedQuantities.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -218,6 +242,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         createdAt: widget.sale.createdAt, // Keep original creation date
         paymentMethod: paymentMethodEnum,
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        isMock: widget.sale.isMock, // Preserve mock flag through edits
       );
 
       // Update sale with stock adjustments
@@ -401,17 +426,47 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               bottom: BorderSide(color: Colors.grey.shade200),
             ),
           ),
-          child: Row(
+          child: Column(
             children: [
-              const Icon(Icons.shopping_cart, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Cart (${_selectedQuantities.length})',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  const Icon(Icons.shopping_cart, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Cart (${_selectedQuantities.length})',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
+              if (_selectedQuantities.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _cartSearchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search cart...',
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    suffixIcon: _cartSearchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _cartSearchController.clear();
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    isDense: true,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -436,22 +491,48 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               ],
             ),
           )
-              : ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _selectedProducts.length,
-            itemBuilder: (context, index) {
-              final product = _selectedProducts[index];
-              return _CartItem(
-                product: product,
-                quantity: _selectedQuantities[product.id]!,
-                price: _customPrices[product.id]!,
-                onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
-                onPriceChanged: (price) => _updatePrice(product.id, price),
-                onRemove: () => _toggleProduct(product),
-                minimumPrice: _getMinimumPrice(product),
-              );
-            },
-          ),
+              : _filteredCartProducts.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.search_off,
+                              size: 64, color: Colors.grey[400]),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No items found',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Try a different search term',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _filteredCartProducts.length,
+                      itemBuilder: (context, index) {
+                        final product = _filteredCartProducts[index];
+                        return _CartItem(
+                          product: product,
+                          quantity: _selectedQuantities[product.id]!,
+                          price: _customPrices[product.id]!,
+                          onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
+                          onPriceChanged: (price) => _updatePrice(product.id, price),
+                          onRemove: () => _toggleProduct(product),
+                          minimumPrice: _getMinimumPrice(product),
+                        );
+                      },
+                    ),
         ),
 
         // Payment method and notes
@@ -706,31 +787,86 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
               const Divider(height: 1),
 
+              // Search bar
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  controller: _cartSearchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search cart...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _cartSearchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _cartSearchController.clear();
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              ),
+
               // Cart items
               Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _selectedProducts.length,
-                  itemBuilder: (context, index) {
-                    final product = _selectedProducts[index];
-                    return _CartItem(
-                      product: product,
-                      quantity: _selectedQuantities[product.id]!,
-                      price: _customPrices[product.id]!,
-                      onQuantityChanged: (qty) {
-                        setState(() => _updateQuantity(product.id, qty));
-                      },
-                      onPriceChanged: (price) {
-                        setState(() => _updatePrice(product.id, price));
-                      },
-                      onRemove: () {
-                        setState(() => _toggleProduct(product));
-                      },
-                      minimumPrice: _getMinimumPrice(product),
-                    );
-                  },
-                ),
+                child: _filteredCartProducts.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.search_off,
+                                size: 64, color: Colors.grey[400]),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No items found',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Try a different search term',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _filteredCartProducts.length,
+                        itemBuilder: (context, index) {
+                          final product = _filteredCartProducts[index];
+                          return _CartItem(
+                            product: product,
+                            quantity: _selectedQuantities[product.id]!,
+                            price: _customPrices[product.id]!,
+                            onQuantityChanged: (qty) {
+                              setState(() => _updateQuantity(product.id, qty));
+                            },
+                            onPriceChanged: (price) {
+                              setState(() => _updatePrice(product.id, price));
+                            },
+                            onRemove: () {
+                              setState(() => _toggleProduct(product));
+                            },
+                            minimumPrice: _getMinimumPrice(product),
+                          );
+                        },
+                      ),
               ),
 
               // Payment and notes section
@@ -857,6 +993,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _cartSearchController.dispose();
     _notesController.dispose();
     super.dispose();
   }

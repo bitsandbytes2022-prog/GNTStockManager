@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
@@ -34,11 +37,13 @@ class SalesListScreen extends StatefulWidget {
 class _SalesListScreenState extends State<SalesListScreen> {
   final SalesService _salesService = SalesService();
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
 
   bool _useStreamMode = true;
   TimeSpan _selectedTimeSpan = TimeSpan.allTime;
   DateTime? _customStartDate;
   DateTime? _customEndDate;
+  String _searchQuery = '';
 
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
@@ -163,6 +168,226 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
+  Future<void> _printInvoice(Sale sale) async {
+    try {
+      final pdf = await _generateInvoicePdf(sale);
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error printing invoice: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<pw.Document> _generateInvoicePdf(Sale sale) async {
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // Header with shop details
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(
+                    flex: 2,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          'Guru Nanak Traders',
+                          style: pw.TextStyle(
+                            fontSize: 22,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          'Mobile: 7696379802',
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                        pw.Text(
+                          'Nandpur, Teh. Amb, Distt. Una (H.P.)',
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                        pw.Text(
+                          'Deals in: All type of hardware, Sanitary & Paints etc.',
+                          style: pw.TextStyle(
+                            fontSize: 10,
+                            fontStyle: pw.FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  pw.Expanded(
+                    flex: 1,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text(
+                          'Invoice #${sale.invoiceNumber}',
+                          style: pw.TextStyle(
+                            fontSize: 18,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.Text(
+                          'Date: ${DateFormat('dd/MM/yyyy').format(sale.createdAt)}',
+                          style: const pw.TextStyle(fontSize: 12),
+                        ),
+                        pw.Text(
+                          'Time: ${DateFormat('hh:mm a').format(sale.createdAt)}',
+                          style: const pw.TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  )
+                ],
+              ),
+
+              pw.Divider(thickness: 2),
+              pw.SizedBox(height: 12),
+
+              // Items table
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey400),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(3),
+                  1: const pw.FlexColumnWidth(1),
+                  2: const pw.FlexColumnWidth(1.5),
+                  3: const pw.FlexColumnWidth(1.5),
+                },
+                children: [
+                  // Header
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                    children: [
+                      _buildPdfTableCell('Item', bold: true),
+                      _buildPdfTableCell('Qty', bold: true),
+                      _buildPdfTableCell('Rate', bold: true),
+                      _buildPdfTableCell('Amount', bold: true),
+                    ],
+                  ),
+                  // Items
+                  ...sale.items.map((item) {
+                    final amount = item.quantity * item.salePrice;
+                    return pw.TableRow(
+                      children: [
+                        _buildPdfTableCell('${item.productName} (${item.productSize})'),
+                        _buildPdfTableCell(item.quantity.toString()),
+                        _buildPdfTableCell('INR ${item.salePrice.toStringAsFixed(2)}'),
+                        _buildPdfTableCell('INR ${amount.toStringAsFixed(2)}'),
+                      ],
+                    );
+                  }).toList(),
+                ],
+              ),
+
+              pw.SizedBox(height: 16),
+
+              // Totals
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Container(
+                    width: 200,
+                    padding: const pw.EdgeInsets.all(8),
+                    decoration: pw.BoxDecoration(
+                      border: pw.Border.all(color: PdfColors.grey400),
+                      color: PdfColors.grey200,
+                    ),
+                    child: pw.Column(
+                      children: [
+                        _buildPdfTotalRow('Total:', sale.totalAmount, bold: true),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              pw.SizedBox(height: 12),
+
+              // Payment method
+              pw.Text(
+                'Payment Method: ${sale.paymentMethod.label}',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              ),
+
+              if (sale.notes != null && sale.notes!.isNotEmpty) ...[
+                pw.SizedBox(height: 8),
+                pw.Text('Notes: ${sale.notes}'),
+              ],
+
+              pw.Spacer(),
+
+              // Footer
+              pw.Divider(),
+              pw.Center(
+                child: pw.Text(
+                  'Thank you for your business!',
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontStyle: pw.FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    return pdf;
+  }
+
+  pw.Widget _buildPdfTableCell(String text, {bool bold = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(2),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontSize: 8,
+          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _buildPdfTotalRow(String label, double amount, {bool bold = false}) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(
+          label,
+          style: pw.TextStyle(
+            fontSize: bold ? 12 : 10,
+            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+        pw.Text(
+          'INR ${amount.toStringAsFixed(2)}',
+          style: pw.TextStyle(
+            fontSize: bold ? 12 : 10,
+            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _refreshSales() async {
     _salesService.clearCache();
     setState(() {});
@@ -245,6 +470,18 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     return sales.where((sale) {
       return sale.createdAt.isAfter(startDate) && sale.createdAt.isBefore(endDate);
+    }).toList();
+  }
+
+  List<Sale> _filterSalesBySearch(List<Sale> sales) {
+    if (_searchQuery.isEmpty) return sales;
+
+    final query = _searchQuery.toLowerCase();
+    return sales.where((sale) {
+      // Check if any item in the sale contains the search query
+      return sale.items.any((item) =>
+          item.productName.toLowerCase().contains(query) ||
+          item.productSize.toLowerCase().contains(query));
     }).toList();
   }
 
@@ -456,6 +693,42 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+
+                // Search bar
+                TextField(
+                  controller: _searchController,
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Search products...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: Colors.grey[100],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -493,7 +766,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final filteredSales = _filterSalesByDateRange(snapshot.data ?? []);
+        var filteredSales = _filterSalesByDateRange(snapshot.data ?? []);
+        filteredSales = _filterSalesBySearch(filteredSales);
         return _buildSalesContent(filteredSales);
       },
     );
@@ -511,7 +785,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final filteredSales = _filterSalesByDateRange(snapshot.data ?? []);
+        var filteredSales = _filterSalesByDateRange(snapshot.data ?? []);
+        filteredSales = _filterSalesBySearch(filteredSales);
         return _buildSalesContent(filteredSales);
       },
     );
@@ -524,16 +799,26 @@ class _SalesListScreenState extends State<SalesListScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.receipt_long_outlined,
+              _searchQuery.isNotEmpty
+                  ? Icons.search_off
+                  : Icons.receipt_long_outlined,
               size: 80,
               color: Colors.grey[400],
             ),
             const SizedBox(height: 16),
             Text(
-              'No sales yet',
+              _searchQuery.isNotEmpty
+                  ? 'No sales found for "$_searchQuery"'
+                  : 'No sales yet',
               style: TextStyle(fontSize: 18, color: Colors.grey[600]),
             ),
-            if (!kIsWeb) ...[
+            if (_searchQuery.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Try searching for a different product',
+                style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+              ),
+            ] else if (!kIsWeb) ...[
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: () {
@@ -557,7 +842,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
       );
     }
 
-    final stats = _calculateDetailedStats(sales);
+    // Mock sales stay in the list (badged) but must not skew the summary
+    // totals, so compute stats from real sales only.
+    final stats =
+        _calculateDetailedStats(sales.where((s) => !s.isMock).toList());
     final crossAxisCount = _getCrossAxisCount(context);
     final spacing = _getGridSpacing(context);
     final aspectRatio = _getChildAspectRatio(context);
@@ -592,6 +880,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   onEdit: () => _editSale(sale),
                   onDelete: () => _deleteSale(sale),
                   onReturn: () => _returnItems(sale),
+                  onPrint: () => _printInvoice(sale),
                   profit: _calculateSaleProfit(sale),
                   profitPercentage: _calculateSaleProfitPercentage(sale),
                 );
@@ -612,6 +901,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 }
@@ -884,6 +1174,7 @@ class _SaleCard extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onEdit;
   final VoidCallback onReturn;
+  final VoidCallback onPrint;
   final double profit;
   final double profitPercentage;
 
@@ -893,6 +1184,7 @@ class _SaleCard extends StatelessWidget {
     required this.onDelete,
     required this.onReturn,
     required this.onEdit,
+    required this.onPrint,
     required this.profit,
     required this.profitPercentage,
   });
@@ -945,6 +1237,37 @@ class _SaleCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
                         ),
+                        if (sale.isMock) ...[
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade100,
+                              borderRadius: BorderRadius.circular(4),
+                              border:
+                                  Border.all(color: Colors.orange.shade300),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.science_outlined,
+                                    size: 11, color: Colors.orange.shade800),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'MOCK',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -957,6 +1280,16 @@ class _SaleCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'print',
+                        child: Row(
+                          children: [
+                            Icon(Icons.print, size: 18, color: Colors.blue),
+                            SizedBox(width: 8),
+                            Text('Print Invoice', style: TextStyle(fontSize: 13)),
+                          ],
+                        ),
+                      ),
                       const PopupMenuItem(
                         value: 'edit',
                         child: Row(
@@ -989,11 +1322,13 @@ class _SaleCard extends StatelessWidget {
                       ),
                     ],
                     onSelected: (value) {
-                      if (value == 'return') {
+                      if (value == 'print') {
+                        onPrint();
+                      } else if (value == 'return') {
                         onReturn();
                       } else if (value == 'delete') {
                         onDelete();
-                      }else if (value == 'edit') {
+                      } else if (value == 'edit') {
                         onEdit();
                       }
                     },
@@ -1213,64 +1548,215 @@ class _SaleDetailsDialog extends StatelessWidget {
 
   const _SaleDetailsDialog({required this.sale});
 
+  double _calculateItemProfit(item) {
+    return (item.salePrice - item.purchasePrice) * item.quantity;
+  }
+
+  double _calculateTotalProfit() {
+    return sale.items.fold(0.0, (sum, item) {
+      return sum + _calculateItemProfit(item);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final totalProfit = _calculateTotalProfit();
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 600),
-        padding: const EdgeInsets.all(24),
+        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Text(
-                  'Sale Details',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ...sale.items.map((item) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+            // Fixed Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
               child: Row(
                 children: [
-                  Expanded(
-                    child: Text('${item.productName} (${item.productSize})'),
+                  const Text(
+                    'Sale Details',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  Text('${item.quantity} × ₹${item.salePrice.toStringAsFixed(0)}'),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
-            )),
-            const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Total',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+            ),
+
+            // Scrollable Content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ...sale.items.map((item) {
+                      final itemProfit = _calculateItemProfit(item);
+                      final itemTotal = item.quantity * item.salePrice;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey[200]!),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '${item.productName} (${item.productSize})',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    '₹${itemTotal.toStringAsFixed(0)}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Text(
+                                    '${item.quantity} × ₹${item.salePrice.toStringAsFixed(0)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: itemProfit >= 0
+                                      ? Colors.green.shade50
+                                      : Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: itemProfit >= 0
+                                        ? Colors.green.shade200
+                                        : Colors.red.shade200,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      itemProfit >= 0
+                                          ? Icons.trending_up
+                                          : Icons.trending_down,
+                                      size: 12,
+                                      color: itemProfit >= 0
+                                          ? Colors.green.shade700
+                                          : Colors.red.shade700,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Profit: ₹${itemProfit.toStringAsFixed(0)}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: itemProfit >= 0
+                                            ? Colors.green.shade700
+                                            : Colors.red.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    const Divider(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Total',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '₹${sale.totalAmount.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              totalProfit >= 0
+                                  ? Icons.trending_up
+                                  : Icons.trending_down,
+                              size: 18,
+                              color: totalProfit >= 0
+                                  ? Colors.green.shade700
+                                  : Colors.red.shade700,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Total Profit',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: totalProfit >= 0
+                                    ? Colors.green.shade700
+                                    : Colors.red.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          '₹${totalProfit.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: totalProfit >= 0
+                                ? Colors.green.shade700
+                                : Colors.red.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                Text(
-                  '₹${sale.totalAmount.toStringAsFixed(0)}',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),

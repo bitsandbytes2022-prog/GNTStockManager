@@ -44,55 +44,62 @@ class SalesService {
     final saleRef = _firestore.collection(_salesCollection).doc();
     batch.set(saleRef, sale.toFirestore());
 
-    // 2. Update stock and sales tracking for each product
-    for (final item in sale.items) {
-      final productRef = _firestore
-          .collection(_productsCollection)
-          .doc(item.productId);
+    // Mock sales are saved for review only: they do NOT deduct stock, do NOT
+    // touch product sold-counts, and are kept out of the revenue/profit
+    // counters that feed the dashboard.
+    if (!sale.isMock) {
+      // 2. Update stock and sales tracking for each product
+      for (final item in sale.items) {
+        final productRef = _firestore
+            .collection(_productsCollection)
+            .doc(item.productId);
 
-      batch.update(productRef, {
-        'stock': FieldValue.increment(-item.quantity),
-        'totalSold': FieldValue.increment(item.quantity),
-        'saleCount': FieldValue.increment(1),
-        'lastSoldAt': FieldValue.serverTimestamp(),
-      });
+        batch.update(productRef, {
+          'stock': FieldValue.increment(-item.quantity),
+          'totalSold': FieldValue.increment(item.quantity),
+          'saleCount': FieldValue.increment(1),
+          'lastSoldAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // 3. Update global revenue counter (for analytics optimization)
+      final statsRef = _firestore.collection(_statsCollection).doc('revenue');
+      batch.set(
+        statsRef,
+        {
+          'totalRevenue': FieldValue.increment(sale.totalAmount),
+          'totalSales': FieldValue.increment(1),
+          'lastSaleDate': FieldValue.serverTimestamp(),
+          // Add payment method tracking
+          'paymentMethods.${sale.paymentMethod.value}': FieldValue.increment(sale.totalAmount),
+        },
+        SetOptions(merge: true),
+      );
+
+      // Calculate total profit for this sale
+      double totalProfit = 0;
+      double totalCost = 0;
+      for (final item in sale.items) {
+        final itemCost = item.purchasePrice * item.quantity;
+        final itemProfit =
+            (item.salePrice - item.purchasePrice) * item.quantity;
+        totalCost += itemCost;
+        totalProfit += itemProfit;
+      }
+
+      // 4. Update profit counter
+      final profitStatsRef =
+          _firestore.collection(_statsCollection).doc('profit');
+      batch.set(
+        profitStatsRef,
+        {
+          'totalProfit': FieldValue.increment(totalProfit),
+          'totalCost': FieldValue.increment(totalCost),
+          'lastUpdated': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
     }
-
-    // 3. Update global revenue counter (for analytics optimization)
-    final statsRef = _firestore.collection(_statsCollection).doc('revenue');
-    batch.set(
-      statsRef,
-      {
-        'totalRevenue': FieldValue.increment(sale.totalAmount),
-        'totalSales': FieldValue.increment(1),
-        'lastSaleDate': FieldValue.serverTimestamp(),
-        // Add payment method tracking
-        'paymentMethods.${sale.paymentMethod.value}': FieldValue.increment(sale.totalAmount),
-      },
-      SetOptions(merge: true),
-    );
-
-    // Calculate total profit for this sale
-    double totalProfit = 0;
-    double totalCost = 0;
-    for (final item in sale.items) {
-      final itemCost = item.purchasePrice * item.quantity;
-      final itemProfit = (item.salePrice - item.purchasePrice) * item.quantity;
-      totalCost += itemCost;
-      totalProfit += itemProfit;
-    }
-
-    // 4. Update profit counter
-    final profitStatsRef = _firestore.collection(_statsCollection).doc('profit');
-    batch.set(
-      profitStatsRef,
-      {
-        'totalProfit': FieldValue.increment(totalProfit),
-        'totalCost': FieldValue.increment(totalCost),
-        'lastUpdated': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
 
     await batch.commit();
 
@@ -106,12 +113,14 @@ class SalesService {
         createdAt: sale.createdAt,
         notes: sale.notes,
         paymentMethod: sale.paymentMethod,
+        isMock: sale.isMock,
       );
       _cachedSales!.insert(0, newSale);
       debugPrint('⚡ Sale added to cache');
     }
 
-    debugPrint('✅ Sale created: ${saleRef.id}, Revenue: ₹${sale.totalAmount}');
+    debugPrint(
+        '✅ Sale created: ${saleRef.id}${sale.isMock ? ' (MOCK)' : ''}, Revenue: ₹${sale.totalAmount}');
     return saleRef.id;
   }
 
@@ -316,6 +325,13 @@ class SalesService {
     return _cachedSales!;
   }
 
+  /// Like [getCachedSales] but excludes mock (test) sales, so analytics never
+  /// count profit/revenue from sales that were only used to check numbers.
+  Future<List<Sale>> getCachedRealSales() async {
+    final sales = await getCachedSales();
+    return sales.where((s) => !s.isMock).toList();
+  }
+
   // ==========================================
   // PAGINATED FETCH
   // ==========================================
@@ -357,11 +373,13 @@ class SalesService {
     try {
       final batch = _firestore.batch();
 
-      // Calculate stock adjustments
+      // Calculate stock adjustments — skip entirely for mock sales, which
+      // never affect stock.
       final Map<String, int> stockAdjustments = {};
+      final bool skipStock = oldSale.isMock || newSale.isMock;
 
       // Process old items - restore stock for removed/reduced items
-      for (final oldItem in oldSale.items) {
+      for (final oldItem in (skipStock ? const <SaleItem>[] : oldSale.items)) {
         final productId = oldItem.productId;
         final oldQty = oldItem.quantity;
 
@@ -387,7 +405,7 @@ class SalesService {
       }
 
       // Process new items - deduct stock for added/increased items
-      for (final newItem in newSale.items) {
+      for (final newItem in (skipStock ? const <SaleItem>[] : newSale.items)) {
         final productId = newItem.productId;
         if (!oldSale.items.any((item) => item.productId == productId)) {
           // New item added
@@ -461,50 +479,56 @@ class SalesService {
     final saleRef = _firestore.collection(_salesCollection).doc(saleId);
     batch.delete(saleRef);
 
-    // 2. Restore stock and adjust sales tracking
-    for (final item in items) {
-      final productRef = _firestore
-          .collection(_productsCollection)
-          .doc(item.productId);
+    // A mock sale never applied any stock/stat changes, so deleting it must
+    // not restore stock or adjust the counters either.
+    if (!sale.isMock) {
+      // 2. Restore stock and adjust sales tracking
+      for (final item in items) {
+        final productRef = _firestore
+            .collection(_productsCollection)
+            .doc(item.productId);
 
-      batch.update(productRef, {
-        'stock': FieldValue.increment(item.quantity),
-        'totalSold': FieldValue.increment(-item.quantity),
-        'saleCount': FieldValue.increment(-1),
-      });
+        batch.update(productRef, {
+          'stock': FieldValue.increment(item.quantity),
+          'totalSold': FieldValue.increment(-item.quantity),
+          'saleCount': FieldValue.increment(-1),
+        });
+      }
+
+      // 3. Update global revenue counter (subtract)
+      final statsRef = _firestore.collection(_statsCollection).doc('revenue');
+      batch.set(
+        statsRef,
+        {
+          'totalRevenue': FieldValue.increment(-sale.totalAmount),
+          'totalSales': FieldValue.increment(-1),
+          'paymentMethods.${sale.paymentMethod.value}': FieldValue.increment(-sale.totalAmount),
+        },
+        SetOptions(merge: true),
+      );
+
+      // 4. Update profit counter
+      double totalProfit = 0;
+      double totalCost = 0;
+      for (final item in items) {
+        final itemCost = item.purchasePrice * item.quantity;
+        final itemProfit =
+            (item.salePrice - item.purchasePrice) * item.quantity;
+        totalCost += itemCost;
+        totalProfit += itemProfit;
+      }
+
+      final profitStatsRef =
+          _firestore.collection(_statsCollection).doc('profit');
+      batch.set(
+        profitStatsRef,
+        {
+          'totalProfit': FieldValue.increment(-totalProfit),
+          'totalCost': FieldValue.increment(-totalCost),
+        },
+        SetOptions(merge: true),
+      );
     }
-
-    // 3. Update global revenue counter (subtract)
-    final statsRef = _firestore.collection(_statsCollection).doc('revenue');
-    batch.set(
-      statsRef,
-      {
-        'totalRevenue': FieldValue.increment(-sale.totalAmount),
-        'totalSales': FieldValue.increment(-1),
-        'paymentMethods.${sale.paymentMethod.value}': FieldValue.increment(-sale.totalAmount),
-      },
-      SetOptions(merge: true),
-    );
-
-    // 4. Update profit counter
-    double totalProfit = 0;
-    double totalCost = 0;
-    for (final item in items) {
-      final itemCost = item.purchasePrice * item.quantity;
-      final itemProfit = (item.salePrice - item.purchasePrice) * item.quantity;
-      totalCost += itemCost;
-      totalProfit += itemProfit;
-    }
-
-    final profitStatsRef = _firestore.collection(_statsCollection).doc('profit');
-    batch.set(
-      profitStatsRef,
-      {
-        'totalProfit': FieldValue.increment(-totalProfit),
-        'totalCost': FieldValue.increment(-totalCost),
-      },
-      SetOptions(merge: true),
-    );
 
     await batch.commit();
 

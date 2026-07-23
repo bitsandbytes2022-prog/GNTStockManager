@@ -6,6 +6,10 @@ import '../../services/firebase_service.dart';
 import '../widgets/product_card.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
+import 'downloads_screen.dart';
+import 'bulk_price_update_screen.dart';
+import 'excel_export_screen.dart';
+import 'gst_calculator_screen.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
 
@@ -31,6 +35,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
   String? _selectedCategory; // null means "All Categories"
   bool _isLoadingCategories = true;
 
+  // Subcategory filtering
+  Map<String, List<String>> _subcategories = {};
+  String? _selectedSubcategory; // null means "All" within the category
+
   @override
   void initState() {
     super.initState();
@@ -46,8 +54,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
     setState(() => _isLoadingCategories = true);
     try {
       final categories = await _firebaseService.getCategories();
+      final subcategories = await _firebaseService.getAllSubcategories();
       setState(() {
         _categories = categories;
+        _subcategories = subcategories;
         _isLoadingCategories = false;
       });
     } catch (e) {
@@ -85,6 +95,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
     if (_selectedCategory != null) {
       filtered = filtered
           .where((p) => p.category.toLowerCase() == _selectedCategory!.toLowerCase())
+          .toList();
+    }
+
+    // Filter by subcategory (only meaningful within a selected category)
+    if (_selectedSubcategory != null) {
+      filtered = filtered
+          .where((p) =>
+              (p.subcategory ?? '').toLowerCase() ==
+              _selectedSubcategory!.toLowerCase())
           .toList();
     }
 
@@ -229,7 +248,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
         selectedCategory: _selectedCategory,
         getCategoryColor: _getCategoryColor,
         onCategorySelected: (category) {
-          setState(() => _selectedCategory = category);
+          setState(() {
+            _selectedCategory = category;
+            _selectedSubcategory = null;
+          });
           Navigator.pop(context);
         },
       ),
@@ -344,6 +366,34 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           setState(() {
                             showPurchasePrices = !showPurchasePrices;
                           });
+                        } else if (value == 'print_list') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const PrintPriceListScreen(),
+                            ),
+                          );
+                        } else if (value == 'bulk_update') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const BulkPriceUpdateScreen(),
+                            ),
+                          );
+                        } else if (value == 'excel_export') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const ExcelExportScreen(),
+                            ),
+                          );
+                        } else if (value == 'gst_calculator') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const GstCalculatorScreen(),
+                            ),
+                          );
                         } else if (value.startsWith('sort_')) {
                           final sortOption = value.replaceFirst('sort_', '');
                           setState(() {
@@ -449,6 +499,77 @@ class _ProductListScreenState extends State<ProductListScreen> {
                             ],
                           ),
                         ),
+
+                        const PopupMenuDivider(),
+
+                        // Tools section
+                        const PopupMenuItem(
+                          enabled: false,
+                          child: Text(
+                            'TOOLS',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'print_list',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.print,
+                                size: 20,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 12),
+                              const Text('Print Price List'),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'bulk_update',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.edit_note,
+                                size: 20,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 12),
+                              const Text('Bulk Price Update'),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'gst_calculator',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.calculate_outlined,
+                                size: 20,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 12),
+                              const Text('GST Calculator'),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'excel_export',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.table_chart,
+                                size: 20,
+                                color: Colors.green[700],
+                              ),
+                              const SizedBox(width: 12),
+                              const Text('Export to Excel'),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -458,6 +579,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 if (isDesktop || isTablet) ...[
                   const SizedBox(height: 16),
                   _buildCategoryChipsRow(),
+                ],
+
+                // Subcategory chips (any layout) — shown when the selected
+                // category has subcategories defined.
+                if (_subcategoryChipsVisible) ...[
+                  const SizedBox(height: 12),
+                  _buildSubcategoryChipsRow(),
                 ],
 
                 // Active filters row (Mobile)
@@ -487,6 +615,64 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
+  bool get _subcategoryChipsVisible {
+    final cat = _selectedCategory;
+    if (cat == null) return false;
+    final subs = _subcategories[cat];
+    return subs != null && subs.isNotEmpty;
+  }
+
+  Widget _buildSubcategoryChipsRow() {
+    final subs = _subcategories[_selectedCategory] ?? const [];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        FilterChip(
+          selected: _selectedSubcategory == null,
+          label: const Text('All'),
+          onSelected: (_) {
+            setState(() => _selectedSubcategory = null);
+          },
+          backgroundColor: Colors.grey[200],
+          selectedColor: Colors.blue.withOpacity(0.2),
+          checkmarkColor: Colors.blue,
+          labelStyle: TextStyle(
+            color: _selectedSubcategory == null ? Colors.blue : Colors.black87,
+            fontWeight: _selectedSubcategory == null
+                ? FontWeight.bold
+                : FontWeight.normal,
+          ),
+        ),
+        ...subs.map((sub) {
+          final isSelected = _selectedSubcategory == sub;
+          return FilterChip(
+            selected: isSelected,
+            label: Text(sub),
+            avatar: Icon(
+              Icons.account_tree_outlined,
+              size: 16,
+              color: isSelected ? Colors.blue : Colors.blue.withOpacity(0.7),
+            ),
+            onSelected: (_) {
+              setState(() {
+                _selectedSubcategory = isSelected ? null : sub;
+              });
+            },
+            backgroundColor: Colors.blue.withOpacity(0.08),
+            selectedColor: Colors.blue.withOpacity(0.2),
+            checkmarkColor: Colors.blue,
+            labelStyle: TextStyle(
+              color: isSelected ? Colors.blue : Colors.black87,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   Widget _buildCategoryChipsRow() {
     if (_isLoadingCategories) {
       return const Center(child: CircularProgressIndicator());
@@ -504,7 +690,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
               ? null
               : const Icon(Icons.grid_view, size: 16),
           onSelected: (_) {
-            setState(() => _selectedCategory = null);
+            setState(() {
+              _selectedCategory = null;
+              _selectedSubcategory = null;
+            });
           },
           backgroundColor: Colors.grey[200],
           selectedColor: Colors.blue.withOpacity(0.2),
@@ -534,6 +723,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
             onSelected: (_) {
               setState(() {
                 _selectedCategory = isSelected ? null : category;
+                _selectedSubcategory = null;
               });
             },
             backgroundColor: color.withOpacity(0.1),
@@ -574,7 +764,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 ),
                 label: Text(_selectedCategory!.toUpperCase()),
                 onDeleted: () {
-                  setState(() => _selectedCategory = null);
+                  setState(() {
+                    _selectedCategory = null;
+                    _selectedSubcategory = null;
+                  });
                 },
                 deleteIcon: const Icon(Icons.close, size: 16),
                 backgroundColor: _getCategoryColor(_selectedCategory!)
@@ -707,6 +900,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 onPressed: () {
                   setState(() {
                     _selectedCategory = null;
+                    _selectedSubcategory = null;
                     _searchController.clear();
                   });
                 },
@@ -796,8 +990,16 @@ class _ProductListScreenState extends State<ProductListScreen> {
               context,
               MaterialPageRoute(
                 builder: (_) => kIsWeb
-                    ? AddProductWebScreen(product: product)
-                    : AddProductScreen(product: product),
+                    ? AddProductWebScreen(
+                        product: product,
+                        products: products,
+                        index: index,
+                      )
+                    : AddProductScreen(
+                        product: product,
+                        products: products,
+                        index: index,
+                      ),
               ),
             ),
           ),

@@ -12,6 +12,7 @@ class Product {
   final String? imageBase64;
   final dynamic createdAt; // Can be DateTime or Timestamp
   final String category;
+  final String? subcategory; // Optional subcategory within the category
   final double? gst; // GST percentage
   final double? discountReceived; // Discount received from supplier (%)
   final double? sellingDiscount; // Discount offered to customers (%)
@@ -30,6 +31,7 @@ class Product {
     required this.imageBase64,
     required this.createdAt,
     this.category = 'Uncategorized',
+    this.subcategory,
     this.gst,
     this.discountReceived,
     this.sellingDiscount,
@@ -53,6 +55,7 @@ class Product {
           ? Timestamp.fromDate(createdAt as DateTime)
           : createdAt, // Already a Timestamp
       'category': category,
+      'subcategory': subcategory,
       'gst': gst,
       'discountReceived': discountReceived,
       'sellingDiscount': sellingDiscount,
@@ -85,6 +88,9 @@ class Product {
       imageBase64: map['imageBase64'],
       createdAt: createdAtValue,
       category: map['category'] ?? 'Uncategorized',
+      subcategory: (map['subcategory'] as String?)?.isNotEmpty == true
+          ? map['subcategory'] as String
+          : null,
       gst: map['gst'] != null ? (map['gst'] as num).toDouble() : null,
       discountReceived: map['discountReceived'] != null
           ? (map['discountReceived'] as num).toDouble()
@@ -112,6 +118,7 @@ class Product {
     String? imageBase64,
     dynamic createdAt,
     String? category,
+    String? subcategory,
     double? gst,
     double? discountReceived,
     double? sellingDiscount,
@@ -130,6 +137,7 @@ class Product {
       imageBase64: imageBase64 ?? this.imageBase64,
       createdAt: createdAt ?? this.createdAt,
       category: category ?? this.category,
+      subcategory: subcategory ?? this.subcategory,
       gst: gst ?? this.gst,
       discountReceived: discountReceived ?? this.discountReceived,
       sellingDiscount: sellingDiscount ?? this.sellingDiscount,

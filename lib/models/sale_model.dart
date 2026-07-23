@@ -120,6 +120,10 @@ class Sale {
   final String? notes;
   final PaymentMethod paymentMethod;
 
+  /// A mock (test) sale: stock is NOT deducted and it is kept out of all
+  /// revenue/profit analytics. Used to check profit on a hypothetical sale.
+  final bool isMock;
+
   Sale({
     required this.id,
     required this.invoiceNumber,
@@ -128,6 +132,7 @@ class Sale {
     DateTime? createdAt,
     this.notes,
     this.paymentMethod = PaymentMethod.cash,
+    this.isMock = false,
   }) : createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toFirestore() => {
@@ -136,6 +141,7 @@ class Sale {
     'createdAt': Timestamp.fromDate(createdAt),
     'notes': notes,
     'paymentMethod': paymentMethod.value,
+    'isMock': isMock,
   };
 
   factory Sale.fromFirestore(DocumentSnapshot doc) {
@@ -153,6 +159,7 @@ class Sale {
       paymentMethod: data['paymentMethod'] != null
           ? PaymentMethodExtension.fromString(data['paymentMethod'])
           : PaymentMethod.cash,
+      isMock: data['isMock'] == true,
     );
   }
 
@@ -164,6 +171,7 @@ class Sale {
     DateTime? createdAt,
     String? notes,
     PaymentMethod? paymentMethod,
+    bool? isMock,
   }) {
     return Sale(
       id: id ?? this.id,
@@ -173,6 +181,7 @@ class Sale {
       createdAt: createdAt ?? this.createdAt,
       notes: notes ?? this.notes,
       paymentMethod: paymentMethod ?? this.paymentMethod,
+      isMock: isMock ?? this.isMock,
     );
   }
 }

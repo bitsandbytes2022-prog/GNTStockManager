@@ -20,6 +20,10 @@ class BillPreviewScreen extends StatefulWidget {
   final String paymentMethod;
   final String? notes;
 
+  /// When true, completing from this preview records a mock sale (no stock
+  /// deduction, excluded from analytics).
+  final bool isMock;
+
   const BillPreviewScreen({
     super.key,
     required this.products,
@@ -27,6 +31,7 @@ class BillPreviewScreen extends StatefulWidget {
     required this.prices,
     required this.paymentMethod,
     this.notes,
+    this.isMock = false,
   });
 
   @override
@@ -128,6 +133,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         ),
         notes: widget.notes,
         invoiceNumber: invoiceNumber, // Add invoice number to sale
+        isMock: widget.isMock,
       );
 
       // Save to Firebase
