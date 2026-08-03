@@ -9,6 +9,8 @@ class SettingsService {
   factory SettingsService() => _instance;
 
   static const String _defaultCategoryKey = 'default_category';
+  static const String _recentSearchesKey = 'recent_product_searches';
+  static const int _maxRecentSearches = 8;
 
   // Cache the SharedPreferences instance for better performance
   static SharedPreferences? _prefsInstance;
@@ -75,6 +77,56 @@ class SettingsService {
     } catch (e) {
       debugPrint('❌ Error clearing default category: $e');
       return false;
+    }
+  }
+
+  /// Recent product-search terms, most recent first, for quick-tap chips on
+  /// the Record Sale screen.
+  Future<List<String>> getRecentSearches() async {
+    try {
+      final prefs = await _getPrefs();
+      if (prefs == null) return [];
+      return prefs.getStringList(_recentSearchesKey) ?? [];
+    } catch (e) {
+      debugPrint('❌ Error getting recent searches: $e');
+      return [];
+    }
+  }
+
+  /// Records a committed search term, moving it to the front (LRU) and
+  /// capping the list at [_maxRecentSearches].
+  Future<void> addRecentSearch(String term) async {
+    final value = term.trim();
+    if (value.isEmpty) return;
+
+    try {
+      final prefs = await _getPrefs();
+      if (prefs == null) return;
+
+      final current = prefs.getStringList(_recentSearchesKey) ?? [];
+      current.removeWhere((s) => s.toLowerCase() == value.toLowerCase());
+      current.insert(0, value);
+
+      await prefs.setStringList(
+        _recentSearchesKey,
+        current.take(_maxRecentSearches).toList(),
+      );
+    } catch (e) {
+      debugPrint('❌ Error saving recent search: $e');
+    }
+  }
+
+  /// Removes a single recent-search entry (e.g. the user dismissed its chip).
+  Future<void> removeRecentSearch(String term) async {
+    try {
+      final prefs = await _getPrefs();
+      if (prefs == null) return;
+
+      final current = prefs.getStringList(_recentSearchesKey) ?? [];
+      current.removeWhere((s) => s.toLowerCase() == term.toLowerCase());
+      await prefs.setStringList(_recentSearchesKey, current);
+    } catch (e) {
+      debugPrint('❌ Error removing recent search: $e');
     }
   }
 }

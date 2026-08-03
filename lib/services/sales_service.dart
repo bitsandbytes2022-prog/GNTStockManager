@@ -33,6 +33,22 @@ class SalesService {
   bool _hasMoreSales = true;
 
   // ==========================================
+  // "FREQUENTLY BOUGHT TOGETHER" / QUANTITY RECALL CACHE
+  // ==========================================
+  // productId -> {coProductId: co-occurrence count across past baskets}
+  Map<String, Map<String, int>>? _coOccurrenceCache;
+  // productId -> quantity used in the most recent sale of that product
+  Map<String, int>? _lastQuantityCache;
+  // productId -> most common quantity across past sales of that product
+  Map<String, int>? _modeQuantityCache;
+  DateTime? _coOccurrenceComputedAt;
+
+  // Cap the scan so this stays cheap regardless of shop volume: recent
+  // sales matter far more than old ones for "what's usually bought with X".
+  static const Duration _coOccurrenceWindow = Duration(days: 90);
+  static const int _coOccurrenceSaleCap = 500;
+
+  // ==========================================
   // CREATE SALE WITH COUNTER UPDATES
   // ==========================================
   /// Creates a sale and updates product stock + global stats counters
@@ -48,8 +64,12 @@ class SalesService {
     // touch product sold-counts, and are kept out of the revenue/profit
     // counters that feed the dashboard.
     if (!sale.isMock) {
-      // 2. Update stock and sales tracking for each product
+      // 2. Update stock and sales tracking for each product. Per-foot lines
+      // (pipes cut to length) skip this entirely, even on a real sale — the
+      // app doesn't track cut-pipe remainders, so stock stays untouched.
       for (final item in sale.items) {
+        if (item.isPerFoot) continue;
+
         final productRef = _firestore
             .collection(_productsCollection)
             .doc(item.productId);
@@ -117,6 +137,21 @@ class SalesService {
       );
       _cachedSales!.insert(0, newSale);
       debugPrint('⚡ Sale added to cache');
+    }
+
+    // Bump the co-occurrence/quantity cache incrementally instead of
+    // invalidating it, so the next "frequently bought together" lookup
+    // doesn't pay for a full recompute. Mock sales are excluded, matching
+    // how they're excluded from every other analytics counter above.
+    if (!sale.isMock && _coOccurrenceCache != null) {
+      for (final item in sale.items) {
+        final map = _coOccurrenceCache!.putIfAbsent(item.productId, () => {});
+        for (final other in sale.items) {
+          if (other.productId == item.productId) continue;
+          map[other.productId] = (map[other.productId] ?? 0) + 1;
+        }
+        _lastQuantityCache?[item.productId] = item.quantity;
+      }
     }
 
     debugPrint(
@@ -188,12 +223,15 @@ class SalesService {
           'refundAmount': itemRefund,
         });
 
-        // Update product stock and counters
-        final productRef = _firestore.collection(_productsCollection).doc(item.productId);
-        batch.update(productRef, {
-          'stock': FieldValue.increment(returnQty), // Restore stock
-          'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
-        });
+        // Update product stock and counters — skipped for per-foot lines,
+        // since they never deducted stock in the first place.
+        if (!item.isPerFoot) {
+          final productRef = _firestore.collection(_productsCollection).doc(item.productId);
+          batch.update(productRef, {
+            'stock': FieldValue.increment(returnQty), // Restore stock
+            'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
+          });
+        }
 
         // If not all quantity is returned, keep the item with reduced quantity
         final remainingQty = item.quantity - returnQty;
@@ -333,6 +371,112 @@ class SalesService {
   }
 
   // ==========================================
+  // "FREQUENTLY BOUGHT TOGETHER" / QUANTITY RECALL
+  // ==========================================
+  /// Recent real sales used to build the co-occurrence/quantity caches,
+  /// capped to [_coOccurrenceWindow]/[_coOccurrenceSaleCap] so this stays
+  /// cheap no matter how much sales history a shop has accumulated.
+  Future<List<Sale>> _getSalesForCoOccurrence() async {
+    final now = DateTime.now();
+    final sales = await getSalesInRange(
+      startDate: now.subtract(_coOccurrenceWindow),
+      endDate: now,
+    );
+    final real = sales.where((s) => !s.isMock).toList();
+    return real.length <= _coOccurrenceSaleCap
+        ? real
+        : real.take(_coOccurrenceSaleCap).toList();
+  }
+
+  /// Computes co-occurrence counts and per-product quantity history in one
+  /// pass over recent sales, then caches the result for [_cacheValidDuration]
+  /// (matching [getCachedSales]'s TTL) so opening the sale screen repeatedly
+  /// doesn't re-scan sales history each time.
+  Future<void> _ensureCoOccurrenceComputed({bool force = false}) async {
+    if (!force &&
+        _coOccurrenceCache != null &&
+        _coOccurrenceComputedAt != null &&
+        DateTime.now().difference(_coOccurrenceComputedAt!) < _cacheValidDuration) {
+      return;
+    }
+
+    final sales = await _getSalesForCoOccurrence();
+    final coOccurrence = <String, Map<String, int>>{};
+    final lastQuantity = <String, int>{};
+    final quantityFrequency = <String, Map<int, int>>{};
+
+    for (final sale in sales) {
+      // Sales are ordered most-recent-first, so the first time we see a
+      // product sets its "last used quantity".
+      for (final item in sale.items) {
+        lastQuantity.putIfAbsent(item.productId, () => item.quantity);
+        final freq = quantityFrequency.putIfAbsent(item.productId, () => {});
+        freq[item.quantity] = (freq[item.quantity] ?? 0) + 1;
+      }
+
+      for (final item in sale.items) {
+        final map = coOccurrence.putIfAbsent(item.productId, () => {});
+        for (final other in sale.items) {
+          if (other.productId == item.productId) continue;
+          map[other.productId] = (map[other.productId] ?? 0) + 1;
+        }
+      }
+    }
+
+    final modeQuantity = <String, int>{};
+    for (final entry in quantityFrequency.entries) {
+      int bestQty = 1;
+      int bestCount = -1;
+      for (final qEntry in entry.value.entries) {
+        if (qEntry.value > bestCount) {
+          bestCount = qEntry.value;
+          bestQty = qEntry.key;
+        }
+      }
+      modeQuantity[entry.key] = bestQty;
+    }
+
+    _coOccurrenceCache = coOccurrence;
+    _lastQuantityCache = lastQuantity;
+    _modeQuantityCache = modeQuantity;
+    _coOccurrenceComputedAt = DateTime.now();
+    debugPrint('🔗 Co-occurrence computed from ${sales.length} recent sales');
+  }
+
+  /// productId -> {coProductId: count}, built from up to [_coOccurrenceSaleCap]
+  /// sales within the last [_coOccurrenceWindow].
+  Future<Map<String, Map<String, int>>> getCoOccurrenceMap() async {
+    await _ensureCoOccurrenceComputed();
+    return _coOccurrenceCache!;
+  }
+
+  /// Products most often bought alongside [productId], highest count first.
+  Future<List<MapEntry<String, int>>> getFrequentlyBoughtWith(
+    String productId, {
+    int limit = 10,
+  }) async {
+    await _ensureCoOccurrenceComputed();
+    final related = _coOccurrenceCache![productId] ?? {};
+    final entries = related.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return entries.take(limit).toList();
+  }
+
+  /// Quantity used the last time this product was sold, if any past sales
+  /// exist within the scan window.
+  Future<int?> getLastQuantity(String productId) async {
+    await _ensureCoOccurrenceComputed();
+    return _lastQuantityCache?[productId];
+  }
+
+  /// Most common quantity this product is sold in, if any past sales exist
+  /// within the scan window.
+  Future<int?> getModeQuantity(String productId) async {
+    await _ensureCoOccurrenceComputed();
+    return _modeQuantityCache?[productId];
+  }
+
+  // ==========================================
   // PAGINATED FETCH
   // ==========================================
   Future<List<Sale>> getSalesPaginated({bool refresh = false}) async {
@@ -379,7 +523,10 @@ class SalesService {
       final bool skipStock = oldSale.isMock || newSale.isMock;
 
       // Process old items - restore stock for removed/reduced items
+      // (per-foot lines never touched stock, so they're skipped here too)
       for (final oldItem in (skipStock ? const <SaleItem>[] : oldSale.items)) {
+        if (oldItem.isPerFoot) continue;
+
         final productId = oldItem.productId;
         final oldQty = oldItem.quantity;
 
@@ -405,7 +552,10 @@ class SalesService {
       }
 
       // Process new items - deduct stock for added/increased items
+      // (per-foot lines are skipped — they never deduct stock)
       for (final newItem in (skipStock ? const <SaleItem>[] : newSale.items)) {
+        if (newItem.isPerFoot) continue;
+
         final productId = newItem.productId;
         if (!oldSale.items.any((item) => item.productId == productId)) {
           // New item added
@@ -482,8 +632,11 @@ class SalesService {
     // A mock sale never applied any stock/stat changes, so deleting it must
     // not restore stock or adjust the counters either.
     if (!sale.isMock) {
-      // 2. Restore stock and adjust sales tracking
+      // 2. Restore stock and adjust sales tracking — skipped for per-foot
+      // lines, since they never deducted stock in the first place.
       for (final item in items) {
+        if (item.isPerFoot) continue;
+
         final productRef = _firestore
             .collection(_productsCollection)
             .doc(item.productId);
@@ -625,11 +778,16 @@ class SalesService {
   void clearCache() {
     _cachedSales = null;
     _lastFetchTime = null;
+    _coOccurrenceCache = null;
+    _lastQuantityCache = null;
+    _modeQuantityCache = null;
+    _coOccurrenceComputedAt = null;
     debugPrint('🗑️ Sales cache cleared');
   }
 
   void invalidateCache() {
     _lastFetchTime = null;
+    _coOccurrenceComputedAt = null;
     debugPrint('⚠️ Sales cache invalidated');
   }
 

@@ -11,6 +11,7 @@ import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
 import '../../services/firebase_service.dart';
 import '../../services/sales_service.dart';
+import '../../services/settings_service.dart';
 import '../screens/bill_preview_screen.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
@@ -54,6 +55,7 @@ class RecordSaleScreen extends StatefulWidget {
 class _RecordSaleScreenState extends State<RecordSaleScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final SalesService _salesService = SalesService();
+  final SettingsService _settingsService = SettingsService();
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _cartSearchController = TextEditingController();
@@ -66,9 +68,19 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   Map<String, double> _customPrices = {};
   List<String> _cartItemOrder = []; // Track order of items added to cart
 
+  // Pipe lines sold by the foot instead of by whole unit (see
+  // _pipeFeetPerUnit) — keyed by productId, same as _customPrices. Stock is
+  // never deducted for these, even on a real sale.
+  Map<String, bool> _perFootItems = {};
+
   // Custom items (non-inventory items)
   Map<String, CustomItem> _customItems = {};
   List<String> _customItemOrder = []; // Track order of custom items
+
+  // "Frequently bought together" suggestions for the most recently added
+  // cart item, refreshed on every add-to-cart.
+  String? _frequentlyBoughtSourceId;
+  List<Product> _frequentlyBoughtProducts = [];
 
   String _searchQuery = '';
   String _cartSearchQuery = '';
@@ -81,6 +93,22 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   String? _selectedCategory; // null means "All Categories"
   bool _isLoadingCategories = true;
 
+  // Subcategory filtering (scoped to the selected category, same source data
+  // used by the product-creation subcategory dropdown).
+  Map<String, List<String>> _allSubcategories = {};
+  String? _selectedSubcategory;
+
+  // Size filtering (multi-select, ANDed with category)
+  Set<String> _selectedSizes = {};
+
+  // Stock filtering
+  bool _inStockOnly = false;
+  bool _lowStockOnly = false;
+
+  // Recent search terms (persisted via SettingsService), shown as quick-tap
+  // chips above the search field.
+  List<String> _recentSearches = [];
+
   // Sort option
   ProductSortOption _currentSortOption = ProductSortOption.newest;
 
@@ -91,6 +119,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // and stays out of revenue/profit analytics.
   bool _isMockSale = false;
 
+  // Blanket cart discount (0-100), applied against each item's list price
+  // (product.salePrice), never printed on the bill — internal negotiating
+  // tool only. The slider itself stops at breakeven (cost price) as a
+  // sensible default, but manual per-item price entry has no floor at all —
+  // some sales are intentionally done at a thin margin (or a loss) and
+  // that's the shop owner's call, not a hardcoded rule.
+  double _discountPercent = 0;
+
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
 
@@ -99,11 +135,46 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     super.initState();
     _loadProducts();
     _loadCategories();
+    _loadRecentSearches();
     _searchController.addListener(_filterProducts);
     _cartSearchController.addListener(() {
       setState(() {
         _cartSearchQuery = _cartSearchController.text.toLowerCase();
       });
+    });
+  }
+
+  Future<void> _loadRecentSearches() async {
+    final searches = await _settingsService.getRecentSearches();
+    if (!mounted) return;
+    setState(() => _recentSearches = searches);
+  }
+
+  void _commitSearch(String term) {
+    final value = term.trim();
+    if (value.isEmpty) return;
+    _settingsService.addRecentSearch(value);
+    setState(() {
+      _recentSearches.removeWhere((s) => s.toLowerCase() == value.toLowerCase());
+      _recentSearches.insert(0, value);
+      if (_recentSearches.length > 8) {
+        _recentSearches = _recentSearches.take(8).toList();
+      }
+    });
+  }
+
+  void _applyRecentSearch(String term) {
+    _searchController.text = term;
+    _searchController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _searchController.text.length),
+    );
+    _filterProducts();
+  }
+
+  void _removeRecentSearch(String term) {
+    _settingsService.removeRecentSearch(term);
+    setState(() {
+      _recentSearches.removeWhere((s) => s.toLowerCase() == term.toLowerCase());
     });
   }
 
@@ -129,8 +200,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() => _isLoadingCategories = true);
     try {
       final categories = await _firebaseService.getCategories();
+      final subcategories = await _firebaseService.getAllSubcategories();
       setState(() {
         _categories = categories;
+        _allSubcategories = subcategories;
         _isLoadingCategories = false;
       });
     } catch (e) {
@@ -153,6 +226,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         filtered = filtered
             .where((p) => p.category.toLowerCase() == _selectedCategory!.toLowerCase())
             .toList();
+      }
+
+      // Filter by subcategory
+      if (_selectedSubcategory != null) {
+        filtered = filtered
+            .where((p) => p.subcategory == _selectedSubcategory)
+            .toList();
+      }
+
+      // Filter by size (multi-select, matches any selected size)
+      if (_selectedSizes.isNotEmpty) {
+        filtered = filtered.where((p) => _selectedSizes.contains(p.size)).toList();
+      }
+
+      // Filter by stock
+      if (_inStockOnly) {
+        filtered = filtered.where((p) => p.stock > 0).toList();
+      }
+      if (_lowStockOnly) {
+        filtered = filtered.where((p) => p.stock > 0 && p.stock < 5).toList();
       }
 
       // Filter by search query
@@ -252,32 +345,157 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
   }
 
-  void _showCategoryFilterSheet() {
+  // Standard pipe length (feet) per category — lets pipes be sold by the
+  // foot instead of by whole unit. Stock is tracked in whole pipes, so
+  // per-foot sales never touch it (see _addToCartWithPrice/SalesService).
+  static const Map<String, int> _pipeFeetPerUnit = {
+    'ppr': 10,
+    'cpvc': 10,
+    'pvc': 20,
+  };
+
+  int? _feetPerPipeFor(Product product) =>
+      _pipeFeetPerUnit[product.category.toLowerCase()];
+
+  // Distinct sizes present given a category+subcategory scope, used to
+  // populate the Filters sheet's size chips.
+  List<String> _availableSizesFor({String? category, String? subcategory}) {
+    Iterable<Product> base = _allProducts;
+    if (category != null) {
+      base = base.where(
+          (p) => p.category.toLowerCase() == category.toLowerCase());
+    }
+    if (subcategory != null) {
+      base = base.where((p) => p.subcategory == subcategory);
+    }
+    final sizes = base
+        .map((p) => p.size)
+        .where((s) => s.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    sizes.sort();
+    return sizes;
+  }
+
+  List<String> _availableSizes() => _availableSizesFor(
+        category: _selectedCategory,
+        subcategory: _selectedSubcategory,
+      );
+
+  // Changing category can make previously-selected sizes unavailable (and
+  // invisible in the chip row), so drop any that no longer apply. Subcategory
+  // is scoped to a category, so it's reset too.
+  void _setCategory(String? category) {
+    setState(() {
+      _selectedCategory = category;
+      _selectedSubcategory = null;
+      final available = _availableSizes().toSet();
+      _selectedSizes = _selectedSizes.intersection(available);
+      _filterProducts();
+    });
+  }
+
+  void _toggleSize(String size) {
+    setState(() {
+      if (!_selectedSizes.remove(size)) {
+        _selectedSizes.add(size);
+      }
+      _filterProducts();
+    });
+  }
+
+  // Applies a full filter selection from the Filters sheet in one shot
+  // (the sheet manages its own local copy while open, then reports the
+  // complete new state here on every change).
+  void _applyFilters({
+    required String? category,
+    required String? subcategory,
+    required Set<String> sizes,
+    required bool inStockOnly,
+    required bool lowStockOnly,
+  }) {
+    setState(() {
+      _selectedCategory = category;
+      _selectedSubcategory = subcategory;
+      _selectedSizes = sizes;
+      _inStockOnly = inStockOnly;
+      _lowStockOnly = lowStockOnly;
+      _filterProducts();
+    });
+  }
+
+  int get _activeFilterCount {
+    return (_selectedCategory != null ? 1 : 0) +
+        (_selectedSubcategory != null ? 1 : 0) +
+        _selectedSizes.length +
+        (_inStockOnly ? 1 : 0) +
+        (_lowStockOnly ? 1 : 0);
+  }
+
+  // "Add similar" from a cart line: refilters the picker to that item's
+  // category+size so the rest of a job (same size fittings) is quick to add.
+  void _filterToSimilar(Product product) {
+    setState(() {
+      _selectedCategory = product.category;
+      _selectedSubcategory = null;
+      _selectedSizes = {product.size};
+      _filterProducts();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Showing ${product.size} ${product.category} items'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showFiltersSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _CategoryFilterSheet(
+      builder: (context) => _FiltersSheet(
         categories: _categories,
-        selectedCategory: _selectedCategory,
+        allSubcategories: _allSubcategories,
         getCategoryColor: _getCategoryColor,
-        onCategorySelected: (category) {
-          setState(() => _selectedCategory = category);
-          _filterProducts();
-          Navigator.pop(context);
-        },
+        initialCategory: _selectedCategory,
+        initialSubcategory: _selectedSubcategory,
+        initialSizes: _selectedSizes,
+        initialInStockOnly: _inStockOnly,
+        initialLowStockOnly: _lowStockOnly,
+        getAvailableSizes: (category, subcategory) =>
+            _availableSizesFor(category: category, subcategory: subcategory),
+        onApply: _applyFilters,
       ),
     );
   }
 
   // New method to show quantity popup
+  // Recalls how this product is typically sold (most common past quantity,
+  // falling back to the last quantity it was sold in) instead of always
+  // defaulting a fresh add-to-cart to 1.
+  Future<int> _suggestedQuantity(String productId) async {
+    final mode = await _salesService.getModeQuantity(productId);
+    if (mode != null) return mode;
+    final last = await _salesService.getLastQuantity(productId);
+    return last ?? 1;
+  }
+
   Future<void> _showQuantityDialog(Product product) async {
+    final int? feetPerPipe = _feetPerPipeFor(product);
+
     // Check if product is already in cart
     bool isInCart = _selectedQuantities.containsKey(product.id);
-    int currentQuantity = _selectedQuantities[product.id] ?? 1;
-    double currentPrice = _customPrices[product.id] ?? product.salePrice;
+    int currentQuantity = _selectedQuantities[product.id] ??
+        await _suggestedQuantity(product.id);
+    if (!mounted) return;
+    bool sellPerFoot = _perFootItems[product.id] ?? false;
+    double currentPrice = _customPrices[product.id] ??
+        (sellPerFoot && feetPerPipe != null
+            ? product.salePrice / feetPerPipe
+            : product.salePrice);
 
     final TextEditingController qtyController = TextEditingController(
       text: currentQuantity.toString(),
@@ -293,302 +511,345 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isInCart ? 'Update Quantity' : 'Add to Cart',
-                style: const TextStyle(fontSize: 18),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                product.name,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              Text(
-                product.size,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Stock info
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: product.stock < 5
-                      ? Colors.orange.shade50
-                      : Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: product.stock < 5
-                        ? Colors.orange.shade200
-                        : Colors.green.shade200,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isInCart ? 'Update Quantity' : 'Add to Cart',
+                    style: const TextStyle(fontSize: 18),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.inventory_2_outlined,
-                      size: 16,
-                      color: product.stock < 5 ? Colors.orange : Colors.green,
+                  const SizedBox(height: 8),
+                  Text(
+                    product.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Available Stock: ${product.stock}',
-                      style: TextStyle(
+                  ),
+                  Text(
+                    product.size,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Stock info
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
                         color: product.stock < 5
-                            ? Colors.orange.shade700
-                            : Colors.green.shade700,
-                        fontWeight: FontWeight.w500,
+                            ? Colors.orange.shade50
+                            : Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: product.stock < 5
+                              ? Colors.orange.shade200
+                              : Colors.green.shade200,
+                        ),
                       ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.inventory_2_outlined,
+                            size: 16,
+                            color: product.stock < 5 ? Colors.orange : Colors.green,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Available Stock: ${product.stock}',
+                            style: TextStyle(
+                              color: product.stock < 5
+                                  ? Colors.orange.shade700
+                                  : Colors.green.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Sell-per-foot toggle (pipe categories only)
+                    if (feetPerPipe != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: sellPerFoot ? Colors.indigo.shade50 : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: sellPerFoot ? Colors.indigo.shade200 : Colors.grey.shade300,
+                          ),
+                        ),
+                        child: SwitchListTile(
+                          value: sellPerFoot,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              sellPerFoot = value;
+                              priceController.text = (value
+                                      ? product.salePrice / feetPerPipe
+                                      : product.salePrice)
+                                  .toStringAsFixed(2);
+                            });
+                          },
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Sell per Foot',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            'Each pipe is $feetPerPipe ft — stock is not deducted for per-foot sales',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+
+                    Text(
+                      sellPerFoot ? 'Feet' : 'Quantity',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 4),
+
+                    // Quantity input with buttons
+                    Row(
+                      children: [
+                        // Decrease button
+                        IconButton(
+                          onPressed: () {
+                            int currentVal = int.tryParse(qtyController.text) ?? 1;
+                            if (currentVal > 1) {
+                              qtyController.text = (currentVal - 1).toString();
+                              qtyController.selection = TextSelection.fromPosition(
+                                TextPosition(offset: qtyController.text.length),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.remove_circle_outline),
+                          iconSize: 32,
+                          color: Colors.blue,
+                        ),
+
+                        // Quantity input field
+                        Expanded(
+                          child: TextField(
+                            controller: qtyController,
+                            focusNode: qtyFocusNode,
+                            textAlign: TextAlign.center,
+                            keyboardType: TextInputType.number,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            decoration: InputDecoration(
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                              ),
+                              hintText: sellPerFoot ? 'feet' : '1',
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(4),
+                            ],
+                            onSubmitted: (value) {
+                              int? qty = int.tryParse(value);
+                              if (qty != null &&
+                                  qty > 0 &&
+                                  (sellPerFoot || qty <= product.stock)) {
+                                Navigator.of(context).pop(qty);
+                              }
+                            },
+                          ),
+                        ),
+
+                        // Increase button
+                        IconButton(
+                          onPressed: () {
+                            int currentVal = int.tryParse(qtyController.text) ?? 0;
+                            if (sellPerFoot || currentVal < product.stock) {
+                              qtyController.text = (currentVal + 1).toString();
+                              qtyController.selection = TextSelection.fromPosition(
+                                TextPosition(offset: qtyController.text.length),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.add_circle_outline),
+                          iconSize: 32,
+                          color: Colors.blue,
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // Quick quantity buttons
+                    Wrap(
+                      spacing: 8,
+                      children: [1, 5, 10, 25, 50].map((qty) {
+                        if (!sellPerFoot && qty > product.stock) {
+                          return const SizedBox.shrink();
+                        }
+                        return ActionChip(
+                          label: Text(qty.toString()),
+                          onPressed: () {
+                            qtyController.text = qty.toString();
+                            qtyController.selection = TextSelection.fromPosition(
+                              TextPosition(offset: qtyController.text.length),
+                            );
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    // Price input
+                    const SizedBox(height: 16),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              sellPerFoot ? 'Price per foot' : 'Price per unit',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Default: ₹${product.salePrice.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: priceController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(
+                            prefixText: '₹',
+                            hintText: product.salePrice.toStringAsFixed(2),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              size: 14,
+                              color: Colors.grey[600],
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Cost: ₹${product.purchasePrice.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-
-              // Quantity input with buttons
-              Row(
-                children: [
-                  // Decrease button
-                  IconButton(
+              actions: [
+                // Remove from cart button (only if already in cart)
+                if (isInCart)
+                  TextButton.icon(
                     onPressed: () {
-                      int currentVal = int.tryParse(qtyController.text) ?? 1;
-                      if (currentVal > 1) {
-                        qtyController.text = (currentVal - 1).toString();
-                        qtyController.selection = TextSelection.fromPosition(
-                          TextPosition(offset: qtyController.text.length),
-                        );
-                      }
+                      Navigator.of(context).pop({'remove': true}); // Indicates remove
                     },
-                    icon: const Icon(Icons.remove_circle_outline),
-                    iconSize: 32,
-                    color: Colors.blue,
-                  ),
-
-                  // Quantity input field
-                  Expanded(
-                    child: TextField(
-                      controller: qtyController,
-                      focusNode: qtyFocusNode,
-                      textAlign: TextAlign.center,
-                      keyboardType: TextInputType.number,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 12,
-                        ),
-                        hintText: '1',
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(4),
-                      ],
-                      onSubmitted: (value) {
-                        int? qty = int.tryParse(value);
-                        if (qty != null && qty > 0 && qty <= product.stock) {
-                          Navigator.of(context).pop(qty);
-                        }
-                      },
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    label: const Text(
+                      'Remove',
+                      style: TextStyle(color: Colors.red),
                     ),
                   ),
 
-                  // Increase button
-                  IconButton(
-                    onPressed: () {
-                      int currentVal = int.tryParse(qtyController.text) ?? 0;
-                      if (currentVal < product.stock) {
-                        qtyController.text = (currentVal + 1).toString();
-                        qtyController.selection = TextSelection.fromPosition(
-                          TextPosition(offset: qtyController.text.length),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.add_circle_outline),
-                    iconSize: 32,
-                    color: Colors.blue,
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 8),
-
-              // Quick quantity buttons
-              Wrap(
-                spacing: 8,
-                children: [1, 5, 10, 25, 50].map((qty) {
-                  if (qty > product.stock) return const SizedBox.shrink();
-                  return ActionChip(
-                    label: Text(qty.toString()),
-                    onPressed: () {
-                      qtyController.text = qty.toString();
-                      qtyController.selection = TextSelection.fromPosition(
-                        TextPosition(offset: qtyController.text.length),
-                      );
-                    },
-                  );
-                }).toList(),
-              ),
-
-              // Price input
-              const SizedBox(height: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Price per unit',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        'Default: ₹${product.salePrice.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: priceController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: InputDecoration(
-                      prefixText: '₹',
-                      hintText: product.salePrice.toStringAsFixed(2),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                    ),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 14,
-                        color: Colors.grey[600],
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Min: ₹${_getMinimumPrice(product).toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            // Remove from cart button (only if already in cart)
-            if (isInCart)
-              TextButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop({'remove': true}); // Indicates remove
-                },
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                label: const Text(
-                  'Remove',
-                  style: TextStyle(color: Colors.red),
+                // Cancel button
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(null),
+                  child: const Text('Cancel'),
                 ),
-              ),
 
-            // Cancel button
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('Cancel'),
-            ),
+                // Add/Update button
+                FilledButton.icon(
+                  onPressed: () {
+                    int? qty = int.tryParse(qtyController.text);
+                    if (qty == null || qty <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter a valid quantity'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                      return;
+                    }
+                    if (!sellPerFoot && qty > product.stock) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Maximum available: ${product.stock}'),
+                          duration: const Duration(seconds: 1),
+                        ),
+                      );
+                      return;
+                    }
 
-            // Add/Update button
-            FilledButton.icon(
-              onPressed: () {
-                int? qty = int.tryParse(qtyController.text);
-                if (qty == null || qty <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter a valid quantity'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                  return;
-                }
-                if (qty > product.stock) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Maximum available: ${product.stock}'),
-                      duration: const Duration(seconds: 1),
-                    ),
-                  );
-                  return;
-                }
+                    double? price = double.tryParse(priceController.text);
+                    if (price == null || price <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter a valid price'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                      return;
+                    }
 
-                double? price = double.tryParse(priceController.text);
-                if (price == null || price <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter a valid price'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                  return;
-                }
-
-                final minPrice = _getMinimumPrice(product);
-                if (price < minPrice) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Price must be at least ₹${minPrice.toStringAsFixed(2)}',
-                      ),
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                  return;
-                }
-
-                Navigator.of(context).pop({
-                  'quantity': qty,
-                  'price': price,
-                });
-              },
-              icon: Icon(isInCart ? Icons.update : Icons.add_shopping_cart),
-              label: Text(isInCart ? 'Update' : 'Add to Cart'),
-            ),
-          ],
+                    Navigator.of(context).pop({
+                      'quantity': qty,
+                      'price': price,
+                      'isPerFoot': sellPerFoot,
+                    });
+                  },
+                  icon: Icon(isInCart ? Icons.update : Icons.add_shopping_cart),
+                  label: Text(isInCart ? 'Update' : 'Add to Cart'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -609,12 +870,22 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _removeFromCart(product.id);
       } else if (result['quantity'] != null && result['price'] != null) {
         // Add or update in cart with custom price
-        _addToCartWithPrice(product, result['quantity'], result['price']);
+        _addToCartWithPrice(
+          product,
+          result['quantity'],
+          result['price'],
+          isPerFoot: result['isPerFoot'] == true,
+        );
       }
     }
   }
 
-  void _addToCartWithPrice(Product product, int quantity, double price) {
+  void _addToCartWithPrice(
+    Product product,
+    int quantity,
+    double price, {
+    bool isPerFoot = false,
+  }) {
     setState(() {
       bool wasInCart = _selectedQuantities.containsKey(product.id);
       if (!wasInCart) {
@@ -623,15 +894,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       }
       _selectedQuantities[product.id] = quantity;
       _customPrices[product.id] = price;
+      _perFootItems[product.id] = isPerFoot;
     });
+
+    _loadFrequentlyBoughtTogether(product.id);
 
     // Show feedback
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           _selectedQuantities.containsKey(product.id)
-              ? 'Updated: ${product.name} (Qty: $quantity, Price: ₹${price.toStringAsFixed(2)})'
-              : 'Added: ${product.name} (Qty: $quantity, Price: ₹${price.toStringAsFixed(2)})',
+              ? 'Updated: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})'
+              : 'Added: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})',
         ),
         duration: const Duration(seconds: 1),
         backgroundColor: Colors.green,
@@ -643,8 +917,42 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() {
       _selectedQuantities.remove(productId);
       _customPrices.remove(productId);
+      _perFootItems.remove(productId);
       _cartItemOrder.remove(productId);
+      if (_cartItemOrder.isEmpty) {
+        _frequentlyBoughtSourceId = null;
+        _frequentlyBoughtProducts = [];
+      }
     });
+  }
+
+  // Refreshes the "frequently bought together" strip for the item that was
+  // just added, using SalesService's cached co-occurrence data (built from
+  // recent sales history) rather than a fresh Firestore read every time.
+  Future<void> _loadFrequentlyBoughtTogether(String productId) async {
+    try {
+      final related = await _salesService.getFrequentlyBoughtWith(productId, limit: 8);
+      // The cart may have changed again (or moved on to a different item)
+      // by the time this resolves — only apply if it's still relevant.
+      if (!mounted || _cartItemOrder.isEmpty || _cartItemOrder.last != productId) {
+        return;
+      }
+
+      final suggestions = <Product>[];
+      for (final entry in related) {
+        final product = _findProductById(entry.key);
+        if (product != null && !_selectedQuantities.containsKey(product.id)) {
+          suggestions.add(product);
+        }
+      }
+
+      setState(() {
+        _frequentlyBoughtSourceId = productId;
+        _frequentlyBoughtProducts = suggestions;
+      });
+    } catch (e) {
+      debugPrint('Error loading frequently bought together: $e');
+    }
   }
 
   // Show dialog to add custom item
@@ -828,8 +1136,34 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     });
   }
 
+  // Breakeven reference price (0% margin) — used only as the quick-discount
+  // slider's stopping point and as an informational "Cost" hint. There is no
+  // enforced minimum margin: manual price entry can go below cost entirely
+  // if that's a deliberate call (clearance, loss-leader, thin-margin deal).
+  static const double _minMarginFraction = 0.0;
+
   double _getMinimumPrice(Product product) {
-    return product.purchasePrice * 0.50;
+    return _effectiveUnitCost(product) / (1 - _minMarginFraction);
+  }
+
+  // Per-foot lines store feet in `quantity`, so cost/price must be scaled
+  // down from the per-pipe values on Product before multiplying by quantity
+  // — otherwise margin math compares a per-foot price against a per-pipe
+  // cost and produces nonsense (e.g. a huge apparent loss).
+  double _effectiveUnitCost(Product product) {
+    if (_perFootItems[product.id] == true) {
+      final feet = _feetPerPipeFor(product);
+      if (feet != null && feet > 0) return product.purchasePrice / feet;
+    }
+    return product.purchasePrice;
+  }
+
+  double _effectiveListPrice(Product product) {
+    if (_perFootItems[product.id] == true) {
+      final feet = _feetPerPipeFor(product);
+      if (feet != null && feet > 0) return product.salePrice / feet;
+    }
+    return product.salePrice;
   }
 
   double get _totalAmount {
@@ -856,17 +1190,82 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     double profit = 0;
     for (final entry in _selectedQuantities.entries) {
       final price = _customPrices[entry.key] ?? 0;
-      Product? product;
-      for (final p in _allProducts) {
-        if (p.id == entry.key) {
-          product = p;
-          break;
-        }
-      }
+      final product = _findProductById(entry.key);
       if (product == null) continue;
-      profit += (price - product.purchasePrice) * entry.value;
+      profit += (price - _effectiveUnitCost(product)) * entry.value;
     }
     return profit;
+  }
+
+  /// Cart revenue at *current* (possibly discounted) prices, inventory items
+  /// only — the denominator for the live blended margin %.
+  double get _costBearingRevenue {
+    double total = 0;
+    for (final entry in _selectedQuantities.entries) {
+      final product = _findProductById(entry.key);
+      if (product == null) continue;
+      final price = _customPrices[entry.key] ?? product.salePrice;
+      total += price * entry.value;
+    }
+    return total;
+  }
+
+  /// Cart revenue/cost at *list* price (product.salePrice), before any
+  /// discount — used to compute how much discount room is available.
+  double get _listRevenue {
+    double total = 0;
+    for (final entry in _selectedQuantities.entries) {
+      final product = _findProductById(entry.key);
+      if (product == null) continue;
+      total += _effectiveListPrice(product) * entry.value;
+    }
+    return total;
+  }
+
+  double get _listCost {
+    double total = 0;
+    for (final entry in _selectedQuantities.entries) {
+      final product = _findProductById(entry.key);
+      if (product == null) continue;
+      total += _effectiveUnitCost(product) * entry.value;
+    }
+    return total;
+  }
+
+  /// Blended margin % across the cart at current prices: profit / revenue.
+  double get _cartMarginPercent {
+    final revenue = _costBearingRevenue;
+    if (revenue <= 0) return 0;
+    return (_totalProfit / revenue) * 100;
+  }
+
+  /// Highest discount % (off list price, uniformly) before the *blended*
+  /// margin would reach breakeven (0%) — the slider's stopping point.
+  /// Manual per-item price entry (the Add/Edit dialog, or completing a sale)
+  /// has no such limit; this only bounds the quick-discount slider itself.
+  double get _maxDiscountPercent {
+    final revenue = _listRevenue;
+    final cost = _listCost;
+    if (revenue <= 0) return 0;
+    final maxFraction = 1 - (cost / (revenue * (1 - _minMarginFraction)));
+    return (maxFraction * 100).clamp(0, 100).toDouble();
+  }
+
+  /// Applies a uniform discount off each item's list price via the slider,
+  /// stopping each item at its own breakeven (cost) price. This is just the
+  /// slider's own ceiling for a sensible quick-discount UX — it does not
+  /// restrict manual price entry elsewhere.
+  void _applyDiscountPercent(double discountPercent) {
+    setState(() {
+      _discountPercent = discountPercent;
+      for (final entry in _selectedQuantities.entries) {
+        final product = _findProductById(entry.key);
+        if (product == null) continue;
+        final floor = _getMinimumPrice(product);
+        final target = _effectiveListPrice(product) * (1 - discountPercent / 100);
+        _customPrices[entry.key] = target < floor ? floor : target;
+      }
+    });
   }
 
   /// Toggle that marks the current sale as a mock (test) sale.
@@ -908,30 +1307,104 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  /// Estimated-profit row, shown under the total when in mock mode.
-  Widget _buildEstProfitRow() {
-    if (!_isMockSale) return const SizedBox.shrink();
+  /// Internal-only margin readout + discount slider, shown under the total
+  /// on every sale (mock or real) — never rendered on the printed bill,
+  /// since bill_preview_screen only ever reads item name/size/qty/price.
+  Widget _buildMarginDiscountSection({VoidCallback? afterChange}) {
+    if (_selectedQuantities.isEmpty) return const SizedBox.shrink();
+
+    final marginPercent = _cartMarginPercent;
+    final maxDiscount = _maxDiscountPercent;
+    final sliderValue = _discountPercent.clamp(0, maxDiscount).toDouble();
+    final marginColor = marginPercent < 0
+        ? Colors.red.shade700
+        : marginPercent >= 20
+            ? Colors.green.shade700
+            : Colors.orange.shade700;
+
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Est. Profit',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade700,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Your Margin',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+              Text(
+                '₹${_totalProfit.toStringAsFixed(2)} (${marginPercent.toStringAsFixed(1)}%)',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: marginColor,
+                ),
+              ),
+            ],
           ),
-          Text(
-            '₹${_totalProfit.toStringAsFixed(2)}',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.green.shade700,
+          if (maxDiscount >= 0.5) ...[
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Special Discount',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                Row(
+                  children: [
+                    Text(
+                      '${_discountPercent.toStringAsFixed(0)}%',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                    if (_discountPercent > 0)
+                      IconButton(
+                        onPressed: () {
+                          _applyDiscountPercent(0);
+                          afterChange?.call();
+                        },
+                        icon: const Icon(Icons.replay, size: 16),
+                        tooltip: 'Reset discount',
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.only(left: 8),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                  ],
+                ),
+              ],
             ),
-          ),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                overlayShape: SliderComponentShape.noOverlay,
+              ),
+              child: Slider(
+                min: 0,
+                max: maxDiscount,
+                divisions: maxDiscount.round().clamp(1, 100),
+                value: sliderValue,
+                label: '${sliderValue.toStringAsFixed(0)}%',
+                onChanged: (value) {
+                  _applyDiscountPercent(value);
+                  afterChange?.call();
+                },
+              ),
+            ),
+            Text(
+              'Slider stops at cost price — type a price below cost manually if needed. Never shown on the bill.',
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+            ),
+          ],
         ],
       ),
     );
@@ -1003,19 +1476,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         );
         return;
       }
+    }
 
-      final minPrice = _getMinimumPrice(product);
-      if (currentPrice < minPrice) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${product.name}: Price must be at least ₹${minPrice.toStringAsFixed(2)}',
-            ),
-            backgroundColor: Colors.red,
+    // _selectedProducts is _allProducts filtered down to cart productIds —
+    // if a cart item's product can no longer be found there (deleted, or
+    // _allProducts went stale), it would silently drop out of saleItems
+    // below while _totalAmount (computed straight from the cart maps) still
+    // includes its price. That saves a sale with a total that doesn't match
+    // its item list — and an empty-looking bill if it happens to every item.
+    // Fail loudly instead of saving a mismatched sale.
+    if (_selectedProducts.length != _selectedQuantities.length) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Some cart items could not be found (they may have been deleted). '
+            'Please remove them from the cart and try again.',
           ),
-        );
-        return;
-      }
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
 
     setState(() => _isSaving = true);
@@ -1031,6 +1511,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           salePrice: _customPrices[product.id]!,
           purchasePrice: product.purchasePrice,
           imageBase64: product.imageBase64,
+          isPerFoot: _perFootItems[product.id] ?? false,
         );
       }).toList();
 
@@ -1086,6 +1567,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         setState(() {
           _selectedQuantities.clear();
           _customPrices.clear();
+          _perFootItems.clear();
           _cartItemOrder.clear();
           _customItems.clear();
           _customItemOrder.clear();
@@ -1093,6 +1575,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _searchController.clear();
           _cartSearchController.clear();
           _isMockSale = false;
+          _discountPercent = 0;
         });
 
         // Refresh products to get updated stock
@@ -1152,6 +1635,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               child: Column(
                 children: [
                   _buildSearchBar(),
+                  _buildSuggestionsSection(),
                   Expanded(child: _buildProductGrid()),
                 ],
               ),
@@ -1203,6 +1687,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         child: Column(
           children: [
             _buildSearchBar(),
+            _buildSuggestionsSection(),
             Expanded(child: _buildProductGrid()),
             if (_selectedQuantities.isNotEmpty) _buildMobileBottomBar(),
           ],
@@ -1222,6 +1707,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       body: Column(
         children: [
           _buildSearchBar(),
+          _buildSuggestionsSection(),
           Expanded(child: _buildProductGrid()),
           if (_totalItemsInCart > 0) _buildMobileBottomBar(),
         ],
@@ -1231,8 +1717,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   Widget _buildSearchBar() {
     final isDesktop = MediaQuery.of(context).size.width >= 1200;
-    final isTablet = MediaQuery.of(context).size.width >= 600 &&
-        MediaQuery.of(context).size.width < 1200;
 
     return Container(
       padding: EdgeInsets.all(isDesktop ? 24 : 16),
@@ -1249,6 +1733,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_searchQuery.isEmpty && _recentSearches.isNotEmpty) ...[
+            _buildRecentSearchChips(),
+            const SizedBox(height: 12),
+          ],
+
           // Search and Filter Row
           Row(
             children: [
@@ -1260,6 +1749,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   ),
                   child: TextField(
                     controller: _searchController,
+                    onSubmitted: _commitSearch,
                     decoration: InputDecoration(
                       hintText: 'Search products...',
                       prefixIcon: const Icon(Icons.search, size: 22),
@@ -1285,27 +1775,36 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               ),
               const SizedBox(width: 12),
 
-              // Category Filter Button (Mobile)
-              if (!isDesktop && !isTablet)
-                IconButton(
-                  onPressed: _showCategoryFilterSheet,
-                  icon: Container(
+              // Filters button (category, subcategory, size, stock — all
+              // live inside one sheet so this row never grows).
+              IconButton(
+                onPressed: _isLoadingCategories ? null : _showFiltersSheet,
+                icon: Badge(
+                  label: Text('$_activeFilterCount'),
+                  isLabelVisible: _activeFilterCount > 0,
+                  child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _selectedCategory != null
-                          ? _getCategoryColor(_selectedCategory!)
-                          .withOpacity(0.2)
+                      color: _activeFilterCount > 0
+                          ? Colors.blue.withOpacity(0.15)
                           : Colors.grey[100],
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
-                      Icons.filter_list,
-                      color: _selectedCategory != null
-                          ? _getCategoryColor(_selectedCategory!)
-                          : Colors.black87,
-                    ),
+                    child: _isLoadingCategories
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            Icons.filter_list,
+                            color: _activeFilterCount > 0
+                                ? Colors.blue.shade700
+                                : Colors.black87,
+                          ),
                   ),
                 ),
+              ),
 
               // Settings Menu
               PopupMenuButton<String>(
@@ -1401,102 +1900,45 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ],
           ),
 
-          // Category Chips (Desktop & Tablet) + Active Filters
-          if (isDesktop || isTablet) ...[
-            const SizedBox(height: 16),
-            _buildCategoryChipsRow(),
-          ],
-
-          // Active filters row (Mobile)
-          if (!isDesktop && !isTablet) ...[
+          // Active filter chips — one compact row, same on every layout.
+          // All the actual controls (category, subcategory, size, stock)
+          // live in the Filters sheet so this never grows past one row.
+          if (_activeFilterCount > 0) ...[
             const SizedBox(height: 12),
-            _buildActiveFiltersRow(),
+            _buildActiveFilterChips(),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildCategoryChipsRow() {
-    if (_isLoadingCategories) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
+  Widget _buildRecentSearchChips() {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: [
-        // All Categories chip
-        FilterChip(
-          selected: _selectedCategory == null,
-          label: const Text('All'),
-          avatar: _selectedCategory == null
-              ? null
-              : const Icon(Icons.grid_view, size: 16),
-          onSelected: (_) {
-            setState(() {
-              _selectedCategory = null;
-              _filterProducts();
-            });
-          },
-          backgroundColor: Colors.grey[200],
-          selectedColor: Colors.blue.withOpacity(0.2),
-          checkmarkColor: Colors.blue,
-          labelStyle: TextStyle(
-            color: _selectedCategory == null ? Colors.blue : Colors.black87,
-            fontWeight: _selectedCategory == null
-                ? FontWeight.bold
-                : FontWeight.normal,
-          ),
-        ),
-
-        // Category chips
-        ..._categories.map((category) {
-          final isSelected = _selectedCategory?.toLowerCase() ==
-              category.toLowerCase();
-          final color = _getCategoryColor(category);
-
-          return FilterChip(
-            selected: isSelected,
-            label: Text(category.toUpperCase()),
-            avatar: Icon(
-              Icons.category,
-              size: 16,
-              color: isSelected ? color : color.withOpacity(0.7),
-            ),
-            onSelected: (_) {
-              setState(() {
-                _selectedCategory = isSelected ? null : category;
-                _filterProducts();
-              });
-            },
-            backgroundColor: color.withOpacity(0.1),
-            selectedColor: color.withOpacity(0.25),
-            checkmarkColor: color,
-            labelStyle: TextStyle(
-              color: isSelected ? color : Colors.black87,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-          );
-        }),
-      ],
+      children: _recentSearches.map((term) {
+        return InputChip(
+          avatar: const Icon(Icons.history, size: 16),
+          label: Text(term),
+          onPressed: () => _applyRecentSearch(term),
+          onDeleted: () => _removeRecentSearch(term),
+          deleteIcon: const Icon(Icons.close, size: 16),
+          backgroundColor: Colors.grey[100],
+          side: BorderSide.none,
+        );
+      }).toList(),
     );
   }
 
-  Widget _buildActiveFiltersRow() {
-    final hasFilters = _selectedCategory != null ||
-        showPurchasePrices ||
-        _currentSortOption != ProductSortOption.newest;
-
-    if (!hasFilters) {
-      return const SizedBox.shrink();
-    }
-
+  // Compact, single-row summary of active filters (category, subcategory,
+  // sizes, stock toggles) — each independently removable. Replaces what used
+  // to be several always-visible chip rows/Wraps; the actual pickers now
+  // live entirely inside the Filters sheet.
+  Widget _buildActiveFilterChips() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          // Selected Category
           if (_selectedCategory != null)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -1507,12 +1949,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   color: _getCategoryColor(_selectedCategory!),
                 ),
                 label: Text(_selectedCategory!.toUpperCase()),
-                onDeleted: () {
-                  setState(() {
-                    _selectedCategory = null;
-                    _filterProducts();
-                  });
-                },
+                onDeleted: () => _setCategory(null),
                 deleteIcon: const Icon(Icons.close, size: 16),
                 backgroundColor: _getCategoryColor(_selectedCategory!)
                     .withOpacity(0.15),
@@ -1520,38 +1957,71 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               ),
             ),
 
-          // Sort indicator
-          Chip(
-            avatar: Icon(
-              _getSortOptionIcon(_currentSortOption),
-              size: 16,
-              color: Colors.blue,
+          if (_selectedSubcategory != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Chip(
+                avatar: const Icon(Icons.label_outline, size: 16, color: Colors.indigo),
+                label: Text(_selectedSubcategory!),
+                onDeleted: () {
+                  setState(() {
+                    _selectedSubcategory = null;
+                    _filterProducts();
+                  });
+                },
+                deleteIcon: const Icon(Icons.close, size: 16),
+                backgroundColor: Colors.indigo.withOpacity(0.15),
+                side: BorderSide.none,
+              ),
             ),
-            label: Text(
-              _getSortOptionLabel(_currentSortOption),
-              style: const TextStyle(fontSize: 12),
-            ),
-            backgroundColor: Colors.blue.withOpacity(0.1),
-            side: BorderSide.none,
-          ),
 
-          // Purchase prices indicator
-          if (showPurchasePrices) ...[
-            const SizedBox(width: 8),
-            Chip(
-              avatar: const Icon(
-                Icons.currency_rupee,
-                size: 16,
-                color: Colors.green,
+          ..._selectedSizes.map((size) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Chip(
+                  avatar: const Icon(Icons.straighten, size: 16, color: Colors.blue),
+                  label: Text(size),
+                  onDeleted: () => _toggleSize(size),
+                  deleteIcon: const Icon(Icons.close, size: 16),
+                  backgroundColor: Colors.blue.withOpacity(0.15),
+                  side: BorderSide.none,
+                ),
+              )),
+
+          if (_inStockOnly)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Chip(
+                avatar: const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.green),
+                label: const Text('In Stock Only'),
+                onDeleted: () {
+                  setState(() {
+                    _inStockOnly = false;
+                    _filterProducts();
+                  });
+                },
+                deleteIcon: const Icon(Icons.close, size: 16),
+                backgroundColor: Colors.green.withOpacity(0.15),
+                side: BorderSide.none,
               ),
-              label: const Text(
-                'Purchase Prices',
-                style: TextStyle(fontSize: 12),
-              ),
-              backgroundColor: Colors.green.withOpacity(0.1),
-              side: BorderSide.none,
             ),
-          ],
+
+          if (_lowStockOnly)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Chip(
+                avatar: const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange),
+                label: const Text('Low Stock'),
+                onDeleted: () {
+                  setState(() {
+                    _lowStockOnly = false;
+                    _filterProducts();
+                  });
+                },
+                deleteIcon: const Icon(Icons.close, size: 16),
+                backgroundColor: Colors.orange.withOpacity(0.15),
+                side: BorderSide.none,
+              ),
+            ),
         ],
       ),
     );
@@ -1579,6 +2049,124 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               fontWeight: isSelected ? FontWeight.bold : null,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  // Finds a product by id in the currently loaded catalog, or null if it's
+  // been removed/not yet loaded.
+  Product? _findProductById(String id) {
+    for (final p in _allProducts) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  Product? get _lastAddedProduct {
+    if (_cartItemOrder.isEmpty) return null;
+    return _findProductById(_cartItemOrder.last);
+  }
+
+  // Combines both suggestion strips shown above the product grid. Kept as a
+  // single insertion point so all three responsive layouts stay untouched.
+  Widget _buildSuggestionsSection() {
+    final strips = <Widget?>[
+      _buildFrequentlyBoughtStrip(),
+      _buildSimilarItemsStrip(),
+    ].whereType<Widget>().toList();
+
+    if (strips.isEmpty) return const SizedBox.shrink();
+    return Column(children: strips);
+  }
+
+  // "Frequently Bought Together" — learned from past sales baskets via
+  // SalesService's co-occurrence cache, keyed to the most recently added
+  // cart item. Excludes anything already in the cart.
+  Widget? _buildFrequentlyBoughtStrip() {
+    final reference = _lastAddedProduct;
+    if (reference == null || _frequentlyBoughtSourceId != reference.id) {
+      return null;
+    }
+    if (_frequentlyBoughtProducts.isEmpty) return null;
+
+    return _buildSuggestionStrip(
+      title: 'Frequently Bought Together',
+      icon: Icons.auto_awesome,
+      products: _frequentlyBoughtProducts,
+    );
+  }
+
+  // "More in <size> <category>" — same category+size as the most recently
+  // added cart item, so a job that needs several fittings of one size is
+  // fast to keep building without re-searching each time.
+  Widget? _buildSimilarItemsStrip() {
+    final reference = _lastAddedProduct;
+    if (reference == null) return null;
+
+    final similar = _allProducts.where((p) =>
+        p.id != reference.id &&
+        p.category.toLowerCase() == reference.category.toLowerCase() &&
+        p.size == reference.size).toList();
+
+    if (similar.isEmpty) return null;
+
+    return _buildSuggestionStrip(
+      title: 'More in ${reference.size} ${reference.category}',
+      icon: Icons.category_outlined,
+      products: similar,
+    );
+  }
+
+  Widget _buildSuggestionStrip({
+    required String title,
+    required IconData icon,
+    required List<Product> products,
+  }) {
+    return Container(
+      padding: const EdgeInsets.only(top: 12, bottom: 4),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Icon(icon, size: 16, color: Colors.grey.shade600),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 108,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: products.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final product = products[index];
+                return _SuggestionCard(
+                  product: product,
+                  isInCart: _selectedQuantities.containsKey(product.id),
+                  onTap: () => _showQuantityDialog(product),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 4),
         ],
       ),
     );
@@ -1670,6 +2258,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     setState(() {
                       _selectedQuantities.clear();
                       _customPrices.clear();
+                      _perFootItems.clear();
                       _cartItemOrder.clear();
                       _customItems.clear();
                       _customItemOrder.clear();
@@ -1786,7 +2375,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           onPriceChanged: (price) => _updatePrice(_filteredCartProducts[i].id, price),
                           onRemove: () => _removeFromCart(_filteredCartProducts[i].id),
                           onEdit: () => _showQuantityDialog(_filteredCartProducts[i]),
+                          onAddSimilar: () => _filterToSimilar(_filteredCartProducts[i]),
                           minimumPrice: _getMinimumPrice(_filteredCartProducts[i]),
+                          isPerFoot: _perFootItems[_filteredCartProducts[i].id] ?? false,
                           itemNumber: _selectedProductsOrdered.indexOf(_filteredCartProducts[i]) + 1,
                         ),
                     ],
@@ -1886,7 +2477,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     ),
                   ],
                 ),
-                _buildEstProfitRow(),
+                _buildMarginDiscountSection(),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -2074,7 +2665,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                                       Navigator.pop(context);
                                       _showQuantityDialog(_filteredCartProducts[i]);
                                     },
+                                    onAddSimilar: () {
+                                      Navigator.pop(context);
+                                      _filterToSimilar(_filteredCartProducts[i]);
+                                    },
                                     minimumPrice: _getMinimumPrice(_filteredCartProducts[i]),
+                                    isPerFoot: _perFootItems[_filteredCartProducts[i].id] ?? false,
                                     itemNumber: _selectedProductsOrdered.indexOf(_filteredCartProducts[i]) + 1,
                                   ),
                               ],
@@ -2189,7 +2785,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             ),
                           ],
                         ),
-                        _buildEstProfitRow(),
+                        _buildMarginDiscountSection(
+                          afterChange: () => setModalState(() {}),
+                        ),
                         const SizedBox(height: 16),
                         Row(
                           children: [
@@ -2304,11 +2902,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       return;
     }
 
-    // Validate stock
+    // Validate stock — skipped for per-foot lines, since their quantity is
+    // feet, not units, and doesn't compare against product.stock.
     for (final entry in _selectedQuantities.entries) {
       final productId = entry.key;
       final quantity = entry.value;
       final product = _allProducts.firstWhere((p) => p.id == productId);
+
+      if (_perFootItems[productId] == true) continue;
 
       if (quantity > product.stock) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2337,6 +2938,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           products: selectedProducts,
           quantities: _selectedQuantities,
           prices: _customPrices,
+          perFootItems: _perFootItems,
           paymentMethod: _paymentMethod,
           notes: _notesController.text.trim().isEmpty
               ? null
@@ -2351,6 +2953,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       setState(() {
         _selectedQuantities.clear();
         _customPrices.clear();
+        _perFootItems.clear();
         _cartItemOrder.clear();
         _customItems.clear();
         _customItemOrder.clear();
@@ -2358,6 +2961,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _searchController.clear();
         _cartSearchController.clear();
         _isMockSale = false;
+        _discountPercent = 0;
       });
 
       // Refresh products to get updated stock
@@ -2380,6 +2984,80 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     _notesController.dispose();
     _cartSearchController.dispose();
     super.dispose();
+  }
+}
+
+// Compact horizontal card used by suggestion strips (similar items,
+// frequently bought together) — narrower than _ProductCard since it scrolls
+// horizontally in a fixed-height row rather than sitting in the main grid.
+class _SuggestionCard extends StatelessWidget {
+  final Product product;
+  final bool isInCart;
+  final VoidCallback onTap;
+
+  const _SuggestionCard({
+    required this.product,
+    required this.isInCart,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isOutOfStock = product.stock == 0;
+
+    return SizedBox(
+      width: 120,
+      child: Card(
+        elevation: isInCart ? 3 : 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isInCart ? Colors.blue : Colors.grey.shade200,
+            width: isInCart ? 2 : 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: isOutOfStock ? null : onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  product.name,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  product.size,
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      isOutOfStock ? 'Out of stock' : '₹${product.salePrice.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: isOutOfStock ? Colors.red : Colors.green.shade700,
+                      ),
+                    ),
+                    if (isInCart)
+                      const Icon(Icons.check_circle, size: 14, color: Colors.blue),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2901,7 +3579,9 @@ class _CartItem extends StatefulWidget {
   final Function(double) onPriceChanged;
   final VoidCallback onRemove;
   final VoidCallback onEdit;
+  final VoidCallback onAddSimilar;
   final double minimumPrice;
+  final bool isPerFoot;
   final int itemNumber;
 
   const _CartItem({
@@ -2912,7 +3592,9 @@ class _CartItem extends StatefulWidget {
     required this.onPriceChanged,
     required this.onRemove,
     required this.onEdit,
+    required this.onAddSimilar,
     required this.minimumPrice,
+    this.isPerFoot = false,
     required this.itemNumber,
   });
 
@@ -3014,12 +3696,35 @@ class _CartItemState extends State<_CartItem> {
                           fontSize: 14,
                         ),
                       ),
-                      Text(
-                        widget.product.size,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            widget.product.size,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          if (widget.isPerFoot) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.indigo.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.indigo.shade200),
+                              ),
+                              child: Text(
+                                'PER FOOT',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.indigo.shade700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
@@ -3028,6 +3733,14 @@ class _CartItemState extends State<_CartItem> {
                 // Actions
                 Row(
                   children: [
+                    IconButton(
+                      onPressed: widget.onAddSimilar,
+                      icon: const Icon(Icons.add_box_outlined, size: 18),
+                      tooltip: 'Add similar items',
+                      style: IconButton.styleFrom(
+                        foregroundColor: Colors.green,
+                      ),
+                    ),
                     IconButton(
                       onPressed: widget.onEdit,
                       icon: const Icon(Icons.edit_outlined, size: 18),
@@ -3057,7 +3770,7 @@ class _CartItemState extends State<_CartItem> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Quantity',
+                        widget.isPerFoot ? 'Feet' : 'Quantity',
                         style: TextStyle(
                           fontSize: 11,
                           color: Colors.grey[600],
@@ -3066,7 +3779,11 @@ class _CartItemState extends State<_CartItem> {
                       const SizedBox(height: 4),
                       Container(
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade300),
+                          border: Border.all(
+                            color: widget.isPerFoot
+                                ? Colors.indigo.shade200
+                                : Colors.grey.shade300,
+                          ),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
@@ -3083,7 +3800,9 @@ class _CartItemState extends State<_CartItem> {
                             ),
                             Expanded(
                               child: Text(
-                                widget.quantity.toString(),
+                                widget.isPerFoot
+                                    ? '${widget.quantity} ft'
+                                    : widget.quantity.toString(),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   fontSize: 14,
@@ -3092,7 +3811,8 @@ class _CartItemState extends State<_CartItem> {
                               ),
                             ),
                             IconButton(
-                              onPressed: widget.quantity < widget.product.stock
+                              onPressed: widget.isPerFoot ||
+                                      widget.quantity < widget.product.stock
                                   ? () => widget.onQuantityChanged(widget.quantity + 1)
                                   : null,
                               icon: const Icon(Icons.add, size: 18),
@@ -3193,57 +3913,155 @@ class _CartItemState extends State<_CartItem> {
 }
 
 /// Mobile Category Filter Sheet with Grid Layout and Search
-class _CategoryFilterSheet extends StatefulWidget {
+// Consolidated Filters sheet: category, subcategory, size, and stock all in
+// one place, so the main screen only ever shows a single "Filters" trigger
+// plus one row of active-filter chips instead of several stacked rows. Every
+// change here is applied to the parent immediately via [onApply] — the sheet
+// keeps its own local copy purely so its own UI (this modal route) rebuilds
+// live, since a parent setState doesn't automatically rebuild a pushed route.
+class _FiltersSheet extends StatefulWidget {
   final List<String> categories;
-  final String? selectedCategory;
+  final Map<String, List<String>> allSubcategories;
   final Color Function(String) getCategoryColor;
-  final Function(String?) onCategorySelected;
+  final String? initialCategory;
+  final String? initialSubcategory;
+  final Set<String> initialSizes;
+  final bool initialInStockOnly;
+  final bool initialLowStockOnly;
+  final List<String> Function(String? category, String? subcategory)
+      getAvailableSizes;
+  final void Function({
+    required String? category,
+    required String? subcategory,
+    required Set<String> sizes,
+    required bool inStockOnly,
+    required bool lowStockOnly,
+  }) onApply;
 
-  const _CategoryFilterSheet({
+  const _FiltersSheet({
     required this.categories,
-    required this.selectedCategory,
+    required this.allSubcategories,
     required this.getCategoryColor,
-    required this.onCategorySelected,
+    required this.initialCategory,
+    required this.initialSubcategory,
+    required this.initialSizes,
+    required this.initialInStockOnly,
+    required this.initialLowStockOnly,
+    required this.getAvailableSizes,
+    required this.onApply,
   });
 
   @override
-  State<_CategoryFilterSheet> createState() => _CategoryFilterSheetState();
+  State<_FiltersSheet> createState() => _FiltersSheetState();
 }
 
-class _CategoryFilterSheetState extends State<_CategoryFilterSheet> {
-  final TextEditingController _searchController = TextEditingController();
+class _FiltersSheetState extends State<_FiltersSheet> {
+  final TextEditingController _categorySearchController =
+      TextEditingController();
   List<String> _filteredCategories = [];
+
+  late String? _category;
+  late String? _subcategory;
+  late Set<String> _sizes;
+  late bool _inStockOnly;
+  late bool _lowStockOnly;
 
   @override
   void initState() {
     super.initState();
+    _category = widget.initialCategory;
+    _subcategory = widget.initialSubcategory;
+    _sizes = Set.of(widget.initialSizes);
+    _inStockOnly = widget.initialInStockOnly;
+    _lowStockOnly = widget.initialLowStockOnly;
     _filteredCategories = widget.categories;
-    _searchController.addListener(_filterCategories);
+    _categorySearchController.addListener(_filterCategories);
   }
 
   void _filterCategories() {
-    final query = _searchController.text.toLowerCase();
+    final query = _categorySearchController.text.toLowerCase();
     setState(() {
-      if (query.isEmpty) {
-        _filteredCategories = widget.categories;
-      } else {
-        _filteredCategories = widget.categories
-            .where((cat) => cat.toLowerCase().contains(query))
-            .toList();
-      }
+      _filteredCategories = query.isEmpty
+          ? widget.categories
+          : widget.categories
+              .where((cat) => cat.toLowerCase().contains(query))
+              .toList();
     });
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _categorySearchController.dispose();
     super.dispose();
+  }
+
+  void _notifyParent() {
+    widget.onApply(
+      category: _category,
+      subcategory: _subcategory,
+      sizes: _sizes,
+      inStockOnly: _inStockOnly,
+      lowStockOnly: _lowStockOnly,
+    );
+  }
+
+  void _selectCategory(String? category) {
+    final available =
+        widget.getAvailableSizes(category, null).toSet();
+    setState(() {
+      _category = category;
+      _subcategory = null;
+      _sizes = _sizes.intersection(available);
+    });
+    _notifyParent();
+  }
+
+  void _selectSubcategory(String sub) {
+    setState(() => _subcategory = _subcategory == sub ? null : sub);
+    _notifyParent();
+  }
+
+  void _toggleSize(String size) {
+    setState(() {
+      if (!_sizes.remove(size)) _sizes.add(size);
+    });
+    _notifyParent();
+  }
+
+  void _toggleInStock() {
+    setState(() => _inStockOnly = !_inStockOnly);
+    _notifyParent();
+  }
+
+  void _toggleLowStock() {
+    setState(() => _lowStockOnly = !_lowStockOnly);
+    _notifyParent();
+  }
+
+  void _clearAll() {
+    setState(() {
+      _category = null;
+      _subcategory = null;
+      _sizes = {};
+      _inStockOnly = false;
+      _lowStockOnly = false;
+    });
+    _notifyParent();
   }
 
   @override
   Widget build(BuildContext context) {
+    final sizes = widget.getAvailableSizes(_category, _subcategory);
+    final subcategories =
+        _category != null ? (widget.allSubcategories[_category] ?? []) : const <String>[];
+    final hasActiveFilters = _category != null ||
+        _subcategory != null ||
+        _sizes.isNotEmpty ||
+        _inStockOnly ||
+        _lowStockOnly;
+
     return DraggableScrollableSheet(
-      initialChildSize: 0.7,
+      initialChildSize: 0.75,
       minChildSize: 0.5,
       maxChildSize: 0.95,
       expand: false,
@@ -3258,85 +4076,236 @@ class _CategoryFilterSheetState extends State<_CategoryFilterSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'Filter by Category',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    'Filters',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+                  Row(
+                    children: [
+                      if (hasActiveFilters)
+                        TextButton(
+                          onPressed: _clearAll,
+                          child: const Text('Clear All'),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
 
-              // Search bar
-              TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search categories...',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                    icon: const Icon(Icons.clear, size: 20),
-                    onPressed: () => _searchController.clear(),
-                  )
-                      : null,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[100],
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Grid of categories
               Expanded(
-                child: GridView.builder(
+                child: ListView(
                   controller: scrollController,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 1.0,
-                  ),
-                  itemCount: _filteredCategories.length + 1, // +1 for "All"
-                  itemBuilder: (context, index) {
-                    // All Categories card
-                    if (index == 0) {
-                      final isSelected = widget.selectedCategory == null;
-                      return _buildCategoryCard(
-                        label: 'All',
-                        icon: Icons.grid_view,
+                  children: [
+                    const Text(
+                      'CATEGORY',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                         color: Colors.grey,
-                        isSelected: isSelected,
-                        onTap: () => widget.onCategorySelected(null),
-                      );
-                    }
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _categorySearchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search categories...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        suffixIcon: _categorySearchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 20),
+                                onPressed: () =>
+                                    _categorySearchController.clear(),
+                              )
+                            : null,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        // Slightly taller than square: some category names
+                        // (e.g. "Sanitary General") wrap to 2 lines and would
+                        // overflow a perfectly square cell once the selected
+                        // checkmark is also shown.
+                        childAspectRatio: 0.85,
+                      ),
+                      itemCount: _filteredCategories.length + 1, // +1 for "All"
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return _buildCategoryCard(
+                            label: 'All',
+                            icon: Icons.grid_view,
+                            color: Colors.grey,
+                            isSelected: _category == null,
+                            onTap: () => _selectCategory(null),
+                          );
+                        }
 
-                    // Individual category cards
-                    final category = _filteredCategories[index - 1];
-                    final isSelected = widget.selectedCategory?.toLowerCase() ==
-                        category.toLowerCase();
-                    final color = widget.getCategoryColor(category);
+                        final category = _filteredCategories[index - 1];
+                        final isSelected =
+                            _category?.toLowerCase() == category.toLowerCase();
+                        final color = widget.getCategoryColor(category);
 
-                    return _buildCategoryCard(
-                      label: category,
-                      icon: Icons.category,
-                      color: color,
-                      isSelected: isSelected,
-                      onTap: () => widget.onCategorySelected(category),
-                    );
-                  },
+                        return _buildCategoryCard(
+                          label: category,
+                          icon: Icons.category,
+                          color: color,
+                          isSelected: isSelected,
+                          onTap: () => _selectCategory(category),
+                        );
+                      },
+                    ),
+
+                    if (subcategories.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      const Text(
+                        'SUBCATEGORY',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: subcategories.map((sub) {
+                          final isSelected = _subcategory == sub;
+                          return FilterChip(
+                            selected: isSelected,
+                            label: Text(sub),
+                            avatar: Icon(
+                              Icons.label_outline,
+                              size: 16,
+                              color: isSelected ? Colors.indigo : Colors.grey[600],
+                            ),
+                            onSelected: (_) => _selectSubcategory(sub),
+                            backgroundColor: Colors.grey[100],
+                            selectedColor: Colors.indigo.withOpacity(0.2),
+                            checkmarkColor: Colors.indigo,
+                            labelStyle: TextStyle(
+                              color: isSelected ? Colors.indigo : Colors.black87,
+                              fontWeight:
+                                  isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+
+                    if (sizes.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      const Text(
+                        'SIZE',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: sizes.map((size) {
+                          final isSelected = _sizes.contains(size);
+                          return FilterChip(
+                            selected: isSelected,
+                            label: Text(size),
+                            avatar: Icon(
+                              Icons.straighten,
+                              size: 16,
+                              color: isSelected ? Colors.blue : Colors.grey[600],
+                            ),
+                            onSelected: (_) => _toggleSize(size),
+                            backgroundColor: Colors.grey[100],
+                            selectedColor: Colors.blue.withOpacity(0.2),
+                            checkmarkColor: Colors.blue,
+                            labelStyle: TextStyle(
+                              color: isSelected ? Colors.blue : Colors.black87,
+                              fontWeight:
+                                  isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+                    const Text(
+                      'STOCK',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilterChip(
+                          selected: _inStockOnly,
+                          label: const Text('In Stock Only'),
+                          avatar: Icon(
+                            Icons.inventory_2_outlined,
+                            size: 16,
+                            color: _inStockOnly ? Colors.green : Colors.grey[600],
+                          ),
+                          onSelected: (_) => _toggleInStock(),
+                          backgroundColor: Colors.grey[100],
+                          selectedColor: Colors.green.withOpacity(0.2),
+                          checkmarkColor: Colors.green,
+                          labelStyle: TextStyle(
+                            color: _inStockOnly ? Colors.green : Colors.black87,
+                            fontWeight:
+                                _inStockOnly ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        FilterChip(
+                          selected: _lowStockOnly,
+                          label: const Text('Low Stock'),
+                          avatar: Icon(
+                            Icons.warning_amber_rounded,
+                            size: 16,
+                            color: _lowStockOnly ? Colors.orange : Colors.grey[600],
+                          ),
+                          onSelected: (_) => _toggleLowStock(),
+                          backgroundColor: Colors.grey[100],
+                          selectedColor: Colors.orange.withOpacity(0.2),
+                          checkmarkColor: Colors.orange,
+                          labelStyle: TextStyle(
+                            color: _lowStockOnly ? Colors.orange : Colors.black87,
+                            fontWeight:
+                                _lowStockOnly ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                 ),
               ),
             ],
@@ -3368,7 +4337,6 @@ class _CategoryFilterSheetState extends State<_CategoryFilterSheet> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Icon with background
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -3382,8 +4350,6 @@ class _CategoryFilterSheetState extends State<_CategoryFilterSheet> {
               ),
             ),
             const SizedBox(height: 8),
-
-            // Label
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
@@ -3398,8 +4364,6 @@ class _CategoryFilterSheetState extends State<_CategoryFilterSheet> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-
-            // Check indicator
             if (isSelected)
               Padding(
                 padding: const EdgeInsets.only(top: 4),

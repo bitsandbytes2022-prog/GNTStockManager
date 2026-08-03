@@ -195,6 +195,24 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       }
     }
 
+    // _selectedProducts is _allProducts filtered down to cart productIds —
+    // if a product can no longer be found there (deleted, or _allProducts
+    // went stale), it silently drops out of updatedSaleItems below while
+    // the sale's total still reflects it. Fail loudly instead of saving a
+    // sale whose items no longer match its total.
+    if (_selectedProducts.length != _selectedQuantities.length) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Some cart items could not be found (they may have been deleted). '
+            'Please remove them from the cart and try again.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     try {

@@ -20,6 +20,10 @@ class BillPreviewScreen extends StatefulWidget {
   final String paymentMethod;
   final String? notes;
 
+  /// productId -> sold-by-length (pipes cut to feet). Quantity for these
+  /// products is feet, not units, and stock is never deducted for them.
+  final Map<String, bool> perFootItems;
+
   /// When true, completing from this preview records a mock sale (no stock
   /// deduction, excluded from analytics).
   final bool isMock;
@@ -31,6 +35,7 @@ class BillPreviewScreen extends StatefulWidget {
     required this.prices,
     required this.paymentMethod,
     this.notes,
+    this.perFootItems = const {},
     this.isMock = false,
   });
 
@@ -118,6 +123,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           quantity: qty,
           salePrice: price,
           purchasePrice: product.purchasePrice,
+          isPerFoot: widget.perFootItems[product.id] ?? false,
         );
       }).toList();
 
@@ -299,11 +305,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     final qty = widget.quantities[product.id]!;
                     final price = widget.prices[product.id]!;
                     final amount = qty * price;
+                    final isPerFoot = widget.perFootItems[product.id] ?? false;
 
                     return pw.TableRow(
                       children: [
                         _buildTableCell('${product.name} (${product.size})'),
-                        _buildTableCell(qty.toString()),
+                        _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
                         _buildTableCell('INR ${price.toStringAsFixed(2)}'),
                         _buildTableCell('INR ${amount.toStringAsFixed(2)}'),
                       ],
@@ -635,6 +642,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     final qty = widget.quantities[product.id]!;
     final price = widget.prices[product.id]!;
     final amount = qty * price;
+    final isPerFoot = widget.perFootItems[product.id] ?? false;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -670,7 +678,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           ),
           Expanded(
             child: Text(
-              qty.toString(),
+              isPerFoot ? '$qty ft' : qty.toString(),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 13),
             ),

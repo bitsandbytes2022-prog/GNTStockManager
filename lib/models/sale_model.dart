@@ -56,6 +56,12 @@ class SaleItem {
   final double purchasePrice;
   final String? imageBase64;
 
+  /// True when this line was sold by length (e.g. a pipe cut to a number of
+  /// feet) rather than by whole unit. [quantity] holds feet in that case.
+  /// Per-foot lines never deduct stock, even on a real (non-mock) sale —
+  /// the app doesn't track cut-pipe remainders.
+  final bool isPerFoot;
+
   SaleItem({
     required this.productId,
     required this.productName,
@@ -64,6 +70,7 @@ class SaleItem {
     required this.salePrice,
     required this.quantity,
     this.imageBase64,
+    this.isPerFoot = false,
   }) : total = salePrice * quantity;
 
   Map<String, dynamic> toMap() => {
@@ -75,6 +82,7 @@ class SaleItem {
     'quantity': quantity,
     'total': total,
     'imageBase64': imageBase64,
+    'isPerFoot': isPerFoot,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -86,6 +94,7 @@ class SaleItem {
       salePrice: (map['salePrice'] ?? 0).toDouble(),
       quantity: map['quantity'] ?? 0,
       imageBase64: map['imageBase64'],
+      isPerFoot: map['isPerFoot'] == true,
     );
   }
 
@@ -98,6 +107,7 @@ class SaleItem {
     int? quantity,
     double? purchasePrice,
     String? imageBase64,
+    bool? isPerFoot,
   }) {
     return SaleItem(
       productId: productId ?? this.productId,
@@ -107,6 +117,7 @@ class SaleItem {
       salePrice: salePrice ?? this.salePrice,
       quantity: quantity ?? this.quantity,
       imageBase64: imageBase64 ?? this.imageBase64,
+      isPerFoot: isPerFoot ?? this.isPerFoot,
     );
   }
 }
