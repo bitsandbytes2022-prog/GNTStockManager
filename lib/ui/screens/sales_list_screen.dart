@@ -518,24 +518,6 @@ class _SalesListScreenState extends State<SalesListScreen> {
     setState(() {});
   }
 
-  double _calculateSaleProfit(Sale sale) {
-    return sale.items.fold(0.0, (sum, item) {
-      final profit = (item.salePrice - item.purchasePrice) * item.quantity;
-      return sum + profit;
-    });
-  }
-
-  double _calculateSaleProfitPercentage(Sale sale) {
-    final totalCost = sale.items.fold(0.0, (sum, item) {
-      return sum + (item.purchasePrice * item.quantity);
-    });
-
-    if (totalCost == 0) return 0;
-
-    final profit = _calculateSaleProfit(sale);
-    return (profit / totalCost) * 100;
-  }
-
   Map<String, DateTime> _getDateRange() {
     final now = DateTime.now();
     DateTime startDate;
@@ -945,6 +927,27 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
+  String _dayLabel(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final that = DateTime(date.year, date.month, date.day);
+    final diff = today.difference(that).inDays;
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
+    return DateFormat('EEEE, d MMM yyyy').format(that);
+  }
+
+  /// Groups sales by calendar day. Relies on [sales] already being sorted
+  /// newest-first — a plain [Map] preserves insertion order, so grouping in
+  /// a single pass keeps day sections in the same newest-first order.
+  Map<String, List<Sale>> _groupSalesByDay(List<Sale> sales) {
+    final grouped = <String, List<Sale>>{};
+    for (final sale in sales) {
+      grouped.putIfAbsent(_dayLabel(sale.createdAt), () => []).add(sale);
+    }
+    return grouped;
+  }
+
   Widget _buildSalesContent(List<Sale> sales) {
     if (sales.isEmpty) {
       return Center(
@@ -1002,6 +1005,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final crossAxisCount = _getCrossAxisCount(context);
     final spacing = _getGridSpacing(context);
     final aspectRatio = _getChildAspectRatio(context);
+    final groupedByDay = _groupSalesByDay(sales);
 
     return CustomScrollView(
       controller: _scrollController,
@@ -1014,40 +1018,60 @@ class _SalesListScreenState extends State<SalesListScreen> {
           ),
         ),
 
-        // Sales Grid
-        SliverPadding(
-          padding: EdgeInsets.symmetric(horizontal: spacing),
-          sliver: SliverGrid(
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: crossAxisCount,
-              crossAxisSpacing: spacing,
-              mainAxisSpacing: spacing,
-              childAspectRatio: aspectRatio,
-            ),
-            delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                final sale = sales[index];
-                return _SaleCard(
-                  sale: sale,
-                  onTap: () => _showSaleDetails(sale),
-                  onEdit: () => _editSale(sale),
-                  onDelete: () => _deleteSale(sale),
-                  onReturn: () => _returnItems(sale),
-                  onPrint: () => _printInvoice(sale),
-                  onRecordPayment: () => _recordPayment(sale),
-                  profit: _calculateSaleProfit(sale),
-                  profitPercentage: _calculateSaleProfitPercentage(sale),
-                );
-              },
-              childCount: sales.length,
+        // One day-header + grid per calendar day, newest day first.
+        for (final entry in groupedByDay.entries) ...[
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(spacing, 0, spacing, 8),
+            sliver: SliverToBoxAdapter(
+              child: Row(
+                children: [
+                  Text(
+                    entry.key,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                  const SizedBox(width: 10),
+                  Text(
+                    '${entry.value.length} sale${entry.value.length == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-
-        // Bottom spacing
-        SliverToBoxAdapter(
-          child: SizedBox(height: spacing),
-        ),
+          SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: spacing),
+            sliver: SliverGrid(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
+                crossAxisSpacing: spacing,
+                mainAxisSpacing: spacing,
+                childAspectRatio: aspectRatio,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                  final sale = entry.value[index];
+                  return _SaleCard(
+                    sale: sale,
+                    onTap: () => _showSaleDetails(sale),
+                    onEdit: () => _editSale(sale),
+                    onDelete: () => _deleteSale(sale),
+                    onReturn: () => _returnItems(sale),
+                    onPrint: () => _printInvoice(sale),
+                    onRecordPayment: () => _recordPayment(sale),
+                  );
+                },
+                childCount: entry.value.length,
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: spacing)),
+        ],
       ],
     );
   }
@@ -1330,8 +1354,6 @@ class _SaleCard extends StatelessWidget {
   final VoidCallback onReturn;
   final VoidCallback onPrint;
   final VoidCallback onRecordPayment;
-  final double profit;
-  final double profitPercentage;
 
   const _SaleCard({
     required this.sale,
@@ -1341,8 +1363,6 @@ class _SaleCard extends StatelessWidget {
     required this.onEdit,
     required this.onPrint,
     required this.onRecordPayment,
-    required this.profit,
-    required this.profitPercentage,
   });
 
   @override
@@ -1393,6 +1413,28 @@ class _SaleCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
                         ),
+                        if (sale.buyerName?.isNotEmpty ?? false) ...[
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Icon(Icons.person_outline,
+                                  size: 12, color: Colors.grey[600]),
+                              const SizedBox(width: 3),
+                              Expanded(
+                                child: Text(
+                                  sale.buyerName!,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.grey[700],
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         if (sale.isMock) ...[
                           const SizedBox(height: 4),
                           Container(
@@ -1505,45 +1547,6 @@ class _SaleCard extends StatelessWidget {
                 ],
               ),
 
-              const SizedBox(height: 6),
-
-              // Profit badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: profit >= 0 ? Colors.green.shade50 : Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: profit >= 0
-                        ? Colors.green.shade200
-                        : Colors.red.shade200,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      profit >= 0 ? Icons.trending_up : Icons.trending_down,
-                      size: 11,
-                      color: profit >= 0 ? Colors.green.shade700 : Colors.red.shade700,
-                    ),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        '₹${profit.abs().toStringAsFixed(0)} (${profitPercentage.toStringAsFixed(1)}%)',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: profit >= 0 ? Colors.green.shade700 : Colors.red.shade700,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
               const Spacer(),
 
               // Footer with date and payment
@@ -1610,7 +1613,7 @@ class _PaymentBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     IconData icon;
-    Color color;
+    MaterialColor color;
 
     switch (method.toLowerCase()) {
       case 'cash':
@@ -1625,30 +1628,33 @@ class _PaymentBadge extends StatelessWidget {
         icon = Icons.credit_card;
         color = Colors.blue;
         break;
+      case 'credit':
+        icon = Icons.schedule;
+        color = Colors.deepOrange;
+        break;
       default:
         icon = Icons.payment;
-        color = Colors.grey;
+        color = Colors.blueGrey;
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withOpacity(0.3), width: 0.5),
+        color: color.shade700,
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 9, color: color),
-          const SizedBox(width: 3),
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 5),
           Text(
             method.toUpperCase(),
-            style: TextStyle(
-              fontSize: 8,
-              fontWeight: FontWeight.w600,
-              color: color,
-              letterSpacing: 0.3,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              letterSpacing: 0.4,
             ),
           ),
         ],

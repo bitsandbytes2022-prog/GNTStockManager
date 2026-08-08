@@ -24,6 +24,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _cartSearchController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+  final TextEditingController _buyerNameController = TextEditingController();
+  final TextEditingController _buyerPhoneController = TextEditingController();
+  final TextEditingController _buyerAddressController = TextEditingController();
+  final TextEditingController _amountPaidController = TextEditingController();
 
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
@@ -58,6 +62,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     // Initialize from existing sale
     _paymentMethod = widget.sale.paymentMethod?.label ?? 'Cash';
     _notesController.text = widget.sale.notes ?? '';
+    _buyerNameController.text = widget.sale.buyerName ?? '';
+    _buyerPhoneController.text = widget.sale.buyerPhone ?? '';
+    _buyerAddressController.text = widget.sale.buyerAddress ?? '';
+    _amountPaidController.text = widget.sale.amountPaid.toStringAsFixed(2);
 
     // Populate selected items
     for (final item in widget.sale.items) {
@@ -137,6 +145,139 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   double _getMinimumPrice(Product product) {
     return product.purchasePrice * 0.50;
+  }
+
+  /// Buyer name/phone/address (recorded for future reference) plus, when
+  /// Payment Method is Credit, an editable "amount received so far" field —
+  /// needed for fixing a sale that was logged under the wrong payment
+  /// method (e.g. recorded as Cash when it was actually Credit).
+  Widget _buildBuyerAndCreditFields() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Buyer Details (optional)',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _buyerNameController,
+          decoration: InputDecoration(
+            labelText: 'Name',
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _buyerPhoneController,
+          keyboardType: TextInputType.phone,
+          decoration: InputDecoration(
+            labelText: 'Phone',
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _buyerAddressController,
+          maxLines: 2,
+          decoration: InputDecoration(
+            labelText: 'Address',
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        if (_paymentMethod == 'Credit') ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amountPaidController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Amount received so far',
+              helperText: 'Set to 0 if nothing has been received yet',
+              prefixText: '₹',
+              isDense: true,
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Payment method + buyer/credit fields + notes, as one block appended to
+  /// the end of the scrollable cart-items list (rather than pinned outside
+  /// it) — otherwise, on a short screen, the extra Credit fields can push
+  /// this section's height past what's left after the pinned Total/Update
+  /// footer, causing a render overflow.
+  Widget _buildPaymentAndNotesSection({required Color backgroundColor}) {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Payment Method',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _paymentMethod,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+            items: ['Cash', 'UPI', 'Card', 'Credit', 'Other']
+                .map((method) => DropdownMenuItem(
+                      value: method,
+                      child: Text(method),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                setState(() => _paymentMethod = value);
+              }
+            },
+          ),
+          const SizedBox(height: 16),
+          _buildBuyerAndCreditFields(),
+          const SizedBox(height: 16),
+          const Text(
+            'Notes (Optional)',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _notesController,
+            maxLines: 2,
+            decoration: InputDecoration(
+              hintText: 'Add any notes...',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.all(12),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   double get _totalAmount {
@@ -281,10 +422,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             (sum, item) => sum + (item.salePrice * item.quantity),
       );
 
-      // Create updated sale object. Buyer details and the credit
-      // payment ledger (amountPaid/payments) aren't editable in this
-      // screen, so they're carried over from the original sale rather
-      // than being dropped.
+      // Amount paid only makes sense to edit for Credit sales (e.g.
+      // correcting a sale that was mistakenly logged as Cash but was
+      // actually Credit). For any other payment method, treat it as fully
+      // paid — pass null so the Sale constructor sets it to the total.
+      final amountPaid = paymentMethodEnum == PaymentMethod.credit
+          ? (double.tryParse(_amountPaidController.text) ?? widget.sale.amountPaid)
+          : null;
+
       final updatedSale = Sale(
         invoiceNumber: widget.sale.invoiceNumber,
         id: widget.sale.id,
@@ -294,10 +439,16 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         paymentMethod: paymentMethodEnum,
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         isMock: widget.sale.isMock, // Preserve mock flag through edits
-        buyerName: widget.sale.buyerName,
-        buyerPhone: widget.sale.buyerPhone,
-        buyerAddress: widget.sale.buyerAddress,
-        amountPaid: widget.sale.amountPaid,
+        buyerName: _buyerNameController.text.trim().isEmpty
+            ? null
+            : _buyerNameController.text.trim(),
+        buyerPhone: _buyerPhoneController.text.trim().isEmpty
+            ? null
+            : _buyerPhoneController.text.trim(),
+        buyerAddress: _buyerAddressController.text.trim().isEmpty
+            ? null
+            : _buyerAddressController.text.trim(),
+        amountPaid: amountPaid,
         payments: widget.sale.payments,
       );
 
@@ -573,89 +724,22 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         ],
                       ),
                     )
-                  : ListView.builder(
+                  : ListView(
                       padding: const EdgeInsets.all(16),
-                      itemCount: _filteredCartProducts.length,
-                      itemBuilder: (context, index) {
-                        final product = _filteredCartProducts[index];
-                        return _CartItem(
-                          product: product,
-                          quantity: _selectedQuantities[product.id]!,
-                          price: _customPrices[product.id]!,
-                          onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
-                          onPriceChanged: (price) => _updatePrice(product.id, price),
-                          onRemove: () => _toggleProduct(product),
-                          minimumPrice: _getMinimumPrice(product),
-                        );
-                      },
+                      children: [
+                        for (final product in _filteredCartProducts)
+                          _CartItem(
+                            product: product,
+                            quantity: _selectedQuantities[product.id]!,
+                            price: _customPrices[product.id]!,
+                            onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
+                            onPriceChanged: (price) => _updatePrice(product.id, price),
+                            onRemove: () => _toggleProduct(product),
+                            minimumPrice: _getMinimumPrice(product),
+                          ),
+                        _buildPaymentAndNotesSection(backgroundColor: Colors.white),
+                      ],
                     ),
-        ),
-
-        // Payment method and notes
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade200),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Payment Method',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _paymentMethod,
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                ),
-                items: ['Cash', 'UPI', 'Card', 'Credit', 'Other']
-                    .map((method) => DropdownMenuItem(
-                  value: method,
-                  child: Text(method),
-                ))
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _paymentMethod = value);
-                  }
-                },
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Notes (Optional)',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _notesController,
-                maxLines: 2,
-                decoration: InputDecoration(
-                  hintText: 'Add any notes...',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.all(12),
-                ),
-              ),
-            ],
-          ),
         ),
 
         // Total and complete button
@@ -900,81 +984,29 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           ],
                         ),
                       )
-                    : ListView.builder(
+                    : ListView(
                         controller: scrollController,
                         padding: const EdgeInsets.all(16),
-                        itemCount: _filteredCartProducts.length,
-                        itemBuilder: (context, index) {
-                          final product = _filteredCartProducts[index];
-                          return _CartItem(
-                            product: product,
-                            quantity: _selectedQuantities[product.id]!,
-                            price: _customPrices[product.id]!,
-                            onQuantityChanged: (qty) {
-                              setState(() => _updateQuantity(product.id, qty));
-                            },
-                            onPriceChanged: (price) {
-                              setState(() => _updatePrice(product.id, price));
-                            },
-                            onRemove: () {
-                              setState(() => _toggleProduct(product));
-                            },
-                            minimumPrice: _getMinimumPrice(product),
-                          );
-                        },
+                        children: [
+                          for (final product in _filteredCartProducts)
+                            _CartItem(
+                              product: product,
+                              quantity: _selectedQuantities[product.id]!,
+                              price: _customPrices[product.id]!,
+                              onQuantityChanged: (qty) {
+                                setState(() => _updateQuantity(product.id, qty));
+                              },
+                              onPriceChanged: (price) {
+                                setState(() => _updatePrice(product.id, price));
+                              },
+                              onRemove: () {
+                                setState(() => _toggleProduct(product));
+                              },
+                              minimumPrice: _getMinimumPrice(product),
+                            ),
+                          _buildPaymentAndNotesSection(backgroundColor: Colors.grey.shade50),
+                        ],
                       ),
-              ),
-
-              // Payment and notes section
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  border: Border(
-                    top: BorderSide(color: Colors.grey.shade200),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      value: _paymentMethod,
-                      decoration: InputDecoration(
-                        labelText: 'Payment Method',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      items: ['Cash', 'UPI', 'Card', 'Credit', 'Other']
-                          .map((method) => DropdownMenuItem(
-                        value: method,
-                        child: Text(method),
-                      ))
-                          .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => _paymentMethod = value);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _notesController,
-                      maxLines: 2,
-                      decoration: InputDecoration(
-                        labelText: 'Notes (Optional)',
-                        hintText: 'Add any notes...',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
               ),
 
               // Total and button
@@ -1051,6 +1083,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _searchController.dispose();
     _cartSearchController.dispose();
     _notesController.dispose();
+    _buyerNameController.dispose();
+    _buyerPhoneController.dispose();
+    _buyerAddressController.dispose();
+    _amountPaidController.dispose();
     super.dispose();
   }
 }
