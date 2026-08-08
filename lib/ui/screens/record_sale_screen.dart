@@ -804,7 +804,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
                 // Add/Update button
                 FilledButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
                     int? qty = int.tryParse(qtyController.text);
                     if (qty == null || qty <= 0) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -816,13 +816,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       return;
                     }
                     if (!sellPerFoot && qty > product.stock) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Maximum available: ${product.stock}'),
-                          duration: const Duration(seconds: 1),
-                        ),
-                      );
-                      return;
+                      // Offer an inline stock fix instead of just blocking —
+                      // covers "forgot to update stock after a restock"
+                      // without losing anything already in the cart.
+                      final resolved = await _resolveInsufficientStock([product]);
+                      if (!resolved) return;
+                      if (mounted) setState(() {});
                     }
 
                     double? price = double.tryParse(priceController.text);
@@ -3133,6 +3132,119 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
+  /// Shown when the cart has items whose quantity exceeds the product's
+  /// recorded stock (typically because the real stock was never updated
+  /// after a restock). Lets the user correct each product's stock right
+  /// here — writing it to Firestore and to [_allProducts] — without losing
+  /// the cart, then continue with whatever action triggered the check.
+  /// Returns true once every product has been fixed, false if cancelled.
+  Future<bool> _resolveInsufficientStock(List<Product> insufficientProducts) async {
+    final controllers = {
+      for (final product in insufficientProducts)
+        product.id: TextEditingController(
+          text: (_selectedQuantities[product.id] ?? product.stock).toString(),
+        ),
+    };
+    bool isSaving = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('Insufficient Stock'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Update the real stock below, then continue — your cart won't be lost.",
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                    ),
+                    const SizedBox(height: 16),
+                    for (final product in insufficientProducts) ...[
+                      Text(
+                        '${product.name} (${product.size})',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      Text(
+                        'Currently ${product.stock} in stock · cart needs ${_selectedQuantities[product.id]}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: controllers[product.id],
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: InputDecoration(
+                          labelText: 'New stock',
+                          isDense: true,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          setDialogState(() => isSaving = true);
+                          try {
+                            for (final product in insufficientProducts) {
+                              final newStock = int.tryParse(controllers[product.id]!.text);
+                              if (newStock == null || newStock < 0) {
+                                throw Exception('Enter a valid stock number for ${product.name}');
+                              }
+                              final updated = product.copyWith(stock: newStock);
+                              await _firebaseService.updateProduct(updated);
+                              final index = _allProducts.indexWhere((p) => p.id == product.id);
+                              if (index != -1) _allProducts[index] = updated;
+                            }
+                            if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                          } catch (e) {
+                            setDialogState(() => isSaving = false);
+                            if (dialogContext.mounted) {
+                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                              );
+                            }
+                          }
+                        },
+                  icon: isSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.check),
+                  label: Text(isSaving ? 'Saving...' : 'Save & Continue'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    for (final controller in controllers.values) {
+      controller.dispose();
+    }
+
+    return result ?? false;
+  }
+
   Future<void> _showBillPreview() async {
     if (_selectedQuantities.isEmpty && _customItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3142,7 +3254,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
 
     // Validate stock — skipped for per-foot lines, since their quantity is
-    // feet, not units, and doesn't compare against product.stock.
+    // feet, not units, and doesn't compare against product.stock. Collect
+    // every shortfall at once (not just the first) so the fix dialog below
+    // can offer all of them together instead of one at a time.
+    final insufficientProducts = <Product>[];
     for (final entry in _selectedQuantities.entries) {
       final productId = entry.key;
       final quantity = entry.value;
@@ -3151,15 +3266,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       if (_perFootItems[productId] == true) continue;
 
       if (quantity > product.stock) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${product.name} has insufficient stock. Available: ${product.stock}',
-            ),
-          ),
-        );
-        return;
+        insufficientProducts.add(product);
       }
+    }
+
+    if (insufficientProducts.isNotEmpty) {
+      final resolved = await _resolveInsufficientStock(insufficientProducts);
+      if (!resolved || !mounted) return;
+      setState(() {}); // refresh product grid with the corrected stock
     }
 
     // Prepare data for bill preview, in cart order — BillPreviewScreen
