@@ -21,12 +21,31 @@ class BillPreviewScreen extends StatefulWidget {
   final String? notes;
 
   /// productId -> sold-by-length (pipes cut to feet). Quantity for these
-  /// products is feet, not units, and stock is never deducted for them.
+  /// products is feet, not units.
   final Map<String, bool> perFootItems;
+
+  /// productId -> effective purchase cost to record on the SaleItem: the
+  /// full per-pipe cost for ordinary lines, or the per-foot cost for
+  /// per-foot lines (product.purchasePrice / feetPerPipe). Falls back to
+  /// the product's own purchasePrice when a productId is missing.
+  final Map<String, double> unitCosts;
+
+  /// productId -> whole stock units (pipes) to deduct. Falls back to the
+  /// cart quantity when a productId is missing.
+  final Map<String, int> stockUnitsMap;
 
   /// When true, completing from this preview records a mock sale (no stock
   /// deduction, excluded from analytics).
   final bool isMock;
+
+  // Optional buyer details, recorded for future reference on the bill.
+  final String? buyerName;
+  final String? buyerPhone;
+  final String? buyerAddress;
+
+  /// Amount received now, used as the initial `amountPaid` when
+  /// [paymentMethod] is Credit (0 means nothing received yet).
+  final double initialPayment;
 
   const BillPreviewScreen({
     super.key,
@@ -36,7 +55,13 @@ class BillPreviewScreen extends StatefulWidget {
     required this.paymentMethod,
     this.notes,
     this.perFootItems = const {},
+    this.unitCosts = const {},
+    this.stockUnitsMap = const {},
     this.isMock = false,
+    this.buyerName,
+    this.buyerPhone,
+    this.buyerAddress,
+    this.initialPayment = 0,
   });
 
   @override
@@ -110,6 +135,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       // Get the actual next invoice number (this will increment the counter)
       final invoiceNumber = await _invoiceService.getNextInvoiceNumber();
 
+      final paymentMethodEnum = PaymentMethod.values.firstWhere(
+        (e) => e.label == widget.paymentMethod,
+        orElse: () => PaymentMethod.cash,
+      );
+
       // Create sale items
       final saleItems = widget.products.entries.map((entry) {
         final product = entry.value;
@@ -122,8 +152,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           productSize: product.size,
           quantity: qty,
           salePrice: price,
-          purchasePrice: product.purchasePrice,
+          purchasePrice: widget.unitCosts[product.id] ?? product.purchasePrice,
           isPerFoot: widget.perFootItems[product.id] ?? false,
+          stockUnits: widget.stockUnitsMap[product.id],
         );
       }).toList();
 
@@ -133,13 +164,16 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         items: saleItems,
         totalAmount: _calculateSubtotal(),
         createdAt: DateTime.now(),
-        paymentMethod: PaymentMethod.values.firstWhere(
-              (e) => e.value == widget.paymentMethod,
-          orElse: () => PaymentMethod.cash,
-        ),
+        paymentMethod: paymentMethodEnum,
         notes: widget.notes,
         invoiceNumber: invoiceNumber, // Add invoice number to sale
         isMock: widget.isMock,
+        buyerName: widget.buyerName,
+        buyerPhone: widget.buyerPhone,
+        buyerAddress: widget.buyerAddress,
+        amountPaid: paymentMethodEnum == PaymentMethod.credit
+            ? widget.initialPayment
+            : null,
       );
 
       // Save to Firebase
@@ -170,11 +204,59 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     }
   }
 
-  Future<void> _printBill() async {
+  Future<void> _showPrintOptions() async {
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Print As',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Standard (A4)'),
+                subtitle: const Text('Full-page printer'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _printBill(thermal: false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Thermal Receipt (3" / 80mm)'),
+                subtitle: const Text('Thermal roll printer'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _printBill(thermal: true);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _printBill({required bool thermal}) async {
     try {
-      final pdf = await _generatePdf();
+      final initialFormat = thermal ? PdfPageFormat.roll80 : PdfPageFormat.a4;
       await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
+        format: initialFormat,
+        onLayout: (PdfPageFormat format) async {
+          final pdf = await _generatePdf(format: format, thermal: thermal);
+          return pdf.save();
+        },
       );
     } catch (e) {
       if (mounted) {
@@ -185,7 +267,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     }
   }
 
-  Future<pw.Document> _generatePdf() async {
+  Future<pw.Document> _generatePdf({
+    PdfPageFormat? format,
+    bool thermal = false,
+  }) async {
     final pdf = pw.Document();
 
     pw.ImageProvider? logoImage;
@@ -197,9 +282,19 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       }
     }
 
+    if (thermal) {
+      pdf.addPage(
+        pw.Page(
+          pageFormat: format ?? PdfPageFormat.roll80,
+          build: (context) => _buildThermalContent(logoImage),
+        ),
+      );
+      return pdf;
+    }
+
     pdf.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat: format ?? PdfPageFormat.a4,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -275,6 +370,25 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               ),
 
               pw.Divider(thickness: 2),
+              if (_hasBuyerInfo) ...[
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'BILL TO',
+                  style: pw.TextStyle(
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.grey700,
+                  ),
+                ),
+                pw.SizedBox(height: 2),
+                if (widget.buyerName?.isNotEmpty ?? false)
+                  pw.Text(widget.buyerName!,
+                      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                if (widget.buyerPhone?.isNotEmpty ?? false)
+                  pw.Text(widget.buyerPhone!, style: const pw.TextStyle(fontSize: 10)),
+                if (widget.buyerAddress?.isNotEmpty ?? false)
+                  pw.Text(widget.buyerAddress!, style: const pw.TextStyle(fontSize: 10)),
+              ],
               pw.SizedBox(height: 12),
 
 
@@ -349,6 +463,17 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                 'Payment Method: ${widget.paymentMethod}',
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
+              if (widget.paymentMethod == 'Credit' &&
+                  (_calculateSubtotal() - widget.initialPayment) > 0) ...[
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'Due: INR ${(_calculateSubtotal() - widget.initialPayment).toStringAsFixed(2)}',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.red700,
+                  ),
+                ),
+              ],
 
               if (widget.notes != null && widget.notes!.isNotEmpty) ...[
                 pw.SizedBox(height: 8),
@@ -375,6 +500,173 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
 
     return pdf;
+  }
+
+  pw.Widget _buildThermalContent(pw.ImageProvider? logoImage) {
+    final subtotal = _calculateSubtotal();
+    pw.Widget dashedDivider() => pw.Text(
+          '--------------------------------',
+          style: const pw.TextStyle(fontSize: 8),
+          textAlign: pw.TextAlign.center,
+        );
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        // Header
+        pw.Center(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              if (logoImage != null)
+                pw.Container(
+                  width: 36,
+                  height: 36,
+                  margin: const pw.EdgeInsets.only(bottom: 4),
+                  child: pw.Image(logoImage),
+                ),
+              pw.Text(
+                'Guru Nanak Traders',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.Text(
+                'Mobile: 7696379802',
+                textAlign: pw.TextAlign.center,
+                style: const pw.TextStyle(fontSize: 8),
+              ),
+              pw.Text(
+                'Nandpur, Teh. Amb, Distt. Una (H.P.)',
+                textAlign: pw.TextAlign.center,
+                style: const pw.TextStyle(fontSize: 8),
+              ),
+              pw.Text(
+                'Deals in: Hardware, Sanitary & Paints',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+        pw.SizedBox(height: 6),
+        dashedDivider(),
+        pw.SizedBox(height: 4),
+
+        // Invoice details
+        pw.Text(
+          'Estimate #: ${_invoiceNumber ?? 'N/A'}',
+          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.Text(
+          'Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}  Time: ${DateFormat('hh:mm a').format(DateTime.now())}',
+          style: const pw.TextStyle(fontSize: 8),
+        ),
+        pw.SizedBox(height: 4),
+        if (_hasBuyerInfo) ...[
+          pw.Text(
+            'BILL TO',
+            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+          ),
+          if (widget.buyerName?.isNotEmpty ?? false)
+            pw.Text(widget.buyerName!,
+                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+          if (widget.buyerPhone?.isNotEmpty ?? false)
+            pw.Text(widget.buyerPhone!, style: const pw.TextStyle(fontSize: 8)),
+          if (widget.buyerAddress?.isNotEmpty ?? false)
+            pw.Text(widget.buyerAddress!, style: const pw.TextStyle(fontSize: 8)),
+          pw.SizedBox(height: 4),
+          dashedDivider(),
+          pw.SizedBox(height: 4),
+        ],
+
+        // Items
+        ...widget.products.entries.map((entry) {
+          final product = entry.value;
+          final qty = widget.quantities[product.id]!;
+          final price = widget.prices[product.id]!;
+          final amount = qty * price;
+          final isPerFoot = widget.perFootItems[product.id] ?? false;
+          final qtyLabel = isPerFoot ? '$qty ft' : qty.toString();
+
+          return pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 4),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  '${product.name} (${product.size})',
+                  style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                ),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      '$qtyLabel x ${price.toStringAsFixed(2)}',
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                    pw.Text(
+                      'INR ${amount.toStringAsFixed(2)}',
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+
+        dashedDivider(),
+        pw.SizedBox(height: 4),
+
+        // Total
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'TOTAL',
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text(
+              'INR ${subtotal.toStringAsFixed(2)}',
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 4),
+        dashedDivider(),
+        pw.SizedBox(height: 4),
+
+        pw.Text(
+          'Payment: ${widget.paymentMethod}',
+          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+        ),
+        if (widget.paymentMethod == 'Credit' &&
+            (subtotal - widget.initialPayment) > 0) ...[
+          pw.Text(
+            'Due: INR ${(subtotal - widget.initialPayment).toStringAsFixed(2)}',
+            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+          ),
+        ],
+
+        if (widget.notes != null && widget.notes!.isNotEmpty) ...[
+          pw.SizedBox(height: 2),
+          pw.Text('Notes: ${widget.notes}', style: const pw.TextStyle(fontSize: 8)),
+        ],
+
+        pw.SizedBox(height: 6),
+        pw.Center(
+          child: pw.Text(
+            'Thank you for your business!',
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+          ),
+        ),
+        pw.SizedBox(height: 10),
+      ],
+    );
   }
 
   pw.Widget _buildTableCell(String text, {bool bold = false}) {
@@ -473,7 +765,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           // Header
           _buildHeader(),
           const Divider(height: 1, thickness: 2),
-
+          _buildBuyerInfo(),
 
           // Items
           Padding(
@@ -507,6 +799,39 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
           // Footer
           _buildFooter(),
+        ],
+      ),
+    );
+  }
+
+  bool get _hasBuyerInfo =>
+      (widget.buyerName?.isNotEmpty ?? false) ||
+      (widget.buyerPhone?.isNotEmpty ?? false) ||
+      (widget.buyerAddress?.isNotEmpty ?? false);
+
+  Widget _buildBuyerInfo() {
+    if (!_hasBuyerInfo) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'BILL TO',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (widget.buyerName?.isNotEmpty ?? false)
+            Text(widget.buyerName!,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          if (widget.buyerPhone?.isNotEmpty ?? false)
+            Text(widget.buyerPhone!, style: const TextStyle(fontSize: 13)),
+          if (widget.buyerAddress?.isNotEmpty ?? false)
+            Text(widget.buyerAddress!, style: const TextStyle(fontSize: 13)),
         ],
       ),
     );
@@ -771,27 +1096,47 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   }
 
   Widget _buildPaymentInfo() {
+    final isCredit = widget.paymentMethod == 'Credit';
+    final due = _calculateSubtotal() - widget.initialPayment;
     return Container(
       padding: const EdgeInsets.all(16),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            widget.paymentMethod == 'Cash'
-                ? Icons.money
-                : widget.paymentMethod == 'Card'
-                ? Icons.credit_card
-                : Icons.account_balance,
-            size: 20,
-            color: Colors.grey[600],
+          Row(
+            children: [
+              Icon(
+                widget.paymentMethod == 'Cash'
+                    ? Icons.money
+                    : widget.paymentMethod == 'Card'
+                    ? Icons.credit_card
+                    : isCredit
+                    ? Icons.schedule
+                    : Icons.account_balance,
+                size: 20,
+                color: Colors.grey[600],
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Payment Method: ${widget.paymentMethod}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Text(
-            'Payment Method: ${widget.paymentMethod}',
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
+          if (isCredit && due > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Due: ₹${due.toStringAsFixed(2)}',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: Colors.red.shade700,
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -837,7 +1182,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         children: [
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: _isSaving ? null : _printBill,
+              onPressed: _isSaving ? null : _showPrintOptions,
               icon: const Icon(Icons.print),
               label: const Text('Print Bill'),
               style: OutlinedButton.styleFrom(

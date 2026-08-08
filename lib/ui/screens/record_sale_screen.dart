@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
 import '../../services/firebase_service.dart';
+import '../../services/invoice_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../screens/bill_preview_screen.dart';
@@ -56,9 +57,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final SalesService _salesService = SalesService();
   final SettingsService _settingsService = SettingsService();
+  final InvoiceService _invoiceService = InvoiceService();
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _cartSearchController = TextEditingController();
+  final TextEditingController _buyerNameController = TextEditingController();
+  final TextEditingController _buyerPhoneController = TextEditingController();
+  final TextEditingController _buyerAddressController = TextEditingController();
+  final TextEditingController _creditPaidController = TextEditingController();
 
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
@@ -69,8 +75,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   List<String> _cartItemOrder = []; // Track order of items added to cart
 
   // Pipe lines sold by the foot instead of by whole unit (see
-  // _pipeFeetPerUnit) — keyed by productId, same as _customPrices. Stock is
-  // never deducted for these, even on a real sale.
+  // Product.feetPerPipe) — keyed by productId, same as _customPrices. Stock
+  // is deducted in whole pipes via _stockUnitsFor, not by the foot.
   Map<String, bool> _perFootItems = {};
 
   // Custom items (non-inventory items)
@@ -345,17 +351,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
   }
 
-  // Standard pipe length (feet) per category — lets pipes be sold by the
-  // foot instead of by whole unit. Stock is tracked in whole pipes, so
-  // per-foot sales never touch it (see _addToCartWithPrice/SalesService).
-  static const Map<String, int> _pipeFeetPerUnit = {
-    'ppr': 10,
-    'cpvc': 10,
-    'pvc': 20,
-  };
+  int? _feetPerPipeFor(Product product) => product.feetPerPipe;
 
-  int? _feetPerPipeFor(Product product) =>
-      _pipeFeetPerUnit[product.category.toLowerCase()];
+  // Whole stock units (pipes) a cart line should deduct: the feet requested
+  // divided by feet-per-pipe, rounded up, for per-foot lines; the plain
+  // quantity otherwise. Stock is allowed to go negative for per-foot sales —
+  // cut-pipe remainders aren't tracked, so this never blocks the sale.
+  int _stockUnitsFor(Product product, int quantity, bool isPerFoot) {
+    if (!isPerFoot) return quantity;
+    final feet = product.feetPerPipe;
+    if (feet == null || feet <= 0) return quantity;
+    return (quantity / feet).ceil();
+  }
 
   // Distinct sizes present given a category+subcategory scope, used to
   // populate the Filters sheet's size chips.
@@ -1270,6 +1277,89 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   /// Toggle that marks the current sale as a mock (test) sale.
   /// [afterChange] lets a modal sheet refresh its own state too.
+  /// Optional buyer contact fields (kept collapsed by default so a quick
+  /// walk-in cash sale isn't slowed down) plus, when Credit is the selected
+  /// payment method, an "amount received now" field for partial upfront
+  /// payment. Shared between the desktop side panel and the mobile bottom
+  /// sheet, same pattern as [_buildMockSaleTile].
+  Widget _buildBuyerAndCreditSection({VoidCallback? afterChange}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              title: const Text(
+                'Buyer Details (optional)',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'For future reference on the bill',
+                style: TextStyle(fontSize: 11),
+              ),
+              children: [
+                TextField(
+                  controller: _buyerNameController,
+                  decoration: InputDecoration(
+                    labelText: 'Name',
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _buyerPhoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(
+                    labelText: 'Phone',
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _buyerAddressController,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Address',
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_paymentMethod == 'Credit') ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: _creditPaidController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Amount received now (optional)',
+                hintText: '0',
+                prefixText: '₹',
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildMockSaleTile({VoidCallback? afterChange}) {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -1503,15 +1593,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     try {
       // Create sale items from regular products
       final saleItems = _selectedProducts.map((product) {
+        final quantity = _selectedQuantities[product.id]!;
+        final isPerFoot = _perFootItems[product.id] ?? false;
         return SaleItem(
           productId: product.id,
           productName: product.name,
           productSize: product.size,
-          quantity: _selectedQuantities[product.id]!,
+          quantity: quantity,
           salePrice: _customPrices[product.id]!,
-          purchasePrice: product.purchasePrice,
+          purchasePrice: _effectiveUnitCost(product),
           imageBase64: product.imageBase64,
-          isPerFoot: _perFootItems[product.id] ?? false,
+          isPerFoot: isPerFoot,
+          stockUnits: _stockUnitsFor(product, quantity, isPerFoot),
         );
       }).toList();
 
@@ -1542,13 +1635,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         case 'card':
           paymentMethodEnum = PaymentMethod.card;
           break;
+        case 'credit':
+          paymentMethodEnum = PaymentMethod.credit;
+          break;
         default:
           paymentMethodEnum = PaymentMethod.other;
       }
 
+      final invoiceNumber = await _invoiceService.getNextInvoiceNumber();
+
       final sale = Sale(
         id: '',
-        invoiceNumber: 0, // Will be set by the service
+        invoiceNumber: invoiceNumber,
         items: saleItems,
         totalAmount: _totalAmount,
         paymentMethod: paymentMethodEnum,
@@ -1556,6 +1654,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ? null
             : _notesController.text.trim(),
         isMock: _isMockSale,
+        buyerName: _buyerNameController.text.trim().isEmpty
+            ? null
+            : _buyerNameController.text.trim(),
+        buyerPhone: _buyerPhoneController.text.trim().isEmpty
+            ? null
+            : _buyerPhoneController.text.trim(),
+        buyerAddress: _buyerAddressController.text.trim().isEmpty
+            ? null
+            : _buyerAddressController.text.trim(),
+        amountPaid: paymentMethodEnum == PaymentMethod.credit
+            ? (double.tryParse(_creditPaidController.text) ?? 0)
+            : null,
       );
 
       await _salesService.createSale(sale);
@@ -1572,6 +1682,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _customItems.clear();
           _customItemOrder.clear();
           _notesController.clear();
+          _buyerNameController.clear();
+          _buyerPhoneController.clear();
+          _buyerAddressController.clear();
+          _creditPaidController.clear();
           _searchController.clear();
           _cartSearchController.clear();
           _isMockSale = false;
@@ -2417,7 +2531,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
-                  children: ['Cash', 'UPI', 'Card', 'Other'].map((method) {
+                  children: ['Cash', 'UPI', 'Card', 'Credit', 'Other'].map((method) {
                     return ChoiceChip(
                       label: Text(method),
                       selected: _paymentMethod == method,
@@ -2425,6 +2539,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     );
                   }).toList(),
                 ),
+                _buildBuyerAndCreditSection(),
                 _buildMockSaleTile(),
                 const SizedBox(height: 16),
                 TextField(
@@ -2721,7 +2836,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
-                          children: ['Cash', 'UPI', 'Card', 'Other'].map((method) {
+                          children: ['Cash', 'UPI', 'Card', 'Credit', 'Other'].map((method) {
                             final isSelected = _paymentMethod == method;
                             return ChoiceChip(
                               label: Text(method),
@@ -2733,6 +2848,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             );
                           }).toList(),
                         ),
+                        _buildBuyerAndCreditSection(afterChange: () => setModalState(() {})),
                         _buildMockSaleTile(afterChange: () => setModalState(() {})),
                         const SizedBox(height: 16),
                         TextField(
@@ -2925,9 +3041,17 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
     // Prepare data for bill preview
     final Map<String, Product> selectedProducts = {};
+    final Map<String, double> unitCosts = {};
+    final Map<String, int> stockUnitsMap = {};
     for (final productId in _selectedQuantities.keys) {
       final product = _allProducts.firstWhere((p) => p.id == productId);
       selectedProducts[productId] = product;
+      unitCosts[productId] = _effectiveUnitCost(product);
+      stockUnitsMap[productId] = _stockUnitsFor(
+        product,
+        _selectedQuantities[productId]!,
+        _perFootItems[productId] ?? false,
+      );
     }
 
     // Navigate to bill preview
@@ -2939,11 +3063,25 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           quantities: _selectedQuantities,
           prices: _customPrices,
           perFootItems: _perFootItems,
+          unitCosts: unitCosts,
+          stockUnitsMap: stockUnitsMap,
           paymentMethod: _paymentMethod,
           notes: _notesController.text.trim().isEmpty
               ? null
               : _notesController.text.trim(),
           isMock: _isMockSale,
+          buyerName: _buyerNameController.text.trim().isEmpty
+              ? null
+              : _buyerNameController.text.trim(),
+          buyerPhone: _buyerPhoneController.text.trim().isEmpty
+              ? null
+              : _buyerPhoneController.text.trim(),
+          buyerAddress: _buyerAddressController.text.trim().isEmpty
+              ? null
+              : _buyerAddressController.text.trim(),
+          initialPayment: _paymentMethod == 'Credit'
+              ? (double.tryParse(_creditPaidController.text) ?? 0)
+              : 0,
         ),
       ),
     );
@@ -2960,6 +3098,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _notesController.clear();
         _searchController.clear();
         _cartSearchController.clear();
+        _buyerNameController.clear();
+        _buyerPhoneController.clear();
+        _buyerAddressController.clear();
+        _creditPaidController.clear();
         _isMockSale = false;
         _discountPercent = 0;
       });
@@ -2983,6 +3125,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     _searchController.dispose();
     _notesController.dispose();
     _cartSearchController.dispose();
+    _buyerNameController.dispose();
+    _buyerPhoneController.dispose();
+    _buyerAddressController.dispose();
+    _creditPaidController.dispose();
     super.dispose();
   }
 }

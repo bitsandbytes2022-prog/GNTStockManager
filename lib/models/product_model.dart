@@ -173,4 +173,19 @@ class Product {
   // Get display price with rupee symbol
   String get displayPurchasePrice => '₹${purchasePrice.toStringAsFixed(2)}';
   String get displaySalePrice => '₹${salePrice.toStringAsFixed(2)}';
+
+  // Standard pipe length (feet) per pipe type — lets pipes be sold by the
+  // foot instead of by whole unit (e.g. cutting 12ft off a 20ft PVC pipe).
+  // The pipe type is usually a subcategory (e.g. category "Sanitary" /
+  // subcategory "PVC"), but some shops may use it as the category directly,
+  // so both are checked.
+  static const Map<String, int> pipeFeetPerUnit = {
+    'ppr': 10,
+    'cpvc': 10,
+    'pvc': 20,
+  };
+
+  int? get feetPerPipe =>
+      pipeFeetPerUnit[category.toLowerCase()] ??
+      (subcategory != null ? pipeFeetPerUnit[subcategory!.toLowerCase()] : null);
 }

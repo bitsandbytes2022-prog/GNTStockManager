@@ -58,9 +58,14 @@ class SaleItem {
 
   /// True when this line was sold by length (e.g. a pipe cut to a number of
   /// feet) rather than by whole unit. [quantity] holds feet in that case.
-  /// Per-foot lines never deduct stock, even on a real (non-mock) sale —
-  /// the app doesn't track cut-pipe remainders.
   final bool isPerFoot;
+
+  /// Whole stock units (e.g. pipes) this line should deduct from stock.
+  /// For ordinary lines this equals [quantity]. For per-foot lines it's the
+  /// number of whole pipes consumed (feet / feet-per-pipe, rounded up),
+  /// computed at sale-creation time since [Product] isn't available later.
+  /// Null on older records — see [effectiveStockUnits].
+  final int? stockUnits;
 
   SaleItem({
     required this.productId,
@@ -71,7 +76,14 @@ class SaleItem {
     required this.quantity,
     this.imageBase64,
     this.isPerFoot = false,
+    this.stockUnits,
   }) : total = salePrice * quantity;
+
+  /// Stock units to apply for this line. Falls back to [quantity] for
+  /// ordinary lines and 0 for per-foot lines saved before [stockUnits]
+  /// existed, matching how those older records already behaved (per-foot
+  /// sales never touched stock until stockUnits was introduced).
+  int get effectiveStockUnits => stockUnits ?? (isPerFoot ? 0 : quantity);
 
   Map<String, dynamic> toMap() => {
     'productId': productId,
@@ -83,6 +95,7 @@ class SaleItem {
     'total': total,
     'imageBase64': imageBase64,
     'isPerFoot': isPerFoot,
+    'stockUnits': stockUnits,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -95,6 +108,7 @@ class SaleItem {
       quantity: map['quantity'] ?? 0,
       imageBase64: map['imageBase64'],
       isPerFoot: map['isPerFoot'] == true,
+      stockUnits: map['stockUnits'] as int?,
     );
   }
 
@@ -108,6 +122,7 @@ class SaleItem {
     double? purchasePrice,
     String? imageBase64,
     bool? isPerFoot,
+    int? stockUnits,
   }) {
     return SaleItem(
       productId: productId ?? this.productId,
@@ -118,6 +133,32 @@ class SaleItem {
       quantity: quantity ?? this.quantity,
       imageBase64: imageBase64 ?? this.imageBase64,
       isPerFoot: isPerFoot ?? this.isPerFoot,
+      stockUnits: stockUnits ?? this.stockUnits,
+    );
+  }
+}
+
+/// A single payment received against a sale, used to build up [Sale.amountPaid]
+/// over time for credit sales that are settled in installments.
+class Payment {
+  final double amount;
+  final DateTime date;
+  final String? note;
+
+  Payment({required this.amount, DateTime? date, this.note})
+      : date = date ?? DateTime.now();
+
+  Map<String, dynamic> toMap() => {
+    'amount': amount,
+    'date': Timestamp.fromDate(date),
+    'note': note,
+  };
+
+  factory Payment.fromMap(Map<String, dynamic> map) {
+    return Payment(
+      amount: (map['amount'] ?? 0).toDouble(),
+      date: (map['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      note: map['note'],
     );
   }
 }
@@ -135,6 +176,20 @@ class Sale {
   /// revenue/profit analytics. Used to check profit on a hypothetical sale.
   final bool isMock;
 
+  // Optional buyer details, recorded for future reference on the bill.
+  final String? buyerName;
+  final String? buyerPhone;
+  final String? buyerAddress;
+
+  /// How much of [totalAmount] has actually been received so far. Defaults
+  /// to the full amount for every payment method except Credit, where it
+  /// defaults to 0 (nothing received yet) unless an initial amount is given.
+  final double amountPaid;
+
+  /// History of payments recorded against this sale (used for Credit sales
+  /// settled across multiple visits).
+  final List<Payment> payments;
+
   Sale({
     required this.id,
     required this.invoiceNumber,
@@ -144,19 +199,38 @@ class Sale {
     this.notes,
     this.paymentMethod = PaymentMethod.cash,
     this.isMock = false,
-  }) : createdAt = createdAt ?? DateTime.now();
+    this.buyerName,
+    this.buyerPhone,
+    this.buyerAddress,
+    double? amountPaid,
+    List<Payment>? payments,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        amountPaid =
+            amountPaid ?? (paymentMethod == PaymentMethod.credit ? 0 : totalAmount),
+        payments = payments ?? const [];
+
+  double get amountDue => (totalAmount - amountPaid).clamp(0, double.infinity);
+  bool get isFullyPaid => amountDue <= 0.001;
+  bool get isCredit => paymentMethod == PaymentMethod.credit;
 
   Map<String, dynamic> toFirestore() => {
+    'invoiceNumber': invoiceNumber,
     'items': items.map((item) => item.toMap()).toList(),
     'totalAmount': totalAmount,
     'createdAt': Timestamp.fromDate(createdAt),
     'notes': notes,
     'paymentMethod': paymentMethod.value,
     'isMock': isMock,
+    'buyerName': buyerName,
+    'buyerPhone': buyerPhone,
+    'buyerAddress': buyerAddress,
+    'amountPaid': amountPaid,
+    'payments': payments.map((p) => p.toMap()).toList(),
   };
 
   factory Sale.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final totalAmount = (data['totalAmount'] ?? 0).toDouble();
     return Sale(
       id: doc.id,
       invoiceNumber: data['invoiceNumber']??0,
@@ -164,25 +238,42 @@ class Sale {
           ?.map((item) => SaleItem.fromMap(item as Map<String, dynamic>))
           .toList() ??
           [],
-      totalAmount: (data['totalAmount'] ?? 0).toDouble(),
+      totalAmount: totalAmount,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       notes: data['notes'],
       paymentMethod: data['paymentMethod'] != null
           ? PaymentMethodExtension.fromString(data['paymentMethod'])
           : PaymentMethod.cash,
       isMock: data['isMock'] == true,
+      buyerName: data['buyerName'],
+      buyerPhone: data['buyerPhone'],
+      buyerAddress: data['buyerAddress'],
+      // Older records predate amountPaid — they were always paid in full.
+      amountPaid: data['amountPaid'] != null
+          ? (data['amountPaid'] as num).toDouble()
+          : totalAmount,
+      payments: (data['payments'] as List?)
+          ?.map((p) => Payment.fromMap(p as Map<String, dynamic>))
+          .toList() ??
+          const [],
     );
   }
 
   // Added copyWith method for Sale
   Sale copyWith({
     String? id,
+    int? invoiceNumber,
     List<SaleItem>? items,
     double? totalAmount,
     DateTime? createdAt,
     String? notes,
     PaymentMethod? paymentMethod,
     bool? isMock,
+    String? buyerName,
+    String? buyerPhone,
+    String? buyerAddress,
+    double? amountPaid,
+    List<Payment>? payments,
   }) {
     return Sale(
       id: id ?? this.id,
@@ -193,6 +284,11 @@ class Sale {
       notes: notes ?? this.notes,
       paymentMethod: paymentMethod ?? this.paymentMethod,
       isMock: isMock ?? this.isMock,
+      buyerName: buyerName ?? this.buyerName,
+      buyerPhone: buyerPhone ?? this.buyerPhone,
+      buyerAddress: buyerAddress ?? this.buyerAddress,
+      amountPaid: amountPaid ?? this.amountPaid,
+      payments: payments ?? this.payments,
     );
   }
 }

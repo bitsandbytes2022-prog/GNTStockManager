@@ -64,18 +64,20 @@ class SalesService {
     // touch product sold-counts, and are kept out of the revenue/profit
     // counters that feed the dashboard.
     if (!sale.isMock) {
-      // 2. Update stock and sales tracking for each product. Per-foot lines
-      // (pipes cut to length) skip this entirely, even on a real sale — the
-      // app doesn't track cut-pipe remainders, so stock stays untouched.
+      // 2. Update stock and sales tracking for each product. Custom items
+      // (added via "Add Custom Item") have no real product doc, so they're
+      // skipped here — a batch update on a nonexistent doc would fail the
+      // whole commit. Per-foot lines (pipes cut to length) deduct whole
+      // pipes via effectiveStockUnits rather than the feet in `quantity`.
       for (final item in sale.items) {
-        if (item.isPerFoot) continue;
+        if (item.productId.startsWith('custom_')) continue;
 
         final productRef = _firestore
             .collection(_productsCollection)
             .doc(item.productId);
 
         batch.update(productRef, {
-          'stock': FieldValue.increment(-item.quantity),
+          'stock': FieldValue.increment(-item.effectiveStockUnits),
           'totalSold': FieldValue.increment(item.quantity),
           'saleCount': FieldValue.increment(1),
           'lastSoldAt': FieldValue.serverTimestamp(),
@@ -125,16 +127,7 @@ class SalesService {
 
     // Update cache optimistically
     if (_cachedSales != null) {
-      final newSale = Sale(
-         invoiceNumber: sale.invoiceNumber,
-        id: saleRef.id,
-        items: sale.items,
-        totalAmount: sale.totalAmount,
-        createdAt: sale.createdAt,
-        notes: sale.notes,
-        paymentMethod: sale.paymentMethod,
-        isMock: sale.isMock,
-      );
+      final newSale = sale.copyWith(id: saleRef.id);
       _cachedSales!.insert(0, newSale);
       debugPrint('⚡ Sale added to cache');
     }
@@ -223,12 +216,19 @@ class SalesService {
           'refundAmount': itemRefund,
         });
 
-        // Update product stock and counters — skipped for per-foot lines,
-        // since they never deducted stock in the first place.
-        if (!item.isPerFoot) {
+        // Update product stock and counters — skipped for custom items
+        // (no real product doc). Stock is restored proportionally to the
+        // fraction of the line being returned, using effectiveStockUnits
+        // rather than returnQty directly so per-foot lines restore whole
+        // pipes instead of feet (this also reduces to exactly returnQty
+        // for ordinary lines, where effectiveStockUnits == quantity).
+        if (!item.productId.startsWith('custom_')) {
+          final restoreUnits = item.quantity > 0
+              ? (item.effectiveStockUnits * returnQty / item.quantity).round()
+              : 0;
           final productRef = _firestore.collection(_productsCollection).doc(item.productId);
           batch.update(productRef, {
-            'stock': FieldValue.increment(returnQty), // Restore stock
+            'stock': FieldValue.increment(restoreUnits), // Restore stock
             'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
           });
         }
@@ -522,13 +522,16 @@ class SalesService {
       final Map<String, int> stockAdjustments = {};
       final bool skipStock = oldSale.isMock || newSale.isMock;
 
-      // Process old items - restore stock for removed/reduced items
-      // (per-foot lines never touched stock, so they're skipped here too)
+      // Process old items - restore stock for removed/reduced items.
+      // Uses effectiveStockUnits (not quantity) so per-foot lines adjust
+      // whole pipes rather than feet. Custom items have no real product
+      // doc and are skipped — a batch update on a nonexistent doc would
+      // fail the whole commit.
       for (final oldItem in (skipStock ? const <SaleItem>[] : oldSale.items)) {
-        if (oldItem.isPerFoot) continue;
+        if (oldItem.productId.startsWith('custom_')) continue;
 
         final productId = oldItem.productId;
-        final oldQty = oldItem.quantity;
+        final oldUnits = oldItem.effectiveStockUnits;
 
         // Find corresponding item in new sale
         final newItem = newSale.items.firstWhere(
@@ -543,23 +546,23 @@ class SalesService {
           ),
         );
 
-        final newQty = newItem.productId.isEmpty ? 0 : newItem.quantity;
-        final difference = oldQty - newQty;
+        final newUnits = newItem.productId.isEmpty ? 0 : newItem.effectiveStockUnits;
+        final difference = oldUnits - newUnits;
 
         if (difference != 0) {
           stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) + difference;
         }
       }
 
-      // Process new items - deduct stock for added/increased items
-      // (per-foot lines are skipped — they never deduct stock)
+      // Process new items - deduct stock for added items (custom items
+      // skipped, same reason as above).
       for (final newItem in (skipStock ? const <SaleItem>[] : newSale.items)) {
-        if (newItem.isPerFoot) continue;
+        if (newItem.productId.startsWith('custom_')) continue;
 
         final productId = newItem.productId;
         if (!oldSale.items.any((item) => item.productId == productId)) {
           // New item added
-          stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) - newItem.quantity;
+          stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) - newItem.effectiveStockUnits;
         }
       }
 
@@ -588,6 +591,44 @@ class SalesService {
     } catch (e) {
       throw Exception('Failed to update sale: $e');
     }
+  }
+
+  // ==========================================
+  // RECORD PAYMENT (Credit sales)
+  // ==========================================
+  /// Records a payment against a Credit sale's outstanding balance. Used to
+  /// settle credit sales gradually across multiple visits.
+  Future<void> recordPayment({
+    required String saleId,
+    required double amount,
+    String? note,
+  }) async {
+    if (amount <= 0) {
+      throw Exception('Payment amount must be greater than 0');
+    }
+
+    final saleRef = _firestore.collection(_salesCollection).doc(saleId);
+    final saleDoc = await saleRef.get();
+    if (!saleDoc.exists) {
+      throw Exception('Sale not found');
+    }
+
+    final sale = Sale.fromFirestore(saleDoc);
+    if (amount > sale.amountDue + 0.001) {
+      throw Exception(
+          'Payment (₹${amount.toStringAsFixed(2)}) exceeds amount due (₹${sale.amountDue.toStringAsFixed(2)})');
+    }
+
+    final payment = Payment(amount: amount, note: note);
+    await saleRef.update({
+      'amountPaid': FieldValue.increment(amount),
+      'payments': FieldValue.arrayUnion([payment.toMap()]),
+    });
+
+    // Clear cache to force refresh
+    clearCache();
+
+    debugPrint('✅ Payment recorded: ₹$amount for sale $saleId');
   }
 
 
@@ -632,17 +673,18 @@ class SalesService {
     // A mock sale never applied any stock/stat changes, so deleting it must
     // not restore stock or adjust the counters either.
     if (!sale.isMock) {
-      // 2. Restore stock and adjust sales tracking — skipped for per-foot
-      // lines, since they never deducted stock in the first place.
+      // 2. Restore stock and adjust sales tracking — skipped for custom
+      // items (no real product doc). Uses effectiveStockUnits so per-foot
+      // lines restore whole pipes rather than feet.
       for (final item in items) {
-        if (item.isPerFoot) continue;
+        if (item.productId.startsWith('custom_')) continue;
 
         final productRef = _firestore
             .collection(_productsCollection)
             .doc(item.productId);
 
         batch.update(productRef, {
-          'stock': FieldValue.increment(item.quantity),
+          'stock': FieldValue.increment(item.effectiveStockUnits),
           'totalSold': FieldValue.increment(-item.quantity),
           'saleCount': FieldValue.increment(-1),
         });

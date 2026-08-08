@@ -216,16 +216,43 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Create updated sale items
+      // Create updated sale items. isPerFoot isn't editable here (no
+      // per-foot toggle in this screen), so it's carried over from the
+      // matching original line — otherwise it would silently reset to
+      // false and corrupt the stock/margin math for that item.
       final updatedSaleItems = _selectedProducts.map((product) {
+        final originalItem = widget.sale.items.firstWhere(
+          (item) => item.productId == product.id,
+          orElse: () => SaleItem(
+            productId: product.id,
+            productName: product.name,
+            productSize: product.size,
+            quantity: 0,
+            salePrice: 0,
+            purchasePrice: 0,
+          ),
+        );
+        final isPerFoot = originalItem.isPerFoot;
+        final quantity = _selectedQuantities[product.id]!;
+        final purchasePrice = isPerFoot && product.feetPerPipe != null
+            ? product.purchasePrice / product.feetPerPipe!
+            : product.purchasePrice;
+        final stockUnits = isPerFoot
+            ? (product.feetPerPipe != null && product.feetPerPipe! > 0
+                ? (quantity / product.feetPerPipe!).ceil()
+                : quantity)
+            : quantity;
+
         return SaleItem(
           productId: product.id,
           productName: product.name,
           productSize: product.size,
-          quantity: _selectedQuantities[product.id]!,
+          quantity: quantity,
           salePrice: _customPrices[product.id]!,
-          purchasePrice: product.purchasePrice,
+          purchasePrice: purchasePrice,
           imageBase64: product.imageBase64,
+          isPerFoot: isPerFoot,
+          stockUnits: stockUnits,
         );
       }).toList();
 
@@ -241,6 +268,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         case 'card':
           paymentMethodEnum = PaymentMethod.card;
           break;
+        case 'credit':
+          paymentMethodEnum = PaymentMethod.credit;
+          break;
         default:
           paymentMethodEnum = PaymentMethod.other;
       }
@@ -251,7 +281,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             (sum, item) => sum + (item.salePrice * item.quantity),
       );
 
-      // Create updated sale object
+      // Create updated sale object. Buyer details and the credit
+      // payment ledger (amountPaid/payments) aren't editable in this
+      // screen, so they're carried over from the original sale rather
+      // than being dropped.
       final updatedSale = Sale(
         invoiceNumber: widget.sale.invoiceNumber,
         id: widget.sale.id,
@@ -261,6 +294,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         paymentMethod: paymentMethodEnum,
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         isMock: widget.sale.isMock, // Preserve mock flag through edits
+        buyerName: widget.sale.buyerName,
+        buyerPhone: widget.sale.buyerPhone,
+        buyerAddress: widget.sale.buyerAddress,
+        amountPaid: widget.sale.amountPaid,
+        payments: widget.sale.payments,
       );
 
       // Update sale with stock adjustments
@@ -584,7 +622,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     vertical: 12,
                   ),
                 ),
-                items: ['Cash', 'UPI', 'Card', 'Other']
+                items: ['Cash', 'UPI', 'Card', 'Credit', 'Other']
                     .map((method) => DropdownMenuItem(
                   value: method,
                   child: Text(method),
@@ -909,7 +947,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         filled: true,
                         fillColor: Colors.white,
                       ),
-                      items: ['Cash', 'UPI', 'Card', 'Other']
+                      items: ['Cash', 'UPI', 'Card', 'Credit', 'Other']
                           .map((method) => DropdownMenuItem(
                         value: method,
                         child: Text(method),

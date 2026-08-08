@@ -44,6 +44,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
   DateTime? _customStartDate;
   DateTime? _customEndDate;
   String _searchQuery = '';
+  bool _creditDueOnly = false;
 
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
@@ -161,6 +162,99 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
   }
 
+  Future<void> _recordPayment(Sale sale) async {
+    final amountController = TextEditingController(
+      text: sale.amountDue.toStringAsFixed(2),
+    );
+    final noteController = TextEditingController();
+
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Record Payment'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Amount due: ₹${sale.amountDue.toStringAsFixed(2)}',
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: amountController,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Amount received',
+                prefixText: '₹',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteController,
+              decoration: InputDecoration(
+                labelText: 'Note (optional)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = double.tryParse(amountController.text);
+              if (value == null || value <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid amount')),
+                );
+                return;
+              }
+              Navigator.pop(context, value);
+            },
+            child: const Text('Record'),
+          ),
+        ],
+      ),
+    );
+
+    if (amount == null) return;
+
+    try {
+      await _salesService.recordPayment(
+        saleId: sale.id,
+        amount: amount,
+        note: noteController.text.trim().isEmpty ? null : noteController.text.trim(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment of ₹${amount.toStringAsFixed(2)} recorded'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _refreshSales();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error recording payment: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _showSaleDetails(Sale sale) async {
     await showDialog(
       context: context,
@@ -259,6 +353,27 @@ class _SalesListScreenState extends State<SalesListScreen> {
               ),
 
               pw.Divider(thickness: 2),
+              if ((sale.buyerName?.isNotEmpty ?? false) ||
+                  (sale.buyerPhone?.isNotEmpty ?? false) ||
+                  (sale.buyerAddress?.isNotEmpty ?? false)) ...[
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'BILL TO',
+                  style: pw.TextStyle(
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.grey700,
+                  ),
+                ),
+                pw.SizedBox(height: 2),
+                if (sale.buyerName?.isNotEmpty ?? false)
+                  pw.Text(sale.buyerName!,
+                      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                if (sale.buyerPhone?.isNotEmpty ?? false)
+                  pw.Text(sale.buyerPhone!, style: const pw.TextStyle(fontSize: 10)),
+                if (sale.buyerAddress?.isNotEmpty ?? false)
+                  pw.Text(sale.buyerAddress!, style: const pw.TextStyle(fontSize: 10)),
+              ],
               pw.SizedBox(height: 12),
 
               // Items table
@@ -325,6 +440,16 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 'Payment Method: ${sale.paymentMethod.label}',
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
+              if (sale.isCredit && sale.amountDue > 0) ...[
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'Due: INR ${sale.amountDue.toStringAsFixed(2)}',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.red700,
+                  ),
+                ),
+              ],
 
               if (sale.notes != null && sale.notes!.isNotEmpty) ...[
                 pw.SizedBox(height: 8),
@@ -483,6 +608,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
           item.productName.toLowerCase().contains(query) ||
           item.productSize.toLowerCase().contains(query));
     }).toList();
+  }
+
+  List<Sale> _filterSalesByCreditDue(List<Sale> sales) {
+    if (!_creditDueOnly) return sales;
+    return sales.where((sale) => sale.isCredit && !sale.isFullyPaid).toList();
   }
 
   Map<String, dynamic> _calculateDetailedStats(List<Sale> sales) {
@@ -729,6 +859,27 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilterChip(
+                    label: const Text('Credit due'),
+                    avatar: Icon(
+                      Icons.schedule,
+                      size: 18,
+                      color: _creditDueOnly ? Colors.white : Colors.red.shade700,
+                    ),
+                    selected: _creditDueOnly,
+                    selectedColor: Colors.red.shade600,
+                    labelStyle: TextStyle(
+                      color: _creditDueOnly ? Colors.white : null,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    onSelected: (value) {
+                      setState(() => _creditDueOnly = value);
+                    },
+                  ),
+                ),
               ],
             ),
           ),
@@ -768,6 +919,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
         var filteredSales = _filterSalesByDateRange(snapshot.data ?? []);
         filteredSales = _filterSalesBySearch(filteredSales);
+        filteredSales = _filterSalesByCreditDue(filteredSales);
         return _buildSalesContent(filteredSales);
       },
     );
@@ -787,6 +939,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
         var filteredSales = _filterSalesByDateRange(snapshot.data ?? []);
         filteredSales = _filterSalesBySearch(filteredSales);
+        filteredSales = _filterSalesByCreditDue(filteredSales);
         return _buildSalesContent(filteredSales);
       },
     );
@@ -881,6 +1034,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   onDelete: () => _deleteSale(sale),
                   onReturn: () => _returnItems(sale),
                   onPrint: () => _printInvoice(sale),
+                  onRecordPayment: () => _recordPayment(sale),
                   profit: _calculateSaleProfit(sale),
                   profitPercentage: _calculateSaleProfitPercentage(sale),
                 );
@@ -1175,6 +1329,7 @@ class _SaleCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onReturn;
   final VoidCallback onPrint;
+  final VoidCallback onRecordPayment;
   final double profit;
   final double profitPercentage;
 
@@ -1185,6 +1340,7 @@ class _SaleCard extends StatelessWidget {
     required this.onReturn,
     required this.onEdit,
     required this.onPrint,
+    required this.onRecordPayment,
     required this.profit,
     required this.profitPercentage,
   });
@@ -1290,6 +1446,17 @@ class _SaleCard extends StatelessWidget {
                           ],
                         ),
                       ),
+                      if (sale.isCredit && !sale.isFullyPaid)
+                        const PopupMenuItem(
+                          value: 'recordPayment',
+                          child: Row(
+                            children: [
+                              Icon(Icons.payments_outlined, size: 18, color: Colors.green),
+                              SizedBox(width: 8),
+                              Text('Record Payment', style: TextStyle(fontSize: 13)),
+                            ],
+                          ),
+                        ),
                       const PopupMenuItem(
                         value: 'edit',
                         child: Row(
@@ -1330,6 +1497,8 @@ class _SaleCard extends StatelessWidget {
                         onDelete();
                       } else if (value == 'edit') {
                         onEdit();
+                      } else if (value == 'recordPayment') {
+                        onRecordPayment();
                       }
                     },
                   ),
@@ -1399,7 +1568,30 @@ class _SaleCard extends StatelessWidget {
 
               if (sale.paymentMethod != null) ...[
                 const SizedBox(height: 4),
-                _PaymentBadge(method: sale.paymentMethod!.label),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    _PaymentBadge(method: sale.paymentMethod!.label),
+                    if (sale.isCredit && !sale.isFullyPaid)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Text(
+                          'Due ₹${sale.amountDue.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ],
           ),
@@ -1598,6 +1790,81 @@ class _SaleDetailsDialog extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if ((sale.buyerName?.isNotEmpty ?? false) ||
+                        (sale.buyerPhone?.isNotEmpty ?? false)) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade100),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'BUYER',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            if (sale.buyerName?.isNotEmpty ?? false)
+                              Text(sale.buyerName!,
+                                  style: const TextStyle(
+                                      fontSize: 14, fontWeight: FontWeight.w600)),
+                            if (sale.buyerPhone?.isNotEmpty ?? false)
+                              Text(sale.buyerPhone!, style: const TextStyle(fontSize: 13)),
+                            if (sale.buyerAddress?.isNotEmpty ?? false)
+                              Text(sale.buyerAddress!, style: const TextStyle(fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (sale.isCredit) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: sale.isFullyPaid
+                              ? Colors.green.shade50
+                              : Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: sale.isFullyPaid
+                                ? Colors.green.shade100
+                                : Colors.red.shade100,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Amount Paid: ₹${sale.amountPaid.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              sale.isFullyPaid
+                                  ? 'Fully Paid'
+                                  : 'Due: ₹${sale.amountDue.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: sale.isFullyPaid
+                                    ? Colors.green.shade700
+                                    : Colors.red.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     ...sale.items.map((item) {
                       final itemProfit = _calculateItemProfit(item);
                       final itemTotal = item.quantity * item.salePrice;
