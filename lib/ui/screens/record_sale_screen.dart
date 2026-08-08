@@ -1763,8 +1763,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Create sale items from regular products
-      final saleItems = _selectedProducts.map((product) {
+      // Create sale items from regular products, in cart order (not
+      // _selectedProducts' catalog order) so the saved sale's item list
+      // matches the order they were actually added.
+      final saleItems = _selectedProductsOrdered.map((product) {
         final quantity = _selectedQuantities[product.id]!;
         final isPerFoot = _perFootItems[product.id] ?? false;
         return SaleItem(
@@ -3160,12 +3162,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       }
     }
 
-    // Prepare data for bill preview
+    // Prepare data for bill preview, in cart order — BillPreviewScreen
+    // builds the saved sale's item list from this map's iteration order.
     final Map<String, Product> selectedProducts = {};
     final Map<String, double> unitCosts = {};
     final Map<String, int> stockUnitsMap = {};
-    for (final productId in _selectedQuantities.keys) {
-      final product = _allProducts.firstWhere((p) => p.id == productId);
+    for (final product in _selectedProductsOrdered) {
+      final productId = product.id;
       selectedProducts[productId] = product;
       unitCosts[productId] = _effectiveUnitCost(product);
       stockUnitsMap[productId] = _stockUnitsFor(

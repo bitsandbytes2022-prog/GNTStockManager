@@ -34,6 +34,15 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   Map<String, int> _selectedQuantities = {};
   Map<String, double> _customPrices = {};
   Map<String, int> _originalQuantities = {}; // To track stock changes
+
+  /// productId -> sold-by-length (pipes cut to feet). Quantity for these
+  /// products is feet, not units — see Product.feetPerPipe.
+  Map<String, bool> _perFootItems = {};
+
+  /// Tracks item order (original sale order, then append-on-add) so the
+  /// saved sale's item list isn't silently reshuffled into product-catalog
+  /// order — see _selectedProducts below.
+  List<String> _cartItemOrder = [];
   String _searchQuery = '';
   String _cartSearchQuery = '';
   bool _isLoading = true;
@@ -67,11 +76,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _buyerAddressController.text = widget.sale.buyerAddress ?? '';
     _amountPaidController.text = widget.sale.amountPaid.toStringAsFixed(2);
 
-    // Populate selected items
+    // Populate selected items, preserving the original sale's item order
     for (final item in widget.sale.items) {
       _selectedQuantities[item.productId] = item.quantity;
       _customPrices[item.productId] = item.salePrice;
       _originalQuantities[item.productId] = item.quantity;
+      _perFootItems[item.productId] = item.isPerFoot;
+      _cartItemOrder.add(item.productId);
     }
   }
 
@@ -117,9 +128,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       if (_selectedQuantities.containsKey(product.id)) {
         _selectedQuantities.remove(product.id);
         _customPrices.remove(product.id);
+        _perFootItems.remove(product.id);
+        _cartItemOrder.remove(product.id);
       } else {
         _selectedQuantities[product.id] = 1;
         _customPrices[product.id] = product.salePrice;
+        _perFootItems[product.id] = false;
+        _cartItemOrder.add(product.id);
       }
     });
   }
@@ -129,6 +144,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       setState(() {
         _selectedQuantities.remove(productId);
         _customPrices.remove(productId);
+        _perFootItems.remove(productId);
       });
     } else {
       setState(() {
@@ -143,7 +159,27 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     });
   }
 
+  /// Toggling per-foot rescales the price the same way record_sale_screen's
+  /// add dialog does — otherwise switching modes leaves a per-pipe price on
+  /// a per-foot line (or vice versa), which then fails the minimum-price
+  /// check since that's scaled to match.
+  void _updatePerFoot(Product product, bool isPerFoot) {
+    setState(() {
+      _perFootItems[product.id] = isPerFoot;
+      final feet = product.feetPerPipe;
+      if (feet != null && feet > 0) {
+        _customPrices[product.id] =
+            isPerFoot ? product.salePrice / feet : product.salePrice;
+      }
+    });
+  }
+
   double _getMinimumPrice(Product product) {
+    final isPerFoot = _perFootItems[product.id] ?? false;
+    final feet = product.feetPerPipe;
+    if (isPerFoot && feet != null && feet > 0) {
+      return (product.purchasePrice / feet) * 0.50;
+    }
     return product.purchasePrice * 0.50;
   }
 
@@ -289,10 +325,20 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     return total;
   }
 
+  /// Selected products in cart order (original sale order, then any items
+  /// added during this edit, appended in the order they were added) —
+  /// not catalog order, so saving doesn't reshuffle the sale's item list.
   List<Product> get _selectedProducts {
-    return _allProducts
-        .where((p) => _selectedQuantities.containsKey(p.id))
-        .toList();
+    final products = <Product>[];
+    for (final productId in _cartItemOrder) {
+      if (!_selectedQuantities.containsKey(productId)) continue;
+      try {
+        products.add(_allProducts.firstWhere((p) => p.id == productId));
+      } catch (_) {
+        // Product no longer in the catalog — skip it.
+      }
+    }
+    return products;
   }
 
   List<Product> get _filteredCartProducts {
@@ -357,10 +403,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Create updated sale items. isPerFoot isn't editable here (no
-      // per-foot toggle in this screen), so it's carried over from the
-      // matching original line — otherwise it would silently reset to
-      // false and corrupt the stock/margin math for that item.
+      // Create updated sale items. isPerFoot comes from the live toggle
+      // state (_perFootItems), which is seeded from each original line on
+      // load and updated by the per-foot switch in the cart — falling back
+      // to the original line covers any item that map somehow doesn't
+      // cover, so it never silently resets to false.
       final updatedSaleItems = _selectedProducts.map((product) {
         final originalItem = widget.sale.items.firstWhere(
           (item) => item.productId == product.id,
@@ -373,7 +420,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             purchasePrice: 0,
           ),
         );
-        final isPerFoot = originalItem.isPerFoot;
+        final isPerFoot = _perFootItems[product.id] ?? originalItem.isPerFoot;
         final quantity = _selectedQuantities[product.id]!;
         final purchasePrice = isPerFoot && product.feetPerPipe != null
             ? product.purchasePrice / product.feetPerPipe!
@@ -736,6 +783,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             onPriceChanged: (price) => _updatePrice(product.id, price),
                             onRemove: () => _toggleProduct(product),
                             minimumPrice: _getMinimumPrice(product),
+                            isPerFoot: _perFootItems[product.id] ?? false,
+                            onPerFootChanged: (value) => _updatePerFoot(product, value),
                           ),
                         _buildPaymentAndNotesSection(backgroundColor: Colors.white),
                       ],
@@ -1003,6 +1052,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                 setState(() => _toggleProduct(product));
                               },
                               minimumPrice: _getMinimumPrice(product),
+                              isPerFoot: _perFootItems[product.id] ?? false,
+                              onPerFootChanged: (value) {
+                                setState(() => _updatePerFoot(product, value));
+                              },
                             ),
                           _buildPaymentAndNotesSection(backgroundColor: Colors.grey.shade50),
                         ],
@@ -1222,6 +1275,8 @@ class _CartItem extends StatefulWidget {
   final Function(double) onPriceChanged;
   final VoidCallback onRemove;
   final double minimumPrice;
+  final bool isPerFoot;
+  final ValueChanged<bool>? onPerFootChanged;
 
   const _CartItem({
     required this.product,
@@ -1231,6 +1286,8 @@ class _CartItem extends StatefulWidget {
     required this.onPriceChanged,
     required this.onRemove,
     required this.minimumPrice,
+    this.isPerFoot = false,
+    this.onPerFootChanged,
   });
 
   @override
@@ -1314,12 +1371,35 @@ class _CartItemState extends State<_CartItem> {
                           fontSize: 14,
                         ),
                       ),
-                      Text(
-                        widget.product.size,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            widget.product.size,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          if (widget.isPerFoot) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.indigo.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.indigo.shade200),
+                              ),
+                              child: Text(
+                                'PER FOOT',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.indigo.shade700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
@@ -1336,6 +1416,33 @@ class _CartItemState extends State<_CartItem> {
                 ),
               ],
             ),
+            if (widget.product.feetPerPipe != null && widget.onPerFootChanged != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: widget.isPerFoot ? Colors.indigo.shade50 : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: widget.isPerFoot ? Colors.indigo.shade200 : Colors.grey.shade300,
+                  ),
+                ),
+                child: SwitchListTile(
+                  value: widget.isPerFoot,
+                  onChanged: (value) => widget.onPerFootChanged!(value),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Sell per Foot',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    'Each pipe is ${widget.product.feetPerPipe} ft',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
 
             // Quantity and price controls
@@ -1347,7 +1454,7 @@ class _CartItemState extends State<_CartItem> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Quantity',
+                        widget.isPerFoot ? 'Feet' : 'Quantity',
                         style: TextStyle(
                           fontSize: 11,
                           color: Colors.grey[600],
@@ -1369,7 +1476,7 @@ class _CartItemState extends State<_CartItem> {
                           ),
                           Expanded(
                             child: Text(
-                              '${widget.quantity}',
+                              widget.isPerFoot ? '${widget.quantity} ft' : '${widget.quantity}',
                               textAlign: TextAlign.center,
                               style: const TextStyle(
                                 fontSize: 16,
@@ -1379,7 +1486,7 @@ class _CartItemState extends State<_CartItem> {
                           ),
                           IconButton(
                             onPressed: () {
-                              if (widget.quantity < widget.product.stock) {
+                              if (widget.isPerFoot || widget.quantity < widget.product.stock) {
                                 widget.onQuantityChanged(widget.quantity + 1);
                               }
                             },
@@ -1402,7 +1509,7 @@ class _CartItemState extends State<_CartItem> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Price',
+                        widget.isPerFoot ? 'Price per foot' : 'Price',
                         style: TextStyle(
                           fontSize: 11,
                           color: Colors.grey[600],
