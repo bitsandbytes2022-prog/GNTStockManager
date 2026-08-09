@@ -46,6 +46,21 @@ class _SalesListScreenState extends State<SalesListScreen> {
   String _searchQuery = '';
   bool _creditDueOnly = false;
 
+  static const String _shopGstin = '02FDUPK4649R1ZK';
+  // Reprinted invoices don't have an interactive rate picker (unlike the
+  // new-sale bill preview), so use the same 18% default there is.
+  static const double _gstRate = 18;
+
+  double _taxableValue(double total) => total / (1 + _gstRate / 100);
+  double _cgstAmount(double total) => (total - _taxableValue(total)) / 2;
+  double _sgstAmount(double total) => _cgstAmount(total);
+  String get _halfRateLabel {
+    const half = _gstRate / 2;
+    return half == half.roundToDouble()
+        ? half.toStringAsFixed(0)
+        : half.toStringAsFixed(1);
+  }
+
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
 
@@ -317,6 +332,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
                           style: const pw.TextStyle(fontSize: 10),
                         ),
                         pw.Text(
+                          'GSTIN: $_shopGstin',
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                        pw.Text(
                           'Deals in: All type of hardware, Sanitary & Paints etc.',
                           style: pw.TextStyle(
                             fontSize: 10,
@@ -331,6 +350,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.end,
                       children: [
+                        pw.Text(
+                          'TAX INVOICE',
+                          style: pw.TextStyle(
+                            fontSize: 13,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
                         pw.Text(
                           'Invoice #${sale.invoiceNumber}',
                           style: pw.TextStyle(
@@ -418,7 +444,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
                   pw.Container(
-                    width: 200,
+                    width: 220,
                     padding: const pw.EdgeInsets.all(8),
                     decoration: pw.BoxDecoration(
                       border: pw.Border.all(color: PdfColors.grey400),
@@ -426,6 +452,16 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     ),
                     child: pw.Column(
                       children: [
+                        _buildPdfTotalRow(
+                            'Taxable Value:', _taxableValue(sale.totalAmount)),
+                        pw.SizedBox(height: 4),
+                        _buildPdfTotalRow(
+                            'CGST @ $_halfRateLabel%:', _cgstAmount(sale.totalAmount)),
+                        pw.SizedBox(height: 4),
+                        _buildPdfTotalRow(
+                            'SGST @ $_halfRateLabel%:', _sgstAmount(sale.totalAmount)),
+                        pw.SizedBox(height: 6),
+                        pw.Divider(),
                         _buildPdfTotalRow('Total:', sale.totalAmount, bold: true),
                       ],
                     ),
