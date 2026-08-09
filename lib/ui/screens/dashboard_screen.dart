@@ -5,6 +5,7 @@ import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
 import 'package:inventory_manager/ui/screens/category_settings_screen.dart';
 import 'package:inventory_manager/ui/screens/earnings_screen.dart';
  import 'package:inventory_manager/ui/screens/product_list_screen.dart';
+import 'package:inventory_manager/ui/screens/profile_screen.dart';
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
 import 'package:inventory_manager/ui/screens/sales_list_screen.dart';
 import 'package:inventory_manager/ui/screens/top_selling_screen.dart';
@@ -278,40 +279,41 @@ class _DesktopSidebar extends StatelessWidget {
 
           // Footer
           const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: Colors.grey.shade200,
-                  child: Icon(Icons.person, color: Colors.grey.shade600),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Admin User',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        'View Profile',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
+          InkWell(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ProfileScreen()),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: Colors.grey.shade200,
+                    child: Icon(Icons.person, color: Colors.grey.shade600),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined),
-                  onPressed: () {},
-                  color: Colors.grey.shade600,
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Admin User',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          'View Profile',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: Colors.grey.shade600),
+                ],
+              ),
             ),
           ),
         ],
