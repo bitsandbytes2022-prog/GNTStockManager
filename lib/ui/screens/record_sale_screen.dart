@@ -511,6 +511,44 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            Future<void> submit() async {
+              int? qty = int.tryParse(qtyController.text);
+              if (qty == null || qty <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a valid quantity'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                return;
+              }
+              if (!sellPerFoot && qty > product.stock) {
+                // Offer an inline stock fix instead of just blocking —
+                // covers "forgot to update stock after a restock"
+                // without losing anything already in the cart.
+                final resolved = await _resolveInsufficientStock([product]);
+                if (!resolved) return;
+                if (mounted) setState(() {});
+              }
+
+              double? price = double.tryParse(priceController.text);
+              if (price == null || price <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a valid price'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                return;
+              }
+
+              Navigator.of(context).pop({
+                'quantity': qty,
+                'price': price,
+                'isPerFoot': sellPerFoot,
+              });
+            }
+
             return AlertDialog(
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -665,14 +703,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               FilteringTextInputFormatter.digitsOnly,
                               LengthLimitingTextInputFormatter(4),
                             ],
-                            onSubmitted: (value) {
-                              int? qty = int.tryParse(value);
-                              if (qty != null &&
-                                  qty > 0 &&
-                                  (sellPerFoot || qty <= product.stock)) {
-                                Navigator.of(context).pop(qty);
-                              }
-                            },
+                            onSubmitted: (_) => submit(),
                           ),
                         ),
 
@@ -804,43 +835,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
                 // Add/Update button
                 FilledButton.icon(
-                  onPressed: () async {
-                    int? qty = int.tryParse(qtyController.text);
-                    if (qty == null || qty <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a valid quantity'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                      return;
-                    }
-                    if (!sellPerFoot && qty > product.stock) {
-                      // Offer an inline stock fix instead of just blocking —
-                      // covers "forgot to update stock after a restock"
-                      // without losing anything already in the cart.
-                      final resolved = await _resolveInsufficientStock([product]);
-                      if (!resolved) return;
-                      if (mounted) setState(() {});
-                    }
-
-                    double? price = double.tryParse(priceController.text);
-                    if (price == null || price <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a valid price'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                      return;
-                    }
-
-                    Navigator.of(context).pop({
-                      'quantity': qty,
-                      'price': price,
-                      'isPerFoot': sellPerFoot,
-                    });
-                  },
+                  onPressed: submit,
                   icon: Icon(isInCart ? Icons.update : Icons.add_shopping_cart),
                   label: Text(isInCart ? 'Update' : 'Add to Cart'),
                 ),
@@ -3401,7 +3396,7 @@ class _SuggestionCard extends StatelessWidget {
           ),
         ),
         child: InkWell(
-          onTap: isOutOfStock ? null : onTap,
+          onTap: onTap,
           borderRadius: BorderRadius.circular(12),
           child: Padding(
             padding: const EdgeInsets.all(8),
@@ -3524,7 +3519,9 @@ class _ProductCard extends StatelessWidget {
         ),
       ),
       child: InkWell(
-        onTap: isOutOfStock ? null : onTap,
+        // Tapping while out of stock still opens the quantity dialog —
+        // it routes into the insufficient-stock fix flow instead of a dead tap.
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
