@@ -349,6 +349,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               ),
               pw.SizedBox(height: 8),
               pw.Container(
+                width: double.infinity,
                 decoration: const pw.BoxDecoration(
                   border: pw.Border.fromBorderSide(
                     pw.BorderSide(color: PdfColors.black, width: 0.8),
@@ -359,7 +360,6 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   children: [
                     // Seller details + invoice meta
                     pw.Row(
-                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                       children: [
                         pw.Expanded(
                           flex: 3,
