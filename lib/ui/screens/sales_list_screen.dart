@@ -446,19 +446,22 @@ class _SalesListScreenState extends State<SalesListScreen> {
                           children: [
                             _buildPdfTableCell('Description of Goods', bold: true),
                             _buildPdfTableCell('Qty', bold: true),
-                            _buildPdfTableCell('Rate', bold: true),
+                            _buildPdfTableCell('Rate (Excl. GST)', bold: true),
                             _buildPdfTableCell('Amount', bold: true),
                           ],
                         ),
                         ...sale.items.map((item) {
-                          final amount = item.quantity * item.salePrice;
+                          // Item rows show the tax-exclusive rate/amount, so the
+                          // Amount column sums to the Taxable Value shown below.
+                          final displayPrice = _taxableValue(item.salePrice);
+                          final amount = item.quantity * displayPrice;
                           return pw.TableRow(
                             children: [
                               _buildPdfTableCell(
                                   '${item.productName} (${item.productSize})'),
                               _buildPdfTableCell(
                                   item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
-                              _buildPdfTableCell('INR ${item.salePrice.toStringAsFixed(2)}'),
+                              _buildPdfTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
                               _buildPdfTableCell('INR ${amount.toStringAsFixed(2)}'),
                             ],
                           );

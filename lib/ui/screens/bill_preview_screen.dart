@@ -484,7 +484,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                           children: [
                             _buildTableCell('Description of Goods', bold: true),
                             _buildTableCell('Qty', bold: true),
-                            _buildTableCell('Rate', bold: true),
+                            _buildTableCell(
+                                showGst ? 'Rate (Excl. GST)' : 'Rate', bold: true),
                             _buildTableCell('Amount', bold: true),
                           ],
                         ),
@@ -492,14 +493,17 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                           final product = entry.value;
                           final qty = widget.quantities[product.id]!;
                           final price = widget.prices[product.id]!;
-                          final amount = qty * price;
+                          // Item rows show the tax-exclusive rate/amount, so the
+                          // Amount column sums to the Taxable Value shown below.
+                          final displayPrice = showGst ? _taxableValue(price) : price;
+                          final amount = qty * displayPrice;
                           final isPerFoot = widget.perFootItems[product.id] ?? false;
 
                           return pw.TableRow(
                             children: [
                               _buildTableCell('${product.name} (${product.size})'),
                               _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
-                              _buildTableCell('INR ${price.toStringAsFixed(2)}'),
+                              _buildTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
                               _buildTableCell('INR ${amount.toStringAsFixed(2)}'),
                             ],
                           );
