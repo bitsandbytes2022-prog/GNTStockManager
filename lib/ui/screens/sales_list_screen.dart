@@ -10,6 +10,7 @@ import 'package:printing/printing.dart';
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../../utils/amount_in_words.dart';
+import '../../utils/pdf_fonts.dart';
 import 'package:inventory_manager/ui/screens/return_items_screen.dart';
 
 import 'edit_sales_screen.dart';
@@ -303,7 +304,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
       (sale.buyerAddress?.isNotEmpty ?? false);
 
   Future<pw.Document> _generateInvoicePdf(Sale sale) async {
-    final pdf = pw.Document();
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
+    );
     final due = sale.amountDue;
 
     pdf.addPage(

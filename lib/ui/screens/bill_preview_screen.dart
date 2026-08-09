@@ -13,6 +13,7 @@ import '../../models/sale_model.dart';
 import '../../services/invoice_service.dart';
 import '../../services/sales_service.dart';
 import '../../utils/amount_in_words.dart';
+import '../../utils/pdf_fonts.dart';
 
 class BillPreviewScreen extends StatefulWidget {
   final Map<String, Product> products;
@@ -306,7 +307,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     PdfPageFormat? format,
     bool thermal = false,
   }) async {
-    final pdf = pw.Document();
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
+    );
 
     pw.ImageProvider? logoImage;
     if (_logoBytes != null) {
