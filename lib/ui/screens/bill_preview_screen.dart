@@ -73,15 +73,49 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   final InvoiceService _invoiceService = InvoiceService();
   final SalesService _salesService = SalesService();
 
+  static const String _shopGstin = '02FDUPK4649R1ZK';
+
   int? _invoiceNumber;
   bool _isLoading = true;
   bool _isSaving = false;
   Uint8List? _logoBytes;
 
+  // GST breakup shown on the bill. Sale prices are treated as GST-inclusive
+  // (same assumption used elsewhere in the app — see GstCalculatorScreen and
+  // add_product_screen's bill-price math), so the customer's total never
+  // changes: this just reverse-calculates the taxable value + CGST/SGST
+  // split baked into that total.
+  bool _gstEnabled = true;
+  final TextEditingController _gstRateController =
+      TextEditingController(text: '18');
+
+  double get _gstRate => double.tryParse(_gstRateController.text) ?? 0;
+
+  double _taxableValue(double total) =>
+      _gstEnabled && _gstRate > 0 ? total / (1 + _gstRate / 100) : total;
+
+  double _cgstAmount(double total) =>
+      _gstEnabled && _gstRate > 0 ? (total - _taxableValue(total)) / 2 : 0;
+
+  double _sgstAmount(double total) => _cgstAmount(total);
+
+  String get _halfRateLabel {
+    final half = _gstRate / 2;
+    return half == half.roundToDouble()
+        ? half.toStringAsFixed(0)
+        : half.toStringAsFixed(1);
+  }
+
   @override
   void initState() {
     super.initState();
     _initialize();
+  }
+
+  @override
+  void dispose() {
+    _gstRateController.dispose();
+    super.dispose();
   }
 
   Future<void> _initialize() async {
@@ -331,6 +365,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                           'Nandpur, Teh. Amb, Distt. Una (H.P.)',
                           style: const pw.TextStyle(fontSize: 10),
                         ),
+                        if (_gstEnabled)
+                          pw.Text(
+                            'GSTIN: $_shopGstin',
+                            style: const pw.TextStyle(fontSize: 10),
+                          ),
                         pw.Text(
                           'Deals in: All type of hardware, Sanitary & Paints etc.',
                           style: pw.TextStyle(
@@ -348,7 +387,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
                       pw.Text(
-                        'Estimate',
+                        _gstEnabled ? 'Tax Invoice' : 'Estimate',
                         style: pw.TextStyle(
                           fontSize: 18,
                           fontWeight: pw.FontWeight.bold,
@@ -440,7 +479,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
                   pw.Container(
-                    width: 200,
+                    width: 220,
                     padding: const pw.EdgeInsets.all(8),
                     decoration: pw.BoxDecoration(
                       border: pw.Border.all(color: PdfColors.grey400),
@@ -448,7 +487,18 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     ),
                     child: pw.Column(
                       children: [
-                        // _buildTotalRow('Subtotal:', _calculateSubtotal()),
+                        if (_gstEnabled && _gstRate > 0) ...[
+                          _buildTotalRow(
+                              'Taxable Value:', _taxableValue(_calculateSubtotal())),
+                          pw.SizedBox(height: 4),
+                          _buildTotalRow('CGST @ $_halfRateLabel%:',
+                              _cgstAmount(_calculateSubtotal())),
+                          pw.SizedBox(height: 4),
+                          _buildTotalRow('SGST @ $_halfRateLabel%:',
+                              _sgstAmount(_calculateSubtotal())),
+                          pw.SizedBox(height: 6),
+                          pw.Divider(),
+                        ],
                         _buildTotalRow('Total:', _calculateSubtotal(), bold: true),
                       ],
                     ),
@@ -543,6 +593,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                 textAlign: pw.TextAlign.center,
                 style: const pw.TextStyle(fontSize: 8),
               ),
+              if (_gstEnabled)
+                pw.Text(
+                  'GSTIN: $_shopGstin',
+                  textAlign: pw.TextAlign.center,
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
               pw.Text(
                 'Deals in: Hardware, Sanitary & Paints',
                 textAlign: pw.TextAlign.center,
@@ -557,7 +613,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
         // Invoice details
         pw.Text(
-          'Estimate #: ${_invoiceNumber ?? 'N/A'}',
+          '${_gstEnabled ? 'Tax Invoice' : 'Estimate'} #: ${_invoiceNumber ?? 'N/A'}',
           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
         ),
         pw.Text(
@@ -620,6 +676,36 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
         dashedDivider(),
         pw.SizedBox(height: 4),
+
+        if (_gstEnabled && _gstRate > 0) ...[
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Taxable Value', style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('INR ${_taxableValue(subtotal).toStringAsFixed(2)}',
+                  style: const pw.TextStyle(fontSize: 8)),
+            ],
+          ),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('CGST @ $_halfRateLabel%',
+                  style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('INR ${_cgstAmount(subtotal).toStringAsFixed(2)}',
+                  style: const pw.TextStyle(fontSize: 8)),
+            ],
+          ),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('SGST @ $_halfRateLabel%',
+                  style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('INR ${_sgstAmount(subtotal).toStringAsFixed(2)}',
+                  style: const pw.TextStyle(fontSize: 8)),
+            ],
+          ),
+          pw.SizedBox(height: 4),
+        ],
 
         // Total
         pw.Row(
@@ -791,6 +877,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
           const Divider(height: 1),
 
+          _buildGstControl(),
+
           // Totals
           _buildTotals(subtotal, profit),
 
@@ -895,6 +983,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   'Nandpur, Teh. Amb, Distt. Una (H.P.)',
                   style: TextStyle(fontSize: 12, color: Colors.white),
                 ),
+                if (_gstEnabled)
+                  const Text(
+                    'GSTIN: $_shopGstin',
+                    style: TextStyle(fontSize: 12, color: Colors.white),
+                  ),
                 const SizedBox(height: 4),
                 Text(
                   'Deals in: All type of hardware, Sanitary & Paints etc.',
@@ -911,7 +1004,15 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                'ESTIMATE #: ${_invoiceNumber ?? 'N/A'}',
+                _gstEnabled ? 'TAX INVOICE' : 'ESTIMATE',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              Text(
+                '#: ${_invoiceNumber ?? 'N/A'}',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.white,
@@ -1032,7 +1133,58 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
   }
 
+  Widget _buildGstControl() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blue.shade100),
+        ),
+        child: Row(
+          children: [
+            Checkbox(
+              value: _gstEnabled,
+              onChanged: (v) => setState(() => _gstEnabled = v ?? true),
+            ),
+            const Text(
+              'Show GST (CGST + SGST)',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            if (_gstEnabled) ...[
+              const Text('Rate:', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 56,
+                child: TextField(
+                  controller: _gstRateController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.center,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    suffixText: '%',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTotals(double subtotal, double profit) {
+    final showGst = _gstEnabled && _gstRate > 0;
+    final taxable = _taxableValue(subtotal);
+    final cgst = _cgstAmount(subtotal);
+    final sgst = _sgstAmount(subtotal);
+
     return Container(
       padding: const EdgeInsets.all(16),
       color: Colors.grey[50],
@@ -1041,13 +1193,36 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Subtotal:', style: TextStyle(fontSize: 14)),
+              Text(showGst ? 'Taxable Value:' : 'Subtotal:',
+                  style: const TextStyle(fontSize: 14)),
               Text(
-                'INR ${subtotal.toStringAsFixed(2)}',
+                'INR ${taxable.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 14),
               ),
             ],
           ),
+          if (showGst) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('CGST @ $_halfRateLabel%:',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                Text('INR ${cgst.toStringAsFixed(2)}',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('SGST @ $_halfRateLabel%:',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                Text('INR ${sgst.toStringAsFixed(2)}',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+              ],
+            ),
+          ],
           const Divider(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
