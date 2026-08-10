@@ -279,10 +279,57 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
-  Future<void> _printInvoice(Sale sale) async {
+  Future<void> _showPrintOptions(Sale sale) async {
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Print As',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Standard (A4)'),
+                subtitle: const Text('Full-page printer'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _printInvoice(sale, thermal: false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Thermal Receipt (3" / 80mm)'),
+                subtitle: const Text('Thermal roll printer'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _printInvoice(sale, thermal: true);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _printInvoice(Sale sale, {required bool thermal}) async {
     try {
-      final pdf = await _generateInvoicePdf(sale);
+      final pdf = thermal
+          ? await _generateThermalInvoicePdf(sale)
+          : await _generateInvoicePdf(sale);
       await Printing.layoutPdf(
+        format: thermal ? PdfPageFormat.roll80 : PdfPageFormat.a4,
         onLayout: (PdfPageFormat format) async => pdf.save(),
       );
     } catch (e) {
@@ -604,6 +651,190 @@ class _SalesListScreenState extends State<SalesListScreen> {
               ),
             ),
           ];
+        },
+      ),
+    );
+
+    return pdf;
+  }
+
+  Future<pw.Document> _generateThermalInvoicePdf(Sale sale) async {
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
+    );
+    final due = sale.amountDue;
+
+    pw.Widget dashedDivider() => pw.Text(
+          '--------------------------------',
+          style: const pw.TextStyle(fontSize: 8),
+          textAlign: pw.TextAlign.center,
+        );
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.roll80,
+        build: (context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              pw.Center(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      'Guru Nanak Traders',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.Text(
+                      'Mobile: 7696379802',
+                      textAlign: pw.TextAlign.center,
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                    pw.Text(
+                      'Nandpur, Teh. Amb, Distt. Una (H.P.)',
+                      textAlign: pw.TextAlign.center,
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                    pw.Text(
+                      'GSTIN: $_shopGstin',
+                      textAlign: pw.TextAlign.center,
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                    pw.Text(
+                      'Deals in: Hardware, Sanitary & Paints',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              dashedDivider(),
+              pw.SizedBox(height: 4),
+
+              pw.Text(
+                'Tax Invoice #: ${sale.invoiceNumber}',
+                style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.Text(
+                'Date: ${DateFormat('dd/MM/yyyy').format(sale.createdAt)}  '
+                'Time: ${DateFormat('hh:mm a').format(sale.createdAt)}',
+                style: const pw.TextStyle(fontSize: 8),
+              ),
+              pw.SizedBox(height: 4),
+              if (_hasBuyerInfo(sale)) ...[
+                pw.Text(
+                  'BILL TO',
+                  style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                ),
+                if (sale.buyerName?.isNotEmpty ?? false)
+                  pw.Text(sale.buyerName!,
+                      style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                if (sale.buyerPhone?.isNotEmpty ?? false)
+                  pw.Text(sale.buyerPhone!, style: const pw.TextStyle(fontSize: 8)),
+                if (sale.buyerAddress?.isNotEmpty ?? false)
+                  pw.Text(sale.buyerAddress!, style: const pw.TextStyle(fontSize: 8)),
+                pw.SizedBox(height: 4),
+                dashedDivider(),
+                pw.SizedBox(height: 4),
+              ],
+
+              ...sale.items.map((item) {
+                final amount = item.quantity * item.salePrice;
+                final qtyLabel = item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
+                return pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 4),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        '${item.productName} (${item.productSize})',
+                        style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text('$qtyLabel x ${item.salePrice.toStringAsFixed(2)}',
+                              style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text('INR ${amount.toStringAsFixed(2)}',
+                              style: const pw.TextStyle(fontSize: 8)),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              }),
+
+              dashedDivider(),
+              pw.SizedBox(height: 4),
+
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Taxable Value', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('INR ${_taxableValue(sale.totalAmount).toStringAsFixed(2)}',
+                      style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('CGST @ $_halfRateLabel%', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('INR ${_cgstAmount(sale.totalAmount).toStringAsFixed(2)}',
+                      style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('SGST @ $_halfRateLabel%', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('INR ${_sgstAmount(sale.totalAmount).toStringAsFixed(2)}',
+                      style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+              pw.SizedBox(height: 4),
+
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('TOTAL',
+                      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('INR ${sale.totalAmount.toStringAsFixed(2)}',
+                      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.SizedBox(height: 4),
+              dashedDivider(),
+              pw.SizedBox(height: 4),
+
+              pw.Text(
+                'Payment: ${sale.paymentMethod.label}',
+                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+              ),
+              if (sale.isCredit && due > 0) ...[
+                pw.Text(
+                  'Due: INR ${due.toStringAsFixed(2)}',
+                  style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                ),
+              ],
+
+              if (sale.notes != null && sale.notes!.isNotEmpty) ...[
+                pw.SizedBox(height: 2),
+                pw.Text('Notes: ${sale.notes}', style: const pw.TextStyle(fontSize: 8)),
+              ],
+
+              pw.SizedBox(height: 6),
+              pw.Center(
+                child: pw.Text(
+                  'Thank you for your business!',
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+            ],
+          );
         },
       ),
     );
@@ -1214,7 +1445,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     onEdit: () => _editSale(sale),
                     onDelete: () => _deleteSale(sale),
                     onReturn: () => _returnItems(sale),
-                    onPrint: () => _printInvoice(sale),
+                    onPrint: () => _showPrintOptions(sale),
                     onRecordPayment: () => _recordPayment(sale),
                   );
                 },
