@@ -335,7 +335,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
         format: initialFormat,
         onLayout: (PdfPageFormat format) async {
           final pdf = thermal
-              ? await _generateThermalInvoicePdf(sale, format: format)
+              ? await _generateThermalInvoicePdf(sale)
               : await _generateInvoicePdf(sale, format: format);
           return pdf.save();
         },
@@ -683,7 +683,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return pdf;
   }
 
-  Future<pw.Document> _generateThermalInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
+  Future<pw.Document> _generateThermalInvoicePdf(Sale sale) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -698,7 +698,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     pdf.addPage(
       pw.Page(
-        pageFormat: format ?? PdfPageFormat.roll80,
+        // Always the true physical roll width — see bill_preview_screen.dart's
+        // identical thermal branch for why the negotiated `format` isn't
+        // trusted here.
+        pageFormat: PdfPageFormat.roll80,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,

@@ -327,7 +327,14 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     if (thermal) {
       pdf.addPage(
         pw.Page(
-          pageFormat: format ?? PdfPageFormat.roll80,
+          // Always the true physical roll width — thermal/POS printer
+          // drivers are unreliable about reporting the actual paper size
+          // via the OS print dialog (often falling back to a much wider
+          // standard paper size), so trusting the negotiated `format` here
+          // causes right-side content to be laid out past the real 80mm
+          // roll and get cut off when it prints. A4 (below) doesn't have
+          // this problem since standard printers report real paper sizes.
+          pageFormat: PdfPageFormat.roll80,
           build: (context) => _buildThermalContent(logoImage),
         ),
       );
