@@ -330,12 +330,15 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   Future<void> _printInvoice(Sale sale, {required bool thermal}) async {
     try {
-      final pdf = thermal
-          ? await _generateThermalInvoicePdf(sale)
-          : await _generateInvoicePdf(sale);
+      final initialFormat = thermal ? PdfPageFormat.roll80 : PdfPageFormat.a4;
       await Printing.layoutPdf(
-        format: thermal ? PdfPageFormat.roll80 : PdfPageFormat.a4,
-        onLayout: (PdfPageFormat format) async => pdf.save(),
+        format: initialFormat,
+        onLayout: (PdfPageFormat format) async {
+          final pdf = thermal
+              ? await _generateThermalInvoicePdf(sale, format: format)
+              : await _generateInvoicePdf(sale, format: format);
+          return pdf.save();
+        },
       );
     } catch (e) {
       if (mounted) {
@@ -355,7 +358,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
       (sale.buyerPhone?.isNotEmpty ?? false) ||
       (sale.buyerAddress?.isNotEmpty ?? false);
 
-  Future<pw.Document> _generateInvoicePdf(Sale sale) async {
+  Future<pw.Document> _generateInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -364,7 +367,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat: format ?? PdfPageFormat.a4,
         maxPages: 50,
         build: (context) {
           return [
@@ -680,7 +683,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return pdf;
   }
 
-  Future<pw.Document> _generateThermalInvoicePdf(Sale sale) async {
+  Future<pw.Document> _generateThermalInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -695,7 +698,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     pdf.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.roll80,
+        pageFormat: format ?? PdfPageFormat.roll80,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
