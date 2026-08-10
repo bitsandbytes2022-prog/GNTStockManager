@@ -49,6 +49,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
   bool _creditDueOnly = false;
 
   static const String _shopGstin = '02FDUPK4649R1ZK';
+  static const String _dealerTagline1 =
+      'नेरोलक पेंट्स व प्रकाश सूर्या PVC पाइप्स के अधिकृत डीलर';
+  static const String _dealerTagline2 =
+      'हार्डवेयर, सैनिटरी वेयर, हैंड टूल्स आदि की समस्त वस्तुएं उपलब्ध';
   // Reprinted invoices don't have an interactive rate picker (unlike the
   // new-sale bill preview), so use the same 18% default there is.
   static const double _gstRate = 18;
@@ -415,6 +419,15 @@ class _SalesListScreenState extends State<SalesListScreen> {
                             'Contact: +91-7696379802',
                             style: pw.TextStyle(fontSize: 9),
                           ),
+                          pw.SizedBox(height: 3),
+                          pw.Text(
+                            _dealerTagline1,
+                            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+                          ),
+                          pw.Text(
+                            _dealerTagline2,
+                            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+                          ),
                         ],
                       ),
                     ),
@@ -702,7 +715,12 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       style: const pw.TextStyle(fontSize: 8),
                     ),
                     pw.Text(
-                      'Deals in: Hardware, Sanitary & Paints',
+                      _dealerTagline1,
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
+                    ),
+                    pw.Text(
+                      _dealerTagline2,
                       textAlign: pw.TextAlign.center,
                       style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
                     ),

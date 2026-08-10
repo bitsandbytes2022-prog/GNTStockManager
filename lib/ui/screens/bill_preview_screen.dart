@@ -76,6 +76,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   final SalesService _salesService = SalesService();
 
   static const String _shopGstin = '02FDUPK4649R1ZK';
+  static const String _dealerTagline1 =
+      'नेरोलक पेंट्स व प्रकाश सूर्या PVC पाइप्स के अधिकृत डीलर';
+  static const String _dealerTagline2 =
+      'हार्डवेयर, सैनिटरी वेयर, हैंड टूल्स आदि की समस्त वस्तुएं उपलब्ध';
 
   int? _invoiceNumber;
   bool _isLoading = true;
@@ -404,6 +408,15 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                             'Contact: +91-7696379802',
                             style: pw.TextStyle(fontSize: 9),
                           ),
+                          pw.SizedBox(height: 3),
+                          pw.Text(
+                            _dealerTagline1,
+                            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+                          ),
+                          pw.Text(
+                            _dealerTagline2,
+                            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+                          ),
                         ],
                       ),
                     ),
@@ -699,7 +712,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   style: const pw.TextStyle(fontSize: 8),
                 ),
               pw.Text(
-                'Deals in: Hardware, Sanitary & Paints',
+                _dealerTagline1,
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
+              ),
+              pw.Text(
+                _dealerTagline2,
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
               ),
@@ -1110,7 +1128,15 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   ),
                 const SizedBox(height: 4),
                 Text(
-                  'Deals in: All type of hardware, Sanitary & Paints etc.',
+                  _dealerTagline1,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white.withOpacity(0.9),
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                Text(
+                  _dealerTagline2,
                   style: TextStyle(
                     fontSize: 10,
                     color: Colors.white.withOpacity(0.9),
