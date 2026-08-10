@@ -11,6 +11,7 @@ import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../../utils/amount_in_words.dart';
 import '../../utils/pdf_fonts.dart';
+import '../../utils/pdf_logo.dart';
 import 'package:inventory_manager/ui/screens/return_items_screen.dart';
 
 import 'edit_sales_screen.dart';
@@ -358,6 +359,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
+    final logoImage = await loadShopLogo();
     final due = sale.amountDue;
 
     pdf.addPage(
@@ -396,6 +398,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
+                          if (logoImage != null)
+                            pw.Container(
+                              width: 36,
+                              height: 36,
+                              margin: const pw.EdgeInsets.only(bottom: 4),
+                              child: pw.Image(logoImage),
+                            ),
                           pw.Text(
                             'Guru Nanak Traders',
                             style: pw.TextStyle(
@@ -675,6 +684,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
+    final logoImage = await loadShopLogo();
     final due = sale.amountDue;
 
     pw.Widget dashedDivider() => pw.Text(
@@ -694,6 +704,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
+                    if (logoImage != null)
+                      pw.Container(
+                        width: 36,
+                        height: 36,
+                        margin: const pw.EdgeInsets.only(bottom: 4),
+                        child: pw.Image(logoImage),
+                      ),
                     pw.Text(
                       'Guru Nanak Traders',
                       textAlign: pw.TextAlign.center,
