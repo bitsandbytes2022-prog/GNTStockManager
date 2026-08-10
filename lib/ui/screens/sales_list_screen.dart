@@ -50,9 +50,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   static const String _shopGstin = '02FDUPK4649R1ZK';
   static const String _dealerTagline1 =
-      'नेरोलक पेंट्स व प्रकाश सूर्या PVC पाइप्स के अधिकृत डीलर';
+      'Authorised Dealer of Nerolac Paints & Prakash Surya PVC Pipes';
   static const String _dealerTagline2 =
-      'हार्डवेयर, सैनिटरी वेयर, हैंड टूल्स आदि की समस्त वस्तुएं उपलब्ध';
+      'Your One-Stop Shop for Hardware, Sanitary Ware & Hand Tools';
   // Reprinted invoices don't have an interactive rate picker (unlike the
   // new-sale bill preview), so use the same 18% default there is.
   static const double _gstRate = 18;
