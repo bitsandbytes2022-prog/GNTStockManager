@@ -670,6 +670,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
   pw.Widget _buildThermalContent(pw.ImageProvider? logoImage) {
     final subtotal = _calculateSubtotal();
+    final showGst = _gstEnabled && _gstRate > 0;
     pw.Widget dashedDivider() => pw.Text(
           '--------------------------------',
           style: const pw.TextStyle(fontSize: 8),
@@ -764,7 +765,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           final product = line.product;
           final qty = line.quantity;
           final price = line.price;
-          final amount = qty * price;
+          // Item rows show the tax-exclusive rate/amount, so the sum
+          // matches the Taxable Value shown below; GST is added once at
+          // the end rather than embedded in each line.
+          final displayPrice = showGst ? _taxableValue(price) : price;
+          final amount = qty * displayPrice;
           final isPerFoot = line.isPerFoot;
           final qtyLabel = isPerFoot ? '$qty ft' : qty.toString();
 
@@ -781,7 +786,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      '$qtyLabel x ${price.toStringAsFixed(2)}',
+                      '$qtyLabel x ${displayPrice.toStringAsFixed(2)}',
                       style: const pw.TextStyle(fontSize: 8),
                     ),
                     pw.Text(
