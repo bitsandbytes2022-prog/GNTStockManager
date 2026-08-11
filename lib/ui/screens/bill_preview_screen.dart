@@ -1221,7 +1221,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     final product = line.product;
     final qty = line.quantity;
     final price = line.price;
-    final amount = qty * price;
+    final showGst = _gstEnabled && _gstRate > 0;
+    final displayPrice = showGst ? _taxableValue(price) : price;
+    final amount = qty * displayPrice;
     final isPerFoot = line.isPerFoot;
 
     return Container(
@@ -1266,7 +1268,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           Expanded(
             flex: 2,
             child: Text(
-              'INR ${price.toStringAsFixed(2)}',
+              'INR ${displayPrice.toStringAsFixed(2)}',
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 13),
             ),
