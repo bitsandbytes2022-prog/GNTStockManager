@@ -782,7 +782,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
               ],
 
               ...sale.items.map((item) {
-                final amount = item.quantity * item.salePrice;
+                final displayPrice = _taxableValue(item.salePrice);
+                final amount = item.quantity * displayPrice;
                 final qtyLabel = item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
                 return pw.Padding(
                   padding: const pw.EdgeInsets.only(bottom: 4),
@@ -796,7 +797,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          pw.Text('$qtyLabel x ${item.salePrice.toStringAsFixed(2)}',
+                          pw.Text('$qtyLabel x ${displayPrice.toStringAsFixed(2)}',
                               style: const pw.TextStyle(fontSize: 8)),
                           pw.Text('INR ${amount.toStringAsFixed(2)}',
                               style: const pw.TextStyle(fontSize: 8)),
