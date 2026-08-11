@@ -4,6 +4,7 @@
 // 3. Improved user experience with quick quantity entry
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -13,6 +14,8 @@ import '../../services/firebase_service.dart';
 import '../../services/invoice_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
+import '../screens/add_product_screen.dart';
+import '../screens/add_product_web_screen.dart';
 import '../screens/bill_preview_screen.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
@@ -277,6 +280,28 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  /// Lets a product missing from the catalog be added without losing the
+  /// sale in progress — opens the normal Add Product form on top of this
+  /// screen (so the cart underneath is untouched), then refreshes the
+  /// catalog and immediately opens the quantity dialog for the product just
+  /// created, so it can be added to the cart in one motion instead of
+  /// having to find it again afterward.
+  Future<void> _navigateToAddProduct() async {
+    final result = await Navigator.push<Product>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => kIsWeb ? AddProductWebScreen() : AddProductScreen(),
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    // FirebaseService.addProduct already updates its own cache optimistically,
+    // so this picks the new product up without a Firestore round-trip.
+    await _loadProducts();
+    if (!mounted) return;
+    await _showQuantityDialog(result);
   }
 
   Future<void> _loadCategories() async {
@@ -2079,6 +2104,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         elevation: 0,
         title: const Text('Record Sale'),
         backgroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: _navigateToAddProduct,
+            icon: const Icon(Icons.add_box_outlined),
+            tooltip: 'Add missing product',
+          ),
+        ],
       ),
       body: Row(
         children: [
@@ -2122,6 +2154,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         backgroundColor: Colors.white,
         actions: [
           IconButton(
+            onPressed: _navigateToAddProduct,
+            icon: const Icon(Icons.add_box_outlined),
+            tooltip: 'Add missing product',
+          ),
+          IconButton(
             onPressed: () {
               showModalBottomSheet(
                 context: context,
@@ -2158,6 +2195,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         elevation: 0,
         title: const Text('Record Sale'),
         backgroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: _navigateToAddProduct,
+            icon: const Icon(Icons.add_box_outlined),
+            tooltip: 'Add missing product',
+          ),
+        ],
       ),
       body: Column(
         children: [

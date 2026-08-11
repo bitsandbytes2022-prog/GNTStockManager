@@ -624,10 +624,12 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         salesFrequency: isEditing ? widget.product!.salesFrequency : 0.0,
       );
 
+      Product savedProduct = product;
       if (isEditing) {
         await _firebaseService.updateProduct(product);
       } else {
-        await _firebaseService.addProduct(product);
+        final newId = await _firebaseService.addProduct(product);
+        savedProduct = product.copyWith(id: newId);
       }
       if (product.size.isNotEmpty) {
         await _firebaseService.markSizeUsed(product.size);
@@ -644,11 +646,14 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
           ),
         );
         // After updating, move to the next product if there is one;
-        // otherwise return to the list.
+        // otherwise return to the list — with the saved product (its real
+        // ID, for a freshly added one), so a caller that needs it right
+        // away (e.g. Record Sale's "Add Product" shortcut) doesn't have to
+        // search the catalog for it.
         if (_hasNav && widget.index! < widget.products!.length - 1) {
           _navigateTo(1);
         } else {
-          Navigator.pop(context);
+          Navigator.pop(context, savedProduct);
         }
       }
     } catch (e) {
