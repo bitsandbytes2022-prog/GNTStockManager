@@ -15,26 +15,39 @@ import '../../services/sales_service.dart';
 import '../../utils/amount_in_words.dart';
 import '../../utils/pdf_fonts.dart';
 
+/// One line on the bill — a product plus the quantity/price/per-foot flag
+/// for that specific line. A product can appear more than once (e.g. a
+/// customer buys 5, then comes back later the same day for 3 more): each
+/// addition is its own BillLineItem rather than being merged into a single
+/// combined quantity, so the printed bill shows exactly what was bought and
+/// when it was added to the cart.
+class BillLineItem {
+  final Product product;
+  final int quantity;
+  final double price;
+  final bool isPerFoot;
+
+  /// Effective purchase cost to record on the SaleItem: the full per-pipe
+  /// cost for ordinary lines, or the per-foot cost for per-foot lines.
+  final double unitCost;
+
+  /// Whole stock units (pipes) to deduct for this line.
+  final int stockUnits;
+
+  const BillLineItem({
+    required this.product,
+    required this.quantity,
+    required this.price,
+    this.isPerFoot = false,
+    required this.unitCost,
+    required this.stockUnits,
+  });
+}
+
 class BillPreviewScreen extends StatefulWidget {
-  final Map<String, Product> products;
-  final Map<String, int> quantities;
-  final Map<String, double> prices;
+  final List<BillLineItem> lineItems;
   final String paymentMethod;
   final String? notes;
-
-  /// productId -> sold-by-length (pipes cut to feet). Quantity for these
-  /// products is feet, not units.
-  final Map<String, bool> perFootItems;
-
-  /// productId -> effective purchase cost to record on the SaleItem: the
-  /// full per-pipe cost for ordinary lines, or the per-foot cost for
-  /// per-foot lines (product.purchasePrice / feetPerPipe). Falls back to
-  /// the product's own purchasePrice when a productId is missing.
-  final Map<String, double> unitCosts;
-
-  /// productId -> whole stock units (pipes) to deduct. Falls back to the
-  /// cart quantity when a productId is missing.
-  final Map<String, int> stockUnitsMap;
 
   /// When true, completing from this preview records a mock sale (no stock
   /// deduction, excluded from analytics).
@@ -51,14 +64,9 @@ class BillPreviewScreen extends StatefulWidget {
 
   const BillPreviewScreen({
     super.key,
-    required this.products,
-    required this.quantities,
-    required this.prices,
+    required this.lineItems,
     required this.paymentMethod,
     this.notes,
-    this.perFootItems = const {},
-    this.unitCosts = const {},
-    this.stockUnitsMap = const {},
     this.isMock = false,
     this.buyerName,
     this.buyerPhone,
@@ -149,21 +157,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   }
 
   double _calculateSubtotal() {
-    return widget.products.entries.fold(0.0, (sum, entry) {
-      final productId = entry.key;
-      final qty = widget.quantities[productId] ?? 0;
-      final price = widget.prices[productId] ?? 0;
-      return sum + (qty * price);
-    });
+    return widget.lineItems.fold(
+        0.0, (sum, line) => sum + (line.quantity * line.price));
   }
 
   double _calculateTotalProfit() {
-    return widget.products.entries.fold(0.0, (sum, entry) {
-      final productId = entry.key;
-      final product = entry.value;
-      final qty = widget.quantities[productId] ?? 0;
-      final salePrice = widget.prices[productId] ?? 0;
-      final profit = (salePrice - product.purchasePrice) * qty;
+    return widget.lineItems.fold(0.0, (sum, line) {
+      final profit = (line.price - line.product.purchasePrice) * line.quantity;
       return sum + profit;
     });
   }
@@ -180,21 +180,18 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         orElse: () => PaymentMethod.cash,
       );
 
-      // Create sale items
-      final saleItems = widget.products.entries.map((entry) {
-        final product = entry.value;
-        final qty = widget.quantities[product.id]!;
-        final price = widget.prices[product.id]!;
-
+      // Create sale items — one per cart line, so a product bought in more
+      // than one line is saved as separate lines on the invoice.
+      final saleItems = widget.lineItems.map((line) {
         return SaleItem(
-          productId: product.id,
-          productName: product.name,
-          productSize: product.size,
-          quantity: qty,
-          salePrice: price,
-          purchasePrice: widget.unitCosts[product.id] ?? product.purchasePrice,
-          isPerFoot: widget.perFootItems[product.id] ?? false,
-          stockUnits: widget.stockUnitsMap[product.id],
+          productId: line.product.id,
+          productName: line.product.name,
+          productSize: line.product.size,
+          quantity: line.quantity,
+          salePrice: line.price,
+          purchasePrice: line.unitCost,
+          isPerFoot: line.isPerFoot,
+          stockUnits: line.stockUnits,
         );
       }).toList();
 
@@ -510,15 +507,15 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     _buildTableCell('Amount', bold: true),
                   ],
                 ),
-                ...widget.products.entries.map((entry) {
-                  final product = entry.value;
-                  final qty = widget.quantities[product.id]!;
-                  final price = widget.prices[product.id]!;
+                ...widget.lineItems.map((line) {
+                  final product = line.product;
+                  final qty = line.quantity;
+                  final price = line.price;
                   // Item rows show the tax-exclusive rate/amount, so the
                   // Amount column sums to the Taxable Value shown below.
                   final displayPrice = showGst ? _taxableValue(price) : price;
                   final amount = qty * displayPrice;
-                  final isPerFoot = widget.perFootItems[product.id] ?? false;
+                  final isPerFoot = line.isPerFoot;
 
                   return pw.TableRow(
                     children: [
@@ -763,12 +760,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         ],
 
         // Items
-        ...widget.products.entries.map((entry) {
-          final product = entry.value;
-          final qty = widget.quantities[product.id]!;
-          final price = widget.prices[product.id]!;
+        ...widget.lineItems.map((line) {
+          final product = line.product;
+          final qty = line.quantity;
+          final price = line.price;
           final amount = qty * price;
-          final isPerFoot = widget.perFootItems[product.id] ?? false;
+          final isPerFoot = line.isPerFoot;
           final qtyLabel = isPerFoot ? '$qty ft' : qty.toString();
 
           return pw.Padding(
@@ -1013,9 +1010,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                ...widget.products.entries.map((entry) {
-                  return _buildItemRow(entry.value);
-                }).toList(),
+                ...widget.lineItems.map(_buildItemRow),
               ],
             ),
           ),
@@ -1217,11 +1212,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
   }
 
-  Widget _buildItemRow(Product product) {
-    final qty = widget.quantities[product.id]!;
-    final price = widget.prices[product.id]!;
+  Widget _buildItemRow(BillLineItem line) {
+    final product = line.product;
+    final qty = line.quantity;
+    final price = line.price;
     final amount = qty * price;
-    final isPerFoot = widget.perFootItems[product.id] ?? false;
+    final isPerFoot = line.isPerFoot;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),

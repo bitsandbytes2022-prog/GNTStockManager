@@ -46,6 +46,26 @@ class CustomItem {
   }
 }
 
+/// One resolved, independent cart line. The same product can appear as more
+/// than one _CartLine (e.g. a customer buys 5, then comes back later the
+/// same day for 3 more) — each addition keeps its own quantity/price/
+/// per-foot flag rather than merging into a shared total.
+class _CartLine {
+  final String lineKey;
+  final Product product;
+  final int quantity;
+  final double price;
+  final bool isPerFoot;
+
+  const _CartLine({
+    required this.lineKey,
+    required this.product,
+    required this.quantity,
+    required this.price,
+    required this.isPerFoot,
+  });
+}
+
 class RecordSaleScreen extends StatefulWidget {
   const RecordSaleScreen({super.key});
 
@@ -69,13 +89,20 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
 
-  // Changed to track order of items added
+  // The cart holds independent *lines*, not one slot per product — the same
+  // product can be added more than once (e.g. a customer buys 5, runs short,
+  // comes back for 3 more the same day) and each addition stays its own line
+  // instead of silently merging into a combined quantity. Every map below is
+  // keyed by a synthetic lineKey (see _newLineKey), not by productId;
+  // _lineProductId resolves a lineKey back to the real product.
   Map<String, int> _selectedQuantities = {};
   Map<String, double> _customPrices = {};
-  List<String> _cartItemOrder = []; // Track order of items added to cart
+  List<String> _cartItemOrder = []; // Track order of lines added to cart
+  Map<String, String> _lineProductId = {}; // lineKey -> productId
+  int _lineKeyCounter = 0;
 
   // Pipe lines sold by the foot instead of by whole unit (see
-  // Product.feetPerPipe) — keyed by productId, same as _customPrices. Stock
+  // Product.feetPerPipe) — keyed by lineKey, same as _customPrices. Stock
   // is deducted in whole pipes via _stockUnitsFor, not by the foot.
   Map<String, bool> _perFootItems = {};
 
@@ -143,6 +170,48 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
+
+  // ==========================================
+  // CART LINE HELPERS
+  // ==========================================
+  // A fresh, unique key for each cart line so the same product can appear
+  // as more than one independent line.
+  String _newLineKey(String productId) => '${productId}_L${_lineKeyCounter++}';
+
+  /// Whether [productId] has at least one line in the cart.
+  bool _isProductInCart(String productId) =>
+      _lineProductId.values.contains(productId);
+
+  /// Total quantity for [productId] summed across every cart line, or 0.
+  /// Used for stock guardrails and "already N in cart" context, since a
+  /// product's real commitment is the sum of all its lines, not any one.
+  int _cartQuantityForProduct(String productId) {
+    var total = 0;
+    for (final key in _cartItemOrder) {
+      if (_lineProductId[key] == productId) {
+        total += _selectedQuantities[key] ?? 0;
+      }
+    }
+    return total;
+  }
+
+  /// The most recently added existing line's price for [productId], if any
+  /// — used as a sensible default when adding another line for the same
+  /// product (a repeat top-up usually wants the same price).
+  double? _lastPriceForProduct(String productId) {
+    for (final key in _cartItemOrder.reversed) {
+      if (_lineProductId[key] == productId) return _customPrices[key];
+    }
+    return null;
+  }
+
+  /// Same idea as [_lastPriceForProduct] but for the per-foot toggle.
+  bool _lastPerFootForProduct(String productId) {
+    for (final key in _cartItemOrder.reversed) {
+      if (_lineProductId[key] == productId) return _perFootItems[key] ?? false;
+    }
+    return false;
+  }
 
   @override
   void initState() {
@@ -481,19 +550,53 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     return last ?? 1;
   }
 
-  Future<void> _showQuantityDialog(Product product) async {
-    final int? feetPerPipe = _feetPerPipeFor(product);
+  /// Tapping a product in the browse grid always adds a fresh cart line —
+  /// even if the product already has lines in the cart (a customer coming
+  /// back later the same day for more should show up as its own line, not
+  /// silently merge into a bigger combined quantity on the earlier one).
+  Future<void> _showQuantityDialog(Product product) =>
+      _showAddOrEditLineDialog(product);
 
-    // Check if product is already in cart
-    bool isInCart = _selectedQuantities.containsKey(product.id);
-    int currentQuantity = _selectedQuantities[product.id] ??
-        await _suggestedQuantity(product.id);
+  /// Editing/removing one specific existing cart line, opened from the cart
+  /// panel itself rather than the browse grid.
+  Future<void> _showEditLineDialog(String lineKey) {
+    final productId = _lineProductId[lineKey];
+    final product = productId != null ? _findProductById(productId) : null;
+    if (product == null) {
+      // The line's product can't be resolved (deleted from the catalog) —
+      // nothing sensible to edit, so just drop the orphaned line.
+      _removeFromCart(lineKey);
+      return Future.value();
+    }
+    return _showAddOrEditLineDialog(product, editingLineKey: lineKey);
+  }
+
+  Future<void> _showAddOrEditLineDialog(
+    Product product, {
+    String? editingLineKey,
+  }) async {
+    final int? feetPerPipe = _feetPerPipeFor(product);
+    final bool isEditingExisting = editingLineKey != null;
+
+    // Quantity already committed to *other* lines of this same product —
+    // excluded from stock guardrails' own line when editing, since that
+    // quantity is being replaced, not added on top of.
+    final int alreadyElsewhere = _cartQuantityForProduct(product.id) -
+        (isEditingExisting ? (_selectedQuantities[editingLineKey] ?? 0) : 0);
+
+    int currentQuantity = isEditingExisting
+        ? _selectedQuantities[editingLineKey]!
+        : await _suggestedQuantity(product.id);
     if (!mounted) return;
-    bool sellPerFoot = _perFootItems[product.id] ?? false;
-    double currentPrice = _customPrices[product.id] ??
-        (sellPerFoot && feetPerPipe != null
-            ? product.salePrice / feetPerPipe
-            : product.salePrice);
+    bool sellPerFoot = isEditingExisting
+        ? (_perFootItems[editingLineKey] ?? false)
+        : _lastPerFootForProduct(product.id);
+    double currentPrice = isEditingExisting
+        ? _customPrices[editingLineKey]!
+        : (_lastPriceForProduct(product.id) ??
+            (sellPerFoot && feetPerPipe != null
+                ? product.salePrice / feetPerPipe
+                : product.salePrice));
 
     final TextEditingController qtyController = TextEditingController(
       text: currentQuantity.toString(),
@@ -511,6 +614,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            // Stock left for *this* line to use, after what other lines of
+            // the same product have already committed.
+            final remainingStock =
+                (product.stock - alreadyElsewhere).clamp(0, product.stock);
+
             Future<void> submit() async {
               int? qty = int.tryParse(qtyController.text);
               if (qty == null || qty <= 0) {
@@ -522,7 +630,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 );
                 return;
               }
-              if (!sellPerFoot && qty > product.stock) {
+              if (!sellPerFoot && (alreadyElsewhere + qty) > product.stock) {
                 // Offer an inline stock fix instead of just blocking —
                 // covers "forgot to update stock after a restock"
                 // without losing anything already in the cart.
@@ -554,7 +662,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    isInCart ? 'Update Quantity' : 'Add to Cart',
+                    isEditingExisting
+                        ? 'Edit Item'
+                        : (alreadyElsewhere > 0 ? 'Add More' : 'Add to Cart'),
                     style: const TextStyle(fontSize: 18),
                   ),
                   const SizedBox(height: 8),
@@ -602,13 +712,28 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             color: product.stock < 5 ? Colors.orange : Colors.green,
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            'Available Stock: ${product.stock}',
-                            style: TextStyle(
-                              color: product.stock < 5
-                                  ? Colors.orange.shade700
-                                  : Colors.green.shade700,
-                              fontWeight: FontWeight.w500,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Available Stock: ${product.stock}',
+                                  style: TextStyle(
+                                    color: product.stock < 5
+                                        ? Colors.orange.shade700
+                                        : Colors.green.shade700,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                if (alreadyElsewhere > 0)
+                                  Text(
+                                    'Already $alreadyElsewhere in cart from earlier',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ],
@@ -711,7 +836,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         IconButton(
                           onPressed: () {
                             int currentVal = int.tryParse(qtyController.text) ?? 0;
-                            if (sellPerFoot || currentVal < product.stock) {
+                            if (sellPerFoot || currentVal < remainingStock) {
                               qtyController.text = (currentVal + 1).toString();
                               qtyController.selection = TextSelection.fromPosition(
                                 TextPosition(offset: qtyController.text.length),
@@ -731,7 +856,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     Wrap(
                       spacing: 8,
                       children: [1, 5, 10, 25, 50].map((qty) {
-                        if (!sellPerFoot && qty > product.stock) {
+                        if (!sellPerFoot && qty > remainingStock) {
                           return const SizedBox.shrink();
                         }
                         return ActionChip(
@@ -814,8 +939,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 ),
               ),
               actions: [
-                // Remove from cart button (only if already in cart)
-                if (isInCart)
+                // Remove button — only when editing an existing line
+                if (isEditingExisting)
                   TextButton.icon(
                     onPressed: () {
                       Navigator.of(context).pop({'remove': true}); // Indicates remove
@@ -836,8 +961,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 // Add/Update button
                 FilledButton.icon(
                   onPressed: submit,
-                  icon: Icon(isInCart ? Icons.update : Icons.add_shopping_cart),
-                  label: Text(isInCart ? 'Update' : 'Add to Cart'),
+                  icon: Icon(isEditingExisting ? Icons.update : Icons.add_shopping_cart),
+                  label: Text(isEditingExisting ? 'Update' : 'Add to Cart'),
                 ),
               ],
             );
@@ -858,35 +983,40 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     // Handle the result
     if (result != null) {
       if (result['remove'] == true) {
-        // Remove from cart
-        _removeFromCart(product.id);
+        // Remove from cart (only reachable when editing an existing line)
+        if (editingLineKey != null) _removeFromCart(editingLineKey);
       } else if (result['quantity'] != null && result['price'] != null) {
-        // Add or update in cart with custom price
+        // Add a new line, or update the line being edited
         _addToCartWithPrice(
           product,
           result['quantity'],
           result['price'],
           isPerFoot: result['isPerFoot'] == true,
+          editLineKey: editingLineKey,
         );
       }
     }
   }
 
+  /// Adds a new cart line for [product], or — when [editLineKey] is given —
+  /// overwrites that specific existing line in place instead of creating a
+  /// new one.
   void _addToCartWithPrice(
     Product product,
     int quantity,
     double price, {
     bool isPerFoot = false,
+    String? editLineKey,
   }) {
     setState(() {
-      bool wasInCart = _selectedQuantities.containsKey(product.id);
-      if (!wasInCart) {
-        // New item - add to order list
-        _cartItemOrder.add(product.id);
+      final lineKey = editLineKey ?? _newLineKey(product.id);
+      if (editLineKey == null) {
+        _cartItemOrder.add(lineKey);
+        _lineProductId[lineKey] = product.id;
       }
-      _selectedQuantities[product.id] = quantity;
-      _customPrices[product.id] = price;
-      _perFootItems[product.id] = isPerFoot;
+      _selectedQuantities[lineKey] = quantity;
+      _customPrices[lineKey] = price;
+      _perFootItems[lineKey] = isPerFoot;
     });
 
     _loadFrequentlyBoughtTogether(product.id);
@@ -895,7 +1025,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          _selectedQuantities.containsKey(product.id)
+          editLineKey != null
               ? 'Updated: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})'
               : 'Added: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})',
         ),
@@ -905,12 +1035,15 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  void _removeFromCart(String productId) {
+  /// Removes one specific cart line, identified by its lineKey (not the
+  /// productId — a product may have several lines).
+  void _removeFromCart(String lineKey) {
     setState(() {
-      _selectedQuantities.remove(productId);
-      _customPrices.remove(productId);
-      _perFootItems.remove(productId);
-      _cartItemOrder.remove(productId);
+      _selectedQuantities.remove(lineKey);
+      _customPrices.remove(lineKey);
+      _perFootItems.remove(lineKey);
+      _lineProductId.remove(lineKey);
+      _cartItemOrder.remove(lineKey);
       if (_cartItemOrder.isEmpty) {
         _frequentlyBoughtSourceId = null;
         _frequentlyBoughtProducts = [];
@@ -926,14 +1059,16 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       final related = await _salesService.getFrequentlyBoughtWith(productId, limit: 8);
       // The cart may have changed again (or moved on to a different item)
       // by the time this resolves — only apply if it's still relevant.
-      if (!mounted || _cartItemOrder.isEmpty || _cartItemOrder.last != productId) {
+      if (!mounted ||
+          _cartItemOrder.isEmpty ||
+          _lineProductId[_cartItemOrder.last] != productId) {
         return;
       }
 
       final suggestions = <Product>[];
       for (final entry in related) {
         final product = _findProductById(entry.key);
-        if (product != null && !_selectedQuantities.containsKey(product.id)) {
+        if (product != null && !_isProductInCart(product.id)) {
           suggestions.add(product);
         }
       }
@@ -1112,19 +1247,19 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
   }
 
-  void _updateQuantity(String productId, int quantity) {
+  void _updateQuantity(String lineKey, int quantity) {
     if (quantity <= 0) {
-      _removeFromCart(productId);
+      _removeFromCart(lineKey);
     } else {
       setState(() {
-        _selectedQuantities[productId] = quantity;
+        _selectedQuantities[lineKey] = quantity;
       });
     }
   }
 
-  void _updatePrice(String productId, double price) {
+  void _updatePrice(String lineKey, double price) {
     setState(() {
-      _customPrices[productId] = price;
+      _customPrices[lineKey] = price;
     });
   }
 
@@ -1134,24 +1269,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // if that's a deliberate call (clearance, loss-leader, thin-margin deal).
   static const double _minMarginFraction = 0.0;
 
-  double _getMinimumPrice(Product product) {
-    return _effectiveUnitCost(product) / (1 - _minMarginFraction);
+  double _getMinimumPrice(Product product, bool isPerFoot) {
+    return _effectiveUnitCost(product, isPerFoot) / (1 - _minMarginFraction);
   }
 
   // Per-foot lines store feet in `quantity`, so cost/price must be scaled
   // down from the per-pipe values on Product before multiplying by quantity
   // — otherwise margin math compares a per-foot price against a per-pipe
-  // cost and produces nonsense (e.g. a huge apparent loss).
-  double _effectiveUnitCost(Product product) {
-    if (_perFootItems[product.id] == true) {
+  // cost and produces nonsense (e.g. a huge apparent loss). isPerFoot is now
+  // a per-*line* attribute (not per-product), so it's passed in explicitly
+  // rather than looked up from a productId-keyed map.
+  double _effectiveUnitCost(Product product, bool isPerFoot) {
+    if (isPerFoot) {
       final feet = _feetPerPipeFor(product);
       if (feet != null && feet > 0) return product.purchasePrice / feet;
     }
     return product.purchasePrice;
   }
 
-  double _effectiveListPrice(Product product) {
-    if (_perFootItems[product.id] == true) {
+  double _effectiveListPrice(Product product, bool isPerFoot) {
+    if (isPerFoot) {
       final feet = _feetPerPipeFor(product);
       if (feet != null && feet > 0) return product.salePrice / feet;
     }
@@ -1160,10 +1297,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   double get _totalAmount {
     double total = 0;
-    // Add regular products
-    for (final entry in _selectedQuantities.entries) {
-      final price = _customPrices[entry.key] ?? 0;
-      total += price * entry.value;
+    // Add regular products (every cart line, including repeat lines for the
+    // same product)
+    for (final line in _cartLines) {
+      total += line.price * line.quantity;
     }
     // Add custom items
     for (final customItem in _customItems.values) {
@@ -1180,11 +1317,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   /// items have no known cost). Used to preview profit on a mock sale.
   double get _totalProfit {
     double profit = 0;
-    for (final entry in _selectedQuantities.entries) {
-      final price = _customPrices[entry.key] ?? 0;
-      final product = _findProductById(entry.key);
-      if (product == null) continue;
-      profit += (price - _effectiveUnitCost(product)) * entry.value;
+    for (final line in _cartLines) {
+      profit += (line.price - _effectiveUnitCost(line.product, line.isPerFoot)) *
+          line.quantity;
     }
     return profit;
   }
@@ -1193,11 +1328,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   /// only — the denominator for the live blended margin %.
   double get _costBearingRevenue {
     double total = 0;
-    for (final entry in _selectedQuantities.entries) {
-      final product = _findProductById(entry.key);
-      if (product == null) continue;
-      final price = _customPrices[entry.key] ?? product.salePrice;
-      total += price * entry.value;
+    for (final line in _cartLines) {
+      total += line.price * line.quantity;
     }
     return total;
   }
@@ -1206,20 +1338,16 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   /// discount — used to compute how much discount room is available.
   double get _listRevenue {
     double total = 0;
-    for (final entry in _selectedQuantities.entries) {
-      final product = _findProductById(entry.key);
-      if (product == null) continue;
-      total += _effectiveListPrice(product) * entry.value;
+    for (final line in _cartLines) {
+      total += _effectiveListPrice(line.product, line.isPerFoot) * line.quantity;
     }
     return total;
   }
 
   double get _listCost {
     double total = 0;
-    for (final entry in _selectedQuantities.entries) {
-      final product = _findProductById(entry.key);
-      if (product == null) continue;
-      total += _effectiveUnitCost(product) * entry.value;
+    for (final line in _cartLines) {
+      total += _effectiveUnitCost(line.product, line.isPerFoot) * line.quantity;
     }
     return total;
   }
@@ -1250,12 +1378,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   void _applyDiscountPercent(double discountPercent) {
     setState(() {
       _discountPercent = discountPercent;
-      for (final entry in _selectedQuantities.entries) {
-        final product = _findProductById(entry.key);
-        if (product == null) continue;
-        final floor = _getMinimumPrice(product);
-        final target = _effectiveListPrice(product) * (1 - discountPercent / 100);
-        _customPrices[entry.key] = target < floor ? floor : target;
+      for (final line in _cartLines) {
+        final floor = _getMinimumPrice(line.product, line.isPerFoot);
+        final target = _effectiveListPrice(line.product, line.isPerFoot) *
+            (1 - discountPercent / 100);
+        _customPrices[line.lineKey] = target < floor ? floor : target;
       }
     });
   }
@@ -1666,37 +1793,42 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  List<Product> get _selectedProductsOrdered {
-    // Return products in the order they were added to cart
-    final List<Product> orderedProducts = [];
-    for (final productId in _cartItemOrder) {
+  /// One resolved cart line — a product plus the quantity/price/per-foot
+  /// flag for that *specific* line (not aggregated across a product's other
+  /// lines, if it has any).
+  List<_CartLine> get _cartLines {
+    final lines = <_CartLine>[];
+    for (final key in _cartItemOrder) {
+      final productId = _lineProductId[key];
+      if (productId == null) continue;
+      Product? product;
       try {
-        final product = _allProducts.firstWhere((p) => p.id == productId);
-        orderedProducts.add(product);
+        product = _allProducts.firstWhere((p) => p.id == productId);
       } catch (e) {
-        // Product not found, skip it
-        continue;
+        continue; // Product not found (deleted), skip it
       }
+      final quantity = _selectedQuantities[key];
+      final price = _customPrices[key];
+      if (quantity == null || price == null) continue;
+      lines.add(_CartLine(
+        lineKey: key,
+        product: product,
+        quantity: quantity,
+        price: price,
+        isPerFoot: _perFootItems[key] ?? false,
+      ));
     }
-    return orderedProducts;
+    return lines;
   }
 
-  List<Product> get _filteredCartProducts {
-    if (_cartSearchQuery.isEmpty) {
-      return _selectedProductsOrdered;
-    }
+  List<_CartLine> get _filteredCartLines {
+    if (_cartSearchQuery.isEmpty) return _cartLines;
 
-    return _selectedProductsOrdered.where((product) {
-      final name = product.name.toLowerCase();
-      final size = product.size.toLowerCase();
+    return _cartLines.where((line) {
+      final name = line.product.name.toLowerCase();
+      final size = line.product.size.toLowerCase();
       return name.contains(_cartSearchQuery) || size.contains(_cartSearchQuery);
     }).toList();
-  }
-
-  List<Product> get _selectedProducts {
-    return _allProducts
-        .where((p) => _selectedQuantities.containsKey(p.id))
-        .toList();
   }
 
   Future<void> _completeSale() async {
@@ -1721,12 +1853,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
 
     // Validate prices
-    for (final product in _selectedProducts) {
-      final currentPrice = _customPrices[product.id];
-      if (currentPrice == null || currentPrice <= 0) {
+    for (final line in _cartLines) {
+      if (line.price <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${product.name}: Please enter a valid price'),
+            content: Text('${line.product.name}: Please enter a valid price'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1734,14 +1865,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       }
     }
 
-    // _selectedProducts is _allProducts filtered down to cart productIds —
-    // if a cart item's product can no longer be found there (deleted, or
-    // _allProducts went stale), it would silently drop out of saleItems
-    // below while _totalAmount (computed straight from the cart maps) still
-    // includes its price. That saves a sale with a total that doesn't match
-    // its item list — and an empty-looking bill if it happens to every item.
-    // Fail loudly instead of saving a mismatched sale.
-    if (_selectedProducts.length != _selectedQuantities.length) {
+    // _cartLines resolves each cart line's product from _allProducts — if a
+    // line's product can no longer be found there (deleted, or _allProducts
+    // went stale), it silently drops out of saleItems below while
+    // _totalAmount (computed straight from the cart maps) still includes its
+    // price. That saves a sale with a total that doesn't match its item list
+    // — and an empty-looking bill if it happens to every item. Fail loudly
+    // instead of saving a mismatched sale.
+    if (_cartLines.length != _cartItemOrder.length) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -1757,22 +1888,21 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Create sale items from regular products, in cart order (not
-      // _selectedProducts' catalog order) so the saved sale's item list
-      // matches the order they were actually added.
-      final saleItems = _selectedProductsOrdered.map((product) {
-        final quantity = _selectedQuantities[product.id]!;
-        final isPerFoot = _perFootItems[product.id] ?? false;
+      // Create sale items from regular products, in cart order — each cart
+      // line becomes its own SaleItem, so a product bought in more than one
+      // line (e.g. topped up later the same day) is saved as separate lines
+      // on the invoice rather than merged into one combined quantity.
+      final saleItems = _cartLines.map((line) {
         return SaleItem(
-          productId: product.id,
-          productName: product.name,
-          productSize: product.size,
-          quantity: quantity,
-          salePrice: _customPrices[product.id]!,
-          purchasePrice: _effectiveUnitCost(product),
-          imageBase64: product.imageBase64,
-          isPerFoot: isPerFoot,
-          stockUnits: _stockUnitsFor(product, quantity, isPerFoot),
+          productId: line.product.id,
+          productName: line.product.name,
+          productSize: line.product.size,
+          quantity: line.quantity,
+          salePrice: line.price,
+          purchasePrice: _effectiveUnitCost(line.product, line.isPerFoot),
+          imageBase64: line.product.imageBase64,
+          isPerFoot: line.isPerFoot,
+          stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
         );
       }).toList();
 
@@ -1847,6 +1977,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _customPrices.clear();
           _perFootItems.clear();
           _cartItemOrder.clear();
+          _lineProductId.clear();
           _customItems.clear();
           _customItemOrder.clear();
           _notesController.clear();
@@ -2389,7 +2520,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   Product? get _lastAddedProduct {
     if (_cartItemOrder.isEmpty) return null;
-    return _findProductById(_cartItemOrder.last);
+    final productId = _lineProductId[_cartItemOrder.last];
+    if (productId == null) return null;
+    return _findProductById(productId);
   }
 
   // Combines both suggestion strips shown above the product grid. Kept as a
@@ -2484,7 +2617,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 final product = products[index];
                 return _SuggestionCard(
                   product: product,
-                  isInCart: _selectedQuantities.containsKey(product.id),
+                  isInCart: _isProductInCart(product.id),
                   onTap: () => _showQuantityDialog(product),
                 );
               },
@@ -2537,8 +2670,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       itemCount: _filteredProducts.length,
       itemBuilder: (context, index) {
         final product = _filteredProducts[index];
-        final isSelected = _selectedQuantities.containsKey(product.id);
-        final quantity = _selectedQuantities[product.id] ?? 0;
+        final isSelected = _isProductInCart(product.id);
+        final quantity = _cartQuantityForProduct(product.id);
 
         return _ProductCard(
           product: product,
@@ -2584,6 +2717,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       _customPrices.clear();
                       _perFootItems.clear();
                       _cartItemOrder.clear();
+                      _lineProductId.clear();
                       _customItems.clear();
                       _customItemOrder.clear();
                       _cartSearchController.clear();
@@ -2689,26 +2823,31 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     _buildCartItemsGrid([
-                      // Regular products
-                      for (int i = 0; i < _filteredCartProducts.length; i++)
+                      // Regular products — one _CartItem per cart *line*, so
+                      // the same product bought in more than one line (e.g.
+                      // topped up later) shows as separate cards.
+                      for (int i = 0; i < _filteredCartLines.length; i++)
                         _CartItem(
-                          product: _filteredCartProducts[i],
-                          quantity: _selectedQuantities[_filteredCartProducts[i].id]!,
-                          price: _customPrices[_filteredCartProducts[i].id]!,
-                          onQuantityChanged: (qty) => _updateQuantity(_filteredCartProducts[i].id, qty),
-                          onPriceChanged: (price) => _updatePrice(_filteredCartProducts[i].id, price),
-                          onRemove: () => _removeFromCart(_filteredCartProducts[i].id),
-                          onEdit: () => _showQuantityDialog(_filteredCartProducts[i]),
-                          minimumPrice: _getMinimumPrice(_filteredCartProducts[i]),
-                          isPerFoot: _perFootItems[_filteredCartProducts[i].id] ?? false,
-                          itemNumber: _selectedProductsOrdered.indexOf(_filteredCartProducts[i]) + 1,
+                          product: _filteredCartLines[i].product,
+                          quantity: _filteredCartLines[i].quantity,
+                          price: _filteredCartLines[i].price,
+                          onQuantityChanged: (qty) =>
+                              _updateQuantity(_filteredCartLines[i].lineKey, qty),
+                          onPriceChanged: (price) =>
+                              _updatePrice(_filteredCartLines[i].lineKey, price),
+                          onRemove: () => _removeFromCart(_filteredCartLines[i].lineKey),
+                          onEdit: () => _showEditLineDialog(_filteredCartLines[i].lineKey),
+                          minimumPrice: _getMinimumPrice(
+                              _filteredCartLines[i].product, _filteredCartLines[i].isPerFoot),
+                          isPerFoot: _filteredCartLines[i].isPerFoot,
+                          itemNumber: i + 1,
                         ),
                       // Custom items
                       for (int i = 0; i < _customItemOrder.length; i++)
                         if (_customItems[_customItemOrder[i]] != null)
                           _CustomCartItem(
                             customItem: _customItems[_customItemOrder[i]]!,
-                            itemNumber: _selectedProductsOrdered.length + i + 1,
+                            itemNumber: _filteredCartLines.length + i + 1,
                             onRemove: () => _removeCustomItem(_customItemOrder[i]),
                             onQuantityChanged: (qty) => _updateCustomItem(_customItemOrder[i], quantity: qty),
                             onAmountChanged: (amount) => _updateCustomItem(_customItemOrder[i], amount: amount),
@@ -2925,38 +3064,45 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             padding: const EdgeInsets.all(16),
                             children: [
                               _buildCartItemsGrid([
-                                // Regular products
-                                for (int i = 0; i < _filteredCartProducts.length; i++)
+                                // Regular products — one _CartItem per cart
+                                // *line*, so a product bought in more than
+                                // one line shows as separate cards.
+                                for (int i = 0; i < _filteredCartLines.length; i++)
                                   _CartItem(
-                                    product: _filteredCartProducts[i],
-                                    quantity: _selectedQuantities[_filteredCartProducts[i].id]!,
-                                    price: _customPrices[_filteredCartProducts[i].id]!,
+                                    product: _filteredCartLines[i].product,
+                                    quantity: _filteredCartLines[i].quantity,
+                                    price: _filteredCartLines[i].price,
                                     onQuantityChanged: (qty) {
-                                      setState(() => _updateQuantity(_filteredCartProducts[i].id, qty));
+                                      setState(() =>
+                                          _updateQuantity(_filteredCartLines[i].lineKey, qty));
                                       setModalState(() {});
                                     },
                                     onPriceChanged: (price) {
-                                      setState(() => _updatePrice(_filteredCartProducts[i].id, price));
+                                      setState(() =>
+                                          _updatePrice(_filteredCartLines[i].lineKey, price));
                                       setModalState(() {});
                                     },
                                     onRemove: () {
-                                      setState(() => _removeFromCart(_filteredCartProducts[i].id));
+                                      setState(() =>
+                                          _removeFromCart(_filteredCartLines[i].lineKey));
                                       setModalState(() {});
                                     },
                                     onEdit: () {
+                                      final lineKey = _filteredCartLines[i].lineKey;
                                       Navigator.pop(context);
-                                      _showQuantityDialog(_filteredCartProducts[i]);
+                                      _showEditLineDialog(lineKey);
                                     },
-                                    minimumPrice: _getMinimumPrice(_filteredCartProducts[i]),
-                                    isPerFoot: _perFootItems[_filteredCartProducts[i].id] ?? false,
-                                    itemNumber: _selectedProductsOrdered.indexOf(_filteredCartProducts[i]) + 1,
+                                    minimumPrice: _getMinimumPrice(_filteredCartLines[i].product,
+                                        _filteredCartLines[i].isPerFoot),
+                                    isPerFoot: _filteredCartLines[i].isPerFoot,
+                                    itemNumber: i + 1,
                                   ),
                                 // Custom items
                                 for (int i = 0; i < _customItemOrder.length; i++)
                                   if (_customItems[_customItemOrder[i]] != null)
                                     _CustomCartItem(
                                       customItem: _customItems[_customItemOrder[i]]!,
-                                      itemNumber: _selectedProductsOrdered.length + i + 1,
+                                      itemNumber: _filteredCartLines.length + i + 1,
                                       onRemove: () {
                                         setState(() => _removeCustomItem(_customItemOrder[i]));
                                         setModalState(() {});
@@ -3137,7 +3283,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final controllers = {
       for (final product in insufficientProducts)
         product.id: TextEditingController(
-          text: (_selectedQuantities[product.id] ?? product.stock).toString(),
+          // Suggest the total cart quantity for this product across every
+          // line (a customer's repeat visits can add up to more than any
+          // single line), not just one line's own quantity.
+          text: _cartQuantityForProduct(product.id).toString(),
         ),
     };
     bool isSaving = false;
@@ -3167,7 +3316,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                       ),
                       Text(
-                        'Currently ${product.stock} in stock · cart needs ${_selectedQuantities[product.id]}',
+                        'Currently ${product.stock} in stock · cart needs '
+                        '${_cartQuantityForProduct(product.id)}',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                       const SizedBox(height: 6),
@@ -3249,21 +3399,22 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
 
     // Validate stock — skipped for per-foot lines, since their quantity is
-    // feet, not units, and doesn't compare against product.stock. Collect
-    // every shortfall at once (not just the first) so the fix dialog below
-    // can offer all of them together instead of one at a time.
-    final insufficientProducts = <Product>[];
-    for (final entry in _selectedQuantities.entries) {
-      final productId = entry.key;
-      final quantity = entry.value;
-      final product = _allProducts.firstWhere((p) => p.id == productId);
-
-      if (_perFootItems[productId] == true) continue;
-
-      if (quantity > product.stock) {
-        insufficientProducts.add(product);
-      }
+    // feet, not units, and doesn't compare against product.stock. Aggregated
+    // across every line of the same product (a customer's repeat visits can
+    // add up to more than any single line commits to), and every shortfall
+    // is collected at once (not just the first) so the fix dialog below can
+    // offer them all together instead of one at a time.
+    final Map<String, int> nonPerFootQtyByProduct = {};
+    for (final line in _cartLines) {
+      if (line.isPerFoot) continue;
+      nonPerFootQtyByProduct[line.product.id] =
+          (nonPerFootQtyByProduct[line.product.id] ?? 0) + line.quantity;
     }
+    final insufficientProducts = <Product>[
+      for (final entry in nonPerFootQtyByProduct.entries)
+        if (entry.value > _findProductById(entry.key)!.stock)
+          _findProductById(entry.key)!,
+    ];
 
     if (insufficientProducts.isNotEmpty) {
       final resolved = await _resolveInsufficientStock(insufficientProducts);
@@ -3271,33 +3422,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       setState(() {}); // refresh product grid with the corrected stock
     }
 
-    // Prepare data for bill preview, in cart order — BillPreviewScreen
-    // builds the saved sale's item list from this map's iteration order.
-    final Map<String, Product> selectedProducts = {};
-    final Map<String, double> unitCosts = {};
-    final Map<String, int> stockUnitsMap = {};
-    for (final product in _selectedProductsOrdered) {
-      final productId = product.id;
-      selectedProducts[productId] = product;
-      unitCosts[productId] = _effectiveUnitCost(product);
-      stockUnitsMap[productId] = _stockUnitsFor(
-        product,
-        _selectedQuantities[productId]!,
-        _perFootItems[productId] ?? false,
-      );
-    }
+    // Prepare data for bill preview, in cart order — each cart line becomes
+    // its own BillLineItem, so a product bought in more than one line shows
+    // as separate rows on the printed bill.
+    final lineItems = _cartLines
+        .map((line) => BillLineItem(
+              product: line.product,
+              quantity: line.quantity,
+              price: line.price,
+              isPerFoot: line.isPerFoot,
+              unitCost: _effectiveUnitCost(line.product, line.isPerFoot),
+              stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
+            ))
+        .toList();
 
     // Navigate to bill preview
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (context) => BillPreviewScreen(
-          products: selectedProducts,
-          quantities: _selectedQuantities,
-          prices: _customPrices,
-          perFootItems: _perFootItems,
-          unitCosts: unitCosts,
-          stockUnitsMap: stockUnitsMap,
+          lineItems: lineItems,
           paymentMethod: _paymentMethod,
           notes: _notesController.text.trim().isEmpty
               ? null
@@ -3326,6 +3470,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _customPrices.clear();
         _perFootItems.clear();
         _cartItemOrder.clear();
+        _lineProductId.clear();
         _customItems.clear();
         _customItemOrder.clear();
         _notesController.clear();
