@@ -58,6 +58,20 @@ class _SalesListScreenState extends State<SalesListScreen> {
   // new-sale bill preview), so use the same 18% default there is.
   static const double _gstRate = 18;
 
+  // The actual printable width of the shop's roll — narrower than the
+  // 80mm roll80 preset's nominal 80mm, which left content laid out past
+  // what the printer can actually print. Matches bill_preview_screen.dart.
+  static const PdfPageFormat _thermalPageFormat = PdfPageFormat(
+    72 * PdfPageFormat.mm,
+    double.infinity,
+    marginAll: 5 * PdfPageFormat.mm,
+  );
+
+  // A long thermal receipt is built as several fixed-height chunks rather
+  // than one arbitrarily tall auto-sized page — see the comment where this
+  // is used in _generateThermalInvoicePdf for why.
+  static const double _thermalPageChunkHeight = 297 * PdfPageFormat.mm;
+
   double _taxableValue(double total) => total / (1 + _gstRate / 100);
   double _cgstAmount(double total) => (total - _taxableValue(total)) / 2;
   double _sgstAmount(double total) => _cgstAmount(total);
@@ -330,12 +344,12 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   Future<void> _printInvoice(Sale sale, {required bool thermal}) async {
     try {
-      final initialFormat = thermal ? PdfPageFormat.roll80 : PdfPageFormat.a4;
+      final initialFormat = thermal ? _thermalPageFormat : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
         onLayout: (PdfPageFormat format) async {
           final pdf = thermal
-              ? await _generateThermalInvoicePdf(sale, format: format)
+              ? await _generateThermalInvoicePdf(sale)
               : await _generateInvoicePdf(sale, format: format);
           return pdf.save();
         },
@@ -683,7 +697,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return pdf;
   }
 
-  Future<pw.Document> _generateThermalInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
+  Future<pw.Document> _generateThermalInvoicePdf(Sale sale) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -696,19 +710,19 @@ class _SalesListScreenState extends State<SalesListScreen> {
           textAlign: pw.TextAlign.center,
         );
 
-    // Width is always the true physical roll width — the negotiated
-    // `format`'s width isn't trusted since thermal/POS drivers often
-    // misreport it (see bill_preview_screen.dart's identical branch).
-    // Height is different: a single pw.Page auto-grows to fit however tall
-    // the content is, producing a complete PDF, but some browser/OS print
-    // pipelines still clip that one oversized page to whatever *physical*
-    // page height they negotiated with the driver — silently dropping
-    // every item past that point on a long invoice instead of continuing
-    // onto more paper. When the driver reports a real (finite) height,
-    // honor it via MultiPage so the invoice spans further pages instead of
-    // being cut off; a true continuous-roll driver with no height limit
-    // keeps the original single auto-sized page.
-    final negotiatedHeight = format?.height;
+    // Width is always the true physical printable width (72mm) — thermal/
+    // POS drivers often misreport it (see bill_preview_screen.dart's
+    // identical branch). Height used to be one single pw.Page auto-grown
+    // to fit the entire invoice, however tall — that produces a complete,
+    // correct PDF, but a long invoice still printed (and even *previewed*
+    // in the browser's own print dialog) with items silently missing past
+    // some point, and relying on the OS/driver's negotiated page height
+    // didn't fix it either. Something in the browser's own PDF rendering/
+    // print pipeline can't handle one extremely tall page, so this is
+    // built as several fixed-height chunks via MultiPage instead — a
+    // continuous-roll printer prints sequential same-width pages
+    // back-to-back with no real gap, so it still reads as one unbroken
+    // invoice regardless of how many chunks it takes.
     final children = [
               pw.Center(
                 child: pw.Column(
@@ -881,30 +895,18 @@ class _SalesListScreenState extends State<SalesListScreen> {
               pw.SizedBox(height: 10),
     ];
 
-    if (negotiatedHeight != null && negotiatedHeight.isFinite) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat(
-            PdfPageFormat.roll80.width,
-            negotiatedHeight,
-            marginAll: 5 * PdfPageFormat.mm,
-          ),
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          maxPages: 200,
-          build: (context) => children,
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat(
+          _thermalPageFormat.width,
+          _thermalPageChunkHeight,
+          marginAll: 5 * PdfPageFormat.mm,
         ),
-      );
-    } else {
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.roll80,
-          build: (context) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            children: children,
-          ),
-        ),
-      );
-    }
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        maxPages: 200,
+        build: (context) => children,
+      ),
+    );
 
     return pdf;
   }

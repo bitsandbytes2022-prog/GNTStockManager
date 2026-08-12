@@ -89,6 +89,21 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   static const String _dealerTagline2 =
       'Your One-Stop Shop for Hardware, Sanitary Ware & Hand Tools';
 
+  // The actual printable width of the shop's roll — narrower than the
+  // 80mm roll80 preset's nominal 80mm, which left content laid out past
+  // what the printer can actually print.
+  static const PdfPageFormat _thermalPageFormat = PdfPageFormat(
+    72 * PdfPageFormat.mm,
+    double.infinity,
+    marginAll: 5 * PdfPageFormat.mm,
+  );
+
+  // A long thermal receipt is built as several fixed-height chunks rather
+  // than one arbitrarily tall auto-sized page — see the comment where this
+  // is used in _generatePdf for why. A4's height is a safe, universally
+  // supported page length to chunk at.
+  static const double _thermalPageChunkHeight = 297 * PdfPageFormat.mm;
+
   int? _invoiceNumber;
   bool _isLoading = true;
   bool _isSaving = false;
@@ -287,7 +302,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
   Future<void> _printBill({required bool thermal}) async {
     try {
-      final initialFormat = thermal ? PdfPageFormat.roll80 : PdfPageFormat.a4;
+      final initialFormat = thermal ? _thermalPageFormat : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
         onLayout: (PdfPageFormat format) async {
@@ -322,48 +337,42 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     }
 
     if (thermal) {
-      // Width is always the true physical roll width — thermal/POS printer
-      // drivers are unreliable about reporting the actual paper size via
-      // the OS print dialog (often falling back to a much wider standard
-      // paper size), so trusting the negotiated `format` for width causes
-      // right-side content to be laid out past the real 80mm roll and get
-      // cut off when it prints.
+      // Width is always the true physical printable width (72mm, narrower
+      // than the roll's nominal 80mm) — thermal/POS printer drivers are
+      // unreliable about reporting the actual paper size via the OS print
+      // dialog (often falling back to a much wider standard paper size),
+      // so trusting the negotiated `format` for width causes right-side
+      // content to be laid out past what the printer can actually print
+      // and get cut off.
       //
-      // Height is different: a single pw.Page auto-grows to fit however
-      // tall the content is, which produces a complete PDF — but some
-      // browser/OS print pipelines (confirmed via web printing) still clip
-      // that one oversized page down to whatever *physical* page height
-      // they negotiated with the printer driver, silently dropping every
-      // item past that point instead of continuing onto more paper. When
-      // the driver reports a real (finite) page height here, honor it via
-      // MultiPage so a long item list correctly spans further pages
-      // instead of being cut off; a true continuous-roll driver that
-      // reports no height limit keeps the original single auto-sized page.
-      final negotiatedHeight = format?.height;
-      if (negotiatedHeight != null && negotiatedHeight.isFinite) {
-        pdf.addPage(
-          pw.MultiPage(
-            pageFormat: PdfPageFormat(
-              PdfPageFormat.roll80.width,
-              negotiatedHeight,
-              marginAll: 5 * PdfPageFormat.mm,
-            ),
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            maxPages: 200,
-            build: (context) => _buildThermalContentChildren(logoImage),
+      // Height used to be one single pw.Page auto-grown to fit the entire
+      // receipt, however tall that ended up being. That produces a
+      // complete, correct PDF — but a long item list still printed (and
+      // even *previewed* in the browser's own print dialog) with items
+      // silently missing past some point. That rules out a driver-side
+      // paper-length limit specifically: relying on the OS/driver to
+      // report a trustworthy finite page height back through `format`
+      // didn't fix it either (confirmed by testing — the single giant
+      // page still got clipped even when nothing about paper length
+      // should have mattered for on-screen preview), so something in the
+      // browser's own PDF rendering/print pipeline can't handle one
+      // extremely tall page. Splitting into fixed-height chunks via
+      // MultiPage avoids that entirely: a continuous-roll printer prints
+      // sequential same-width pages back-to-back with no real gap, so
+      // this reads as one unbroken receipt regardless of how many chunks
+      // it takes.
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat(
+            _thermalPageFormat.width,
+            _thermalPageChunkHeight,
+            marginAll: 5 * PdfPageFormat.mm,
           ),
-        );
-      } else {
-        pdf.addPage(
-          pw.Page(
-            pageFormat: PdfPageFormat.roll80,
-            build: (context) => pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: _buildThermalContentChildren(logoImage),
-            ),
-          ),
-        );
-      }
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          maxPages: 200,
+          build: (context) => _buildThermalContentChildren(logoImage),
+        ),
+      );
       return pdf;
     }
 
