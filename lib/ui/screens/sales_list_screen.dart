@@ -30,6 +30,21 @@ enum TimeSpan {
   custom,
 }
 
+/// The physical thermal roll sizes the shop prints on. `printableWidthMm`
+/// is the actual printable width, not the nominal roll width — e.g. an
+/// "80mm" roll only prints ~72mm wide, and a "57mm" roll ~48mm, once the
+/// printer's own side margins are accounted for. Matches
+/// bill_preview_screen.dart's identical enum.
+enum _ThermalRollSize {
+  mm80(printableWidthMm: 72, label: 'Thermal Receipt (3" / 80mm)'),
+  mm57(printableWidthMm: 48, label: 'Thermal Receipt (2" / 57mm)');
+
+  const _ThermalRollSize({required this.printableWidthMm, required this.label});
+
+  final double printableWidthMm;
+  final String label;
+}
+
 class SalesListScreen extends StatefulWidget {
   const SalesListScreen({super.key});
 
@@ -58,14 +73,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
   // new-sale bill preview), so use the same 18% default there is.
   static const double _gstRate = 18;
 
-  // The actual printable width of the shop's roll — narrower than the
-  // 80mm roll80 preset's nominal 80mm, which left content laid out past
-  // what the printer can actually print. Matches bill_preview_screen.dart.
-  static const PdfPageFormat _thermalPageFormat = PdfPageFormat(
-    72 * PdfPageFormat.mm,
-    double.infinity,
-    marginAll: 5 * PdfPageFormat.mm,
-  );
+  PdfPageFormat _thermalPageFormat(_ThermalRollSize size) => PdfPageFormat(
+        size.printableWidthMm * PdfPageFormat.mm,
+        double.infinity,
+        marginAll: 5 * PdfPageFormat.mm,
+      );
 
   // A long thermal receipt is built as several fixed-height chunks rather
   // than one arbitrarily tall auto-sized page — see the comment where this
@@ -322,18 +334,19 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 subtitle: const Text('Full-page printer'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _printInvoice(sale, thermal: false);
+                  _printInvoice(sale, thermalSize: null);
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.receipt_long_outlined),
-                title: const Text('Thermal Receipt (3" / 80mm)'),
-                subtitle: const Text('Thermal roll printer'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _printInvoice(sale, thermal: true);
-                },
-              ),
+              for (final size in _ThermalRollSize.values)
+                ListTile(
+                  leading: const Icon(Icons.receipt_long_outlined),
+                  title: Text(size.label),
+                  subtitle: const Text('Thermal roll printer'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _printInvoice(sale, thermalSize: size);
+                  },
+                ),
               const SizedBox(height: 8),
             ],
           ),
@@ -342,14 +355,15 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
-  Future<void> _printInvoice(Sale sale, {required bool thermal}) async {
+  Future<void> _printInvoice(Sale sale, {required _ThermalRollSize? thermalSize}) async {
     try {
-      final initialFormat = thermal ? _thermalPageFormat : PdfPageFormat.a4;
+      final initialFormat =
+          thermalSize != null ? _thermalPageFormat(thermalSize) : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
         onLayout: (PdfPageFormat format) async {
-          final pdf = thermal
-              ? await _generateThermalInvoicePdf(sale)
+          final pdf = thermalSize != null
+              ? await _generateThermalInvoicePdf(sale, thermalSize)
               : await _generateInvoicePdf(sale, format: format);
           return pdf.save();
         },
@@ -697,7 +711,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return pdf;
   }
 
-  Future<pw.Document> _generateThermalInvoicePdf(Sale sale) async {
+  Future<pw.Document> _generateThermalInvoicePdf(
+    Sale sale,
+    _ThermalRollSize thermalSize,
+  ) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -710,9 +727,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
           textAlign: pw.TextAlign.center,
         );
 
-    // Width is always the true physical printable width (72mm) — thermal/
-    // POS drivers often misreport it (see bill_preview_screen.dart's
-    // identical branch). Height used to be one single pw.Page auto-grown
+    // Width is always the true physical printable width for the chosen
+    // roll size — thermal/POS drivers often misreport it (see
+    // bill_preview_screen.dart's identical branch). Height used to be one
+    // single pw.Page auto-grown
     // to fit the entire invoice, however tall — that produces a complete,
     // correct PDF, but a long invoice still printed (and even *previewed*
     // in the browser's own print dialog) with items silently missing past
@@ -898,7 +916,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat(
-          _thermalPageFormat.width,
+          _thermalPageFormat(thermalSize).width,
           _thermalPageChunkHeight,
           marginAll: 5 * PdfPageFormat.mm,
         ),
