@@ -519,50 +519,40 @@ class SalesService {
 
       // Calculate stock adjustments — skip entirely for mock sales, which
       // never affect stock.
-      final Map<String, int> stockAdjustments = {};
       final bool skipStock = oldSale.isMock || newSale.isMock;
 
-      // Process old items - restore stock for removed/reduced items.
-      // Uses effectiveStockUnits (not quantity) so per-foot lines adjust
-      // whole pipes rather than feet. Custom items have no real product
-      // doc and are skipped — a batch update on a nonexistent doc would
-      // fail the whole commit.
-      for (final oldItem in (skipStock ? const <SaleItem>[] : oldSale.items)) {
-        if (oldItem.productId.startsWith('custom_')) continue;
-
-        final productId = oldItem.productId;
-        final oldUnits = oldItem.effectiveStockUnits;
-
-        // Find corresponding item in new sale
-        final newItem = newSale.items.firstWhere(
-              (item) => item.productId == productId,
-          orElse: () => SaleItem(
-            productId: '',
-            productName: '',
-            productSize: '',
-            quantity: 0,
-            salePrice: 0,
-            purchasePrice: 0,
-          ),
-        );
-
-        final newUnits = newItem.productId.isEmpty ? 0 : newItem.effectiveStockUnits;
-        final difference = oldUnits - newUnits;
-
-        if (difference != 0) {
-          stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) + difference;
+      // Sum effectiveStockUnits per product across every line — a product
+      // can appear as more than one independent line (see the multi-line
+      // cart in record/edit sale screens), so matching old-vs-new by a
+      // single "first" item per productId would silently mis-adjust stock
+      // whenever a product spans more than one line on either side of the
+      // edit (e.g. splitting one line into two of the same product would
+      // wrongly look like a reduction and restore stock that was never
+      // actually freed). Custom items have no real product doc and are
+      // skipped — a batch update on a nonexistent doc would fail the whole
+      // commit.
+      Map<String, int> unitsByProduct(List<SaleItem> items) {
+        final totals = <String, int>{};
+        for (final item in items) {
+          if (item.productId.startsWith('custom_')) continue;
+          totals[item.productId] =
+              (totals[item.productId] ?? 0) + item.effectiveStockUnits;
         }
+        return totals;
       }
 
-      // Process new items - deduct stock for added items (custom items
-      // skipped, same reason as above).
-      for (final newItem in (skipStock ? const <SaleItem>[] : newSale.items)) {
-        if (newItem.productId.startsWith('custom_')) continue;
+      final Map<String, int> stockAdjustments = {};
+      if (!skipStock) {
+        final oldUnitsByProduct = unitsByProduct(oldSale.items);
+        final newUnitsByProduct = unitsByProduct(newSale.items);
+        final productIds = {...oldUnitsByProduct.keys, ...newUnitsByProduct.keys};
 
-        final productId = newItem.productId;
-        if (!oldSale.items.any((item) => item.productId == productId)) {
-          // New item added
-          stockAdjustments[productId] = (stockAdjustments[productId] ?? 0) - newItem.effectiveStockUnits;
+        for (final productId in productIds) {
+          final difference =
+              (oldUnitsByProduct[productId] ?? 0) - (newUnitsByProduct[productId] ?? 0);
+          if (difference != 0) {
+            stockAdjustments[productId] = difference;
+          }
         }
       }
 

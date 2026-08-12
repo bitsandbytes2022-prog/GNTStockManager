@@ -9,6 +9,27 @@ import '../../models/sale_model.dart';
 import '../../services/firebase_service.dart';
 import '../../services/sales_service.dart';
 
+/// One resolved, independent cart line. The same product can appear as more
+/// than one _CartLine (e.g. the original sale already had it twice, or the
+/// editor adds another line for it) — each keeps its own quantity/price/
+/// per-foot flag rather than merging into a shared total. Mirrors
+/// RecordSaleScreen's _CartLine so edit and record stay consistent.
+class _CartLine {
+  final String lineKey;
+  final Product product;
+  final int quantity;
+  final double price;
+  final bool isPerFoot;
+
+  const _CartLine({
+    required this.lineKey,
+    required this.product,
+    required this.quantity,
+    required this.price,
+    required this.isPerFoot,
+  });
+}
+
 class EditSaleScreen extends StatefulWidget {
   final Sale sale;
 
@@ -31,18 +52,26 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
+
+  // The cart holds independent *lines*, not one slot per product — the same
+  // product can appear more than once (already true of the original sale in
+  // some cases, and now also possible by adding it again during editing).
+  // Every map below is keyed by a synthetic lineKey (see _newLineKey), not
+  // by productId; _lineProductId resolves a lineKey back to the real
+  // product. Mirrors RecordSaleScreen's cart model.
   Map<String, int> _selectedQuantities = {};
   Map<String, double> _customPrices = {};
-  Map<String, int> _originalQuantities = {}; // To track stock changes
 
-  /// productId -> sold-by-length (pipes cut to feet). Quantity for these
+  /// lineKey -> sold-by-length (pipes cut to feet). Quantity for these
   /// products is feet, not units — see Product.feetPerPipe.
   Map<String, bool> _perFootItems = {};
 
-  /// Tracks item order (original sale order, then append-on-add) so the
+  /// Tracks line order (original sale order, then append-on-add) so the
   /// saved sale's item list isn't silently reshuffled into product-catalog
-  /// order — see _selectedProducts below.
+  /// order — see _cartLines below.
   List<String> _cartItemOrder = [];
+  Map<String, String> _lineProductId = {}; // lineKey -> productId
+  int _lineKeyCounter = 0;
   String _searchQuery = '';
   String _cartSearchQuery = '';
   bool _isLoading = true;
@@ -51,6 +80,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
+
+  // A fresh, unique key for each cart line so the same product can appear
+  // as more than one independent line.
+  String _newLineKey(String productId) => '${productId}_L${_lineKeyCounter++}';
+
+  /// Whether [productId] has at least one line in the cart.
+  bool _isProductInCart(String productId) =>
+      _lineProductId.values.contains(productId);
 
   @override
   void initState() {
@@ -76,13 +113,17 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _buyerAddressController.text = widget.sale.buyerAddress ?? '';
     _amountPaidController.text = widget.sale.amountPaid.toStringAsFixed(2);
 
-    // Populate selected items, preserving the original sale's item order
+    // Populate selected items, preserving the original sale's item order.
+    // Each sale item becomes its own cart line — if the original sale
+    // already had a product on more than one line, that must stay intact
+    // rather than collapsing into one combined entry.
     for (final item in widget.sale.items) {
-      _selectedQuantities[item.productId] = item.quantity;
-      _customPrices[item.productId] = item.salePrice;
-      _originalQuantities[item.productId] = item.quantity;
-      _perFootItems[item.productId] = item.isPerFoot;
-      _cartItemOrder.add(item.productId);
+      final lineKey = _newLineKey(item.productId);
+      _cartItemOrder.add(lineKey);
+      _lineProductId[lineKey] = item.productId;
+      _selectedQuantities[lineKey] = item.quantity;
+      _customPrices[lineKey] = item.salePrice;
+      _perFootItems[lineKey] = item.isPerFoot;
     }
   }
 
@@ -123,39 +164,47 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     });
   }
 
-  void _toggleProduct(Product product) {
+  /// Tapping a product in the browse grid always adds a fresh cart line —
+  /// even if the product already has lines in the cart, so coming back for
+  /// more of the same item shows up as its own line rather than silently
+  /// merging into (or replacing) an earlier one. Removing a line is done
+  /// from the cart panel itself via the line's remove button.
+  void _addProductLine(Product product) {
     setState(() {
-      if (_selectedQuantities.containsKey(product.id)) {
-        _selectedQuantities.remove(product.id);
-        _customPrices.remove(product.id);
-        _perFootItems.remove(product.id);
-        _cartItemOrder.remove(product.id);
-      } else {
-        _selectedQuantities[product.id] = 1;
-        _customPrices[product.id] = product.salePrice;
-        _perFootItems[product.id] = false;
-        _cartItemOrder.add(product.id);
-      }
+      final lineKey = _newLineKey(product.id);
+      _cartItemOrder.add(lineKey);
+      _lineProductId[lineKey] = product.id;
+      _selectedQuantities[lineKey] = 1;
+      _customPrices[lineKey] = product.salePrice;
+      _perFootItems[lineKey] = false;
     });
   }
 
-  void _updateQuantity(String productId, int quantity) {
+  /// Removes one specific cart line, identified by its lineKey (not the
+  /// productId — a product may have several lines).
+  void _removeFromCart(String lineKey) {
+    setState(() {
+      _selectedQuantities.remove(lineKey);
+      _customPrices.remove(lineKey);
+      _perFootItems.remove(lineKey);
+      _lineProductId.remove(lineKey);
+      _cartItemOrder.remove(lineKey);
+    });
+  }
+
+  void _updateQuantity(String lineKey, int quantity) {
     if (quantity <= 0) {
-      setState(() {
-        _selectedQuantities.remove(productId);
-        _customPrices.remove(productId);
-        _perFootItems.remove(productId);
-      });
+      _removeFromCart(lineKey);
     } else {
       setState(() {
-        _selectedQuantities[productId] = quantity;
+        _selectedQuantities[lineKey] = quantity;
       });
     }
   }
 
-  void _updatePrice(String productId, double price) {
+  void _updatePrice(String lineKey, double price) {
     setState(() {
-      _customPrices[productId] = price;
+      _customPrices[lineKey] = price;
     });
   }
 
@@ -163,19 +212,18 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   /// add dialog does — otherwise switching modes leaves a per-pipe price on
   /// a per-foot line (or vice versa), which then fails the minimum-price
   /// check since that's scaled to match.
-  void _updatePerFoot(Product product, bool isPerFoot) {
+  void _updatePerFoot(String lineKey, Product product, bool isPerFoot) {
     setState(() {
-      _perFootItems[product.id] = isPerFoot;
+      _perFootItems[lineKey] = isPerFoot;
       final feet = product.feetPerPipe;
       if (feet != null && feet > 0) {
-        _customPrices[product.id] =
+        _customPrices[lineKey] =
             isPerFoot ? product.salePrice / feet : product.salePrice;
       }
     });
   }
 
-  double _getMinimumPrice(Product product) {
-    final isPerFoot = _perFootItems[product.id] ?? false;
+  double _getMinimumPrice(Product product, bool isPerFoot) {
     final feet = product.feetPerPipe;
     if (isPerFoot && feet != null && feet > 0) {
       return (product.purchasePrice / feet) * 0.50;
@@ -318,39 +366,50 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   double get _totalAmount {
     double total = 0;
-    for (final entry in _selectedQuantities.entries) {
-      final price = _customPrices[entry.key] ?? 0;
-      total += price * entry.value;
+    for (final line in _cartLines) {
+      total += line.price * line.quantity;
     }
     return total;
   }
 
-  /// Selected products in cart order (original sale order, then any items
-  /// added during this edit, appended in the order they were added) —
-  /// not catalog order, so saving doesn't reshuffle the sale's item list.
-  List<Product> get _selectedProducts {
-    final products = <Product>[];
-    for (final productId in _cartItemOrder) {
-      if (!_selectedQuantities.containsKey(productId)) continue;
+  /// One resolved cart line per entry in cart order (original sale order,
+  /// then any lines added during this edit, appended in the order they
+  /// were added) — not catalog order, so saving doesn't reshuffle the
+  /// sale's item list. A product can legitimately resolve to more than one
+  /// line here.
+  List<_CartLine> get _cartLines {
+    final lines = <_CartLine>[];
+    for (final key in _cartItemOrder) {
+      final productId = _lineProductId[key];
+      if (productId == null) continue;
+      Product? product;
       try {
-        products.add(_allProducts.firstWhere((p) => p.id == productId));
+        product = _allProducts.firstWhere((p) => p.id == productId);
       } catch (_) {
-        // Product no longer in the catalog — skip it.
+        continue; // Product no longer in the catalog — skip it.
       }
+      final quantity = _selectedQuantities[key];
+      final price = _customPrices[key];
+      if (quantity == null || price == null) continue;
+      lines.add(_CartLine(
+        lineKey: key,
+        product: product,
+        quantity: quantity,
+        price: price,
+        isPerFoot: _perFootItems[key] ?? false,
+      ));
     }
-    return products;
+    return lines;
   }
 
-  List<Product> get _filteredCartProducts {
-    if (_cartSearchQuery.isEmpty) {
-      return _selectedProducts;
-    }
+  List<_CartLine> get _filteredCartLines {
+    if (_cartSearchQuery.isEmpty) return _cartLines;
 
     final queryWords = _cartSearchQuery.split(' ').where((w) => w.isNotEmpty);
 
-    return _selectedProducts.where((product) {
-      final name = product.name.toLowerCase();
-      final size = product.size.toLowerCase();
+    return _cartLines.where((line) {
+      final name = line.product.name.toLowerCase();
+      final size = line.product.size.toLowerCase();
 
       return queryWords.every((word) => name.contains(word) || size.contains(word));
     }).toList();
@@ -365,15 +424,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     }
 
     // Validate prices
-    for (final product in _selectedProducts) {
-      final currentPrice = _customPrices[product.id]!;
-      final minPrice = _getMinimumPrice(product);
+    for (final line in _cartLines) {
+      final minPrice = _getMinimumPrice(line.product, line.isPerFoot);
 
-      if (currentPrice < minPrice) {
+      if (line.price < minPrice) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${product.name}: Price must be at least ₹${minPrice.toStringAsFixed(2)}',
+              '${line.product.name}: Price must be at least ₹${minPrice.toStringAsFixed(2)}',
             ),
             backgroundColor: Colors.red,
           ),
@@ -382,12 +440,12 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       }
     }
 
-    // _selectedProducts is _allProducts filtered down to cart productIds —
-    // if a product can no longer be found there (deleted, or _allProducts
+    // _cartLines resolves each cart line's product from _allProducts — if a
+    // line's product can no longer be found there (deleted, or _allProducts
     // went stale), it silently drops out of updatedSaleItems below while
     // the sale's total still reflects it. Fail loudly instead of saving a
     // sale whose items no longer match its total.
-    if (_selectedProducts.length != _selectedQuantities.length) {
+    if (_cartLines.length != _cartItemOrder.length) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -403,25 +461,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Create updated sale items. isPerFoot comes from the live toggle
-      // state (_perFootItems), which is seeded from each original line on
-      // load and updated by the per-foot switch in the cart — falling back
-      // to the original line covers any item that map somehow doesn't
-      // cover, so it never silently resets to false.
-      final updatedSaleItems = _selectedProducts.map((product) {
-        final originalItem = widget.sale.items.firstWhere(
-          (item) => item.productId == product.id,
-          orElse: () => SaleItem(
-            productId: product.id,
-            productName: product.name,
-            productSize: product.size,
-            quantity: 0,
-            salePrice: 0,
-            purchasePrice: 0,
-          ),
-        );
-        final isPerFoot = _perFootItems[product.id] ?? originalItem.isPerFoot;
-        final quantity = _selectedQuantities[product.id]!;
+      // Create updated sale items — each cart line becomes its own SaleItem,
+      // so a product appearing on more than one line (already true of some
+      // original sales, or added again during this edit) is saved as
+      // separate lines rather than merged into one combined quantity.
+      final updatedSaleItems = _cartLines.map((line) {
+        final product = line.product;
+        final isPerFoot = line.isPerFoot;
+        final quantity = line.quantity;
         final purchasePrice = isPerFoot && product.feetPerPipe != null
             ? product.purchasePrice / product.feetPerPipe!
             : product.purchasePrice;
@@ -436,7 +483,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           productName: product.name,
           productSize: product.size,
           quantity: quantity,
-          salePrice: _customPrices[product.id]!,
+          salePrice: line.price,
           purchasePrice: purchasePrice,
           imageBase64: product.imageBase64,
           isPerFoot: isPerFoot,
@@ -499,11 +546,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         payments: widget.sale.payments,
       );
 
-      // Update sale with stock adjustments
+      // Update sale with stock adjustments. Stock deltas are computed by
+      // SalesService from oldSale vs. newSale item totals per product, so
+      // no separate original-quantities map is needed here.
       await _salesService.updateSale(
         widget.sale,
         updatedSale,
-        _originalQuantities,
+        const {},
       );
 
       if (mounted) {
@@ -654,12 +703,12 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             itemCount: _filteredProducts.length,
             itemBuilder: (context, index) {
               final product = _filteredProducts[index];
-              final isSelected = _selectedQuantities.containsKey(product.id);
+              final isSelected = _isProductInCart(product.id);
 
               return _ProductCard(
                 product: product,
                 isSelected: isSelected,
-                onTap: () => _toggleProduct(product),
+                onTap: () => _addProductLine(product),
               );
             },
           ),
@@ -687,7 +736,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   const Icon(Icons.shopping_cart, size: 20),
                   const SizedBox(width: 8),
                   Text(
-                    'Cart (${_selectedQuantities.length})',
+                    'Cart (${_cartLines.length})',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -727,7 +776,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
         // Cart items
         Expanded(
-          child: _selectedProducts.isEmpty
+          child: _cartLines.isEmpty
               ? Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -745,7 +794,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               ],
             ),
           )
-              : _filteredCartProducts.isEmpty
+              : _filteredCartLines.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -774,17 +823,18 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   : ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
-                        for (final product in _filteredCartProducts)
+                        for (final line in _filteredCartLines)
                           _CartItem(
-                            product: product,
-                            quantity: _selectedQuantities[product.id]!,
-                            price: _customPrices[product.id]!,
-                            onQuantityChanged: (qty) => _updateQuantity(product.id, qty),
-                            onPriceChanged: (price) => _updatePrice(product.id, price),
-                            onRemove: () => _toggleProduct(product),
-                            minimumPrice: _getMinimumPrice(product),
-                            isPerFoot: _perFootItems[product.id] ?? false,
-                            onPerFootChanged: (value) => _updatePerFoot(product, value),
+                            product: line.product,
+                            quantity: line.quantity,
+                            price: line.price,
+                            onQuantityChanged: (qty) => _updateQuantity(line.lineKey, qty),
+                            onPriceChanged: (price) => _updatePrice(line.lineKey, price),
+                            onRemove: () => _removeFromCart(line.lineKey),
+                            minimumPrice: _getMinimumPrice(line.product, line.isPerFoot),
+                            isPerFoot: line.isPerFoot,
+                            onPerFootChanged: (value) =>
+                                _updatePerFoot(line.lineKey, line.product, value),
                           ),
                         _buildPaymentAndNotesSection(backgroundColor: Colors.white),
                       ],
@@ -877,7 +927,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               children: [
                 ListTile(
                   leading: const Icon(Icons.shopping_cart),
-                  title: Text('${_selectedQuantities.length} items'),
+                  title: Text('${_cartLines.length} items'),
                   trailing: Text(
                     '₹${_totalAmount.toStringAsFixed(0)}',
                     style: const TextStyle(
@@ -1007,7 +1057,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
               // Cart items
               Expanded(
-                child: _filteredCartProducts.isEmpty
+                child: _filteredCartLines.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -1037,24 +1087,24 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         controller: scrollController,
                         padding: const EdgeInsets.all(16),
                         children: [
-                          for (final product in _filteredCartProducts)
+                          for (final line in _filteredCartLines)
                             _CartItem(
-                              product: product,
-                              quantity: _selectedQuantities[product.id]!,
-                              price: _customPrices[product.id]!,
+                              product: line.product,
+                              quantity: line.quantity,
+                              price: line.price,
                               onQuantityChanged: (qty) {
-                                setState(() => _updateQuantity(product.id, qty));
+                                setState(() => _updateQuantity(line.lineKey, qty));
                               },
                               onPriceChanged: (price) {
-                                setState(() => _updatePrice(product.id, price));
+                                setState(() => _updatePrice(line.lineKey, price));
                               },
                               onRemove: () {
-                                setState(() => _toggleProduct(product));
+                                setState(() => _removeFromCart(line.lineKey));
                               },
-                              minimumPrice: _getMinimumPrice(product),
-                              isPerFoot: _perFootItems[product.id] ?? false,
+                              minimumPrice: _getMinimumPrice(line.product, line.isPerFoot),
+                              isPerFoot: line.isPerFoot,
                               onPerFootChanged: (value) {
-                                setState(() => _updatePerFoot(product, value));
+                                setState(() => _updatePerFoot(line.lineKey, line.product, value));
                               },
                             ),
                           _buildPaymentAndNotesSection(backgroundColor: Colors.grey.shade50),
