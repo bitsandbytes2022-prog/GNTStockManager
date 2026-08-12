@@ -335,7 +335,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
         format: initialFormat,
         onLayout: (PdfPageFormat format) async {
           final pdf = thermal
-              ? await _generateThermalInvoicePdf(sale)
+              ? await _generateThermalInvoicePdf(sale, format: format)
               : await _generateInvoicePdf(sale, format: format);
           return pdf.save();
         },
@@ -683,7 +683,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return pdf;
   }
 
-  Future<pw.Document> _generateThermalInvoicePdf(Sale sale) async {
+  Future<pw.Document> _generateThermalInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -696,16 +696,20 @@ class _SalesListScreenState extends State<SalesListScreen> {
           textAlign: pw.TextAlign.center,
         );
 
-    pdf.addPage(
-      pw.Page(
-        // Always the true physical roll width — see bill_preview_screen.dart's
-        // identical thermal branch for why the negotiated `format` isn't
-        // trusted here.
-        pageFormat: PdfPageFormat.roll80,
-        build: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            children: [
+    // Width is always the true physical roll width — the negotiated
+    // `format`'s width isn't trusted since thermal/POS drivers often
+    // misreport it (see bill_preview_screen.dart's identical branch).
+    // Height is different: a single pw.Page auto-grows to fit however tall
+    // the content is, producing a complete PDF, but some browser/OS print
+    // pipelines still clip that one oversized page to whatever *physical*
+    // page height they negotiated with the driver — silently dropping
+    // every item past that point on a long invoice instead of continuing
+    // onto more paper. When the driver reports a real (finite) height,
+    // honor it via MultiPage so the invoice spans further pages instead of
+    // being cut off; a true continuous-roll driver with no height limit
+    // keeps the original single auto-sized page.
+    final negotiatedHeight = format?.height;
+    final children = [
               pw.Center(
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.center,
@@ -875,11 +879,32 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 ),
               ),
               pw.SizedBox(height: 10),
-            ],
-          );
-        },
-      ),
-    );
+    ];
+
+    if (negotiatedHeight != null && negotiatedHeight.isFinite) {
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat(
+            PdfPageFormat.roll80.width,
+            negotiatedHeight,
+            marginAll: 5 * PdfPageFormat.mm,
+          ),
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          maxPages: 200,
+          build: (context) => children,
+        ),
+      );
+    } else {
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.roll80,
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: children,
+          ),
+        ),
+      );
+    }
 
     return pdf;
   }

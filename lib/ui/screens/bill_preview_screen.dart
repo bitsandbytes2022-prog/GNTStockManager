@@ -322,19 +322,48 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     }
 
     if (thermal) {
-      pdf.addPage(
-        pw.Page(
-          // Always the true physical roll width — thermal/POS printer
-          // drivers are unreliable about reporting the actual paper size
-          // via the OS print dialog (often falling back to a much wider
-          // standard paper size), so trusting the negotiated `format` here
-          // causes right-side content to be laid out past the real 80mm
-          // roll and get cut off when it prints. A4 (below) doesn't have
-          // this problem since standard printers report real paper sizes.
-          pageFormat: PdfPageFormat.roll80,
-          build: (context) => _buildThermalContent(logoImage),
-        ),
-      );
+      // Width is always the true physical roll width — thermal/POS printer
+      // drivers are unreliable about reporting the actual paper size via
+      // the OS print dialog (often falling back to a much wider standard
+      // paper size), so trusting the negotiated `format` for width causes
+      // right-side content to be laid out past the real 80mm roll and get
+      // cut off when it prints.
+      //
+      // Height is different: a single pw.Page auto-grows to fit however
+      // tall the content is, which produces a complete PDF — but some
+      // browser/OS print pipelines (confirmed via web printing) still clip
+      // that one oversized page down to whatever *physical* page height
+      // they negotiated with the printer driver, silently dropping every
+      // item past that point instead of continuing onto more paper. When
+      // the driver reports a real (finite) page height here, honor it via
+      // MultiPage so a long item list correctly spans further pages
+      // instead of being cut off; a true continuous-roll driver that
+      // reports no height limit keeps the original single auto-sized page.
+      final negotiatedHeight = format?.height;
+      if (negotiatedHeight != null && negotiatedHeight.isFinite) {
+        pdf.addPage(
+          pw.MultiPage(
+            pageFormat: PdfPageFormat(
+              PdfPageFormat.roll80.width,
+              negotiatedHeight,
+              marginAll: 5 * PdfPageFormat.mm,
+            ),
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            maxPages: 200,
+            build: (context) => _buildThermalContentChildren(logoImage),
+          ),
+        );
+      } else {
+        pdf.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat.roll80,
+            build: (context) => pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: _buildThermalContentChildren(logoImage),
+            ),
+          ),
+        );
+      }
       return pdf;
     }
 
@@ -668,7 +697,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     return pdf;
   }
 
-  pw.Widget _buildThermalContent(pw.ImageProvider? logoImage) {
+  /// The thermal receipt's content as a flat list of top-level blocks
+  /// (rather than one pw.Widget tree) so it can feed either a single
+  /// auto-sized pw.Page or a pw.MultiPage that spans multiple physical
+  /// pages — see the pageFormat selection in _generatePdf.
+  List<pw.Widget> _buildThermalContentChildren(pw.ImageProvider? logoImage) {
     final subtotal = _calculateSubtotal();
     final showGst = _gstEnabled && _gstRate > 0;
     pw.Widget dashedDivider() => pw.Text(
@@ -677,9 +710,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           textAlign: pw.TextAlign.center,
         );
 
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
+    return [
         // Header
         pw.Center(
           child: pw.Column(
@@ -877,8 +908,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           ),
         ),
         pw.SizedBox(height: 10),
-      ],
-    );
+      ];
   }
 
   pw.Widget _buildTableCell(String text, {bool bold = false}) {
