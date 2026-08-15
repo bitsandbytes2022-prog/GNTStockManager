@@ -463,20 +463,6 @@ class SalesService {
     return entries.take(limit).toList();
   }
 
-  /// Quantity used the last time this product was sold, if any past sales
-  /// exist within the scan window.
-  Future<int?> getLastQuantity(String productId) async {
-    await _ensureCoOccurrenceComputed();
-    return _lastQuantityCache?[productId];
-  }
-
-  /// Most common quantity this product is sold in, if any past sales exist
-  /// within the scan window.
-  Future<int?> getModeQuantity(String productId) async {
-    await _ensureCoOccurrenceComputed();
-    return _modeQuantityCache?[productId];
-  }
-
   // ==========================================
   // PAGINATED FETCH
   // ==========================================

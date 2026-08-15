@@ -564,17 +564,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
-  // New method to show quantity popup
-  // Recalls how this product is typically sold (most common past quantity,
-  // falling back to the last quantity it was sold in) instead of always
-  // defaulting a fresh add-to-cart to 1.
-  Future<int> _suggestedQuantity(String productId) async {
-    final mode = await _salesService.getModeQuantity(productId);
-    if (mode != null) return mode;
-    final last = await _salesService.getLastQuantity(productId);
-    return last ?? 1;
-  }
-
   /// Tapping a product in the browse grid always adds a fresh cart line —
   /// even if the product already has lines in the cart (a customer coming
   /// back later the same day for more should show up as its own line, not
@@ -609,9 +598,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final int alreadyElsewhere = _cartQuantityForProduct(product.id) -
         (isEditingExisting ? (_selectedQuantities[editingLineKey] ?? 0) : 0);
 
-    int currentQuantity = isEditingExisting
-        ? _selectedQuantities[editingLineKey]!
-        : await _suggestedQuantity(product.id);
+    int currentQuantity =
+        isEditingExisting ? _selectedQuantities[editingLineKey]! : 1;
     if (!mounted) return;
     bool sellPerFoot = isEditingExisting
         ? (_perFootItems[editingLineKey] ?? false)
