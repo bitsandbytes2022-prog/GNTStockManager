@@ -67,6 +67,13 @@ class SaleItem {
   /// Null on older records — see [effectiveStockUnits].
   final int? stockUnits;
 
+  /// Set only when this line was brought in from a different sale via
+  /// "Merge sales" — the date that sale was originally made on. Null means
+  /// this line has always belonged to the sale it's on, so it takes the
+  /// parent [Sale.createdAt] as its date. Lets a merged sale still show
+  /// which items were bought when.
+  final DateTime? addedOn;
+
   SaleItem({
     required this.productId,
     required this.productName,
@@ -77,6 +84,7 @@ class SaleItem {
     this.imageBase64,
     this.isPerFoot = false,
     this.stockUnits,
+    this.addedOn,
   }) : total = salePrice * quantity;
 
   /// Stock units to apply for this line. Falls back to [quantity] for
@@ -96,6 +104,7 @@ class SaleItem {
     'imageBase64': imageBase64,
     'isPerFoot': isPerFoot,
     'stockUnits': stockUnits,
+    'addedOn': addedOn != null ? Timestamp.fromDate(addedOn!) : null,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -109,8 +118,13 @@ class SaleItem {
       imageBase64: map['imageBase64'],
       isPerFoot: map['isPerFoot'] == true,
       stockUnits: map['stockUnits'] as int?,
+      addedOn: (map['addedOn'] as Timestamp?)?.toDate(),
     );
   }
+
+  /// The date this line should be shown/grouped under: the sale it was
+  /// merged in from, or [sale]'s own date if it was never merged.
+  DateTime effectiveDate(Sale sale) => addedOn ?? sale.createdAt;
 
   // Added copyWith for SaleItem
   SaleItem copyWith({
@@ -123,6 +137,7 @@ class SaleItem {
     String? imageBase64,
     bool? isPerFoot,
     int? stockUnits,
+    DateTime? addedOn,
   }) {
     return SaleItem(
       productId: productId ?? this.productId,
@@ -134,6 +149,7 @@ class SaleItem {
       imageBase64: imageBase64 ?? this.imageBase64,
       isPerFoot: isPerFoot ?? this.isPerFoot,
       stockUnits: stockUnits ?? this.stockUnits,
+      addedOn: addedOn ?? this.addedOn,
     );
   }
 }

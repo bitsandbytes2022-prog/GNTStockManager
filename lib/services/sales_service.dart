@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 
 import '../models/sale_model.dart';
 
@@ -581,6 +582,74 @@ class SalesService {
     } catch (e) {
       throw Exception('Failed to update sale: $e');
     }
+  }
+
+  // ==========================================
+  // MERGE SALES
+  // ==========================================
+  /// Merges 2+ sales into one, for when a customer adds to an existing sale
+  /// after some days rather than starting a fresh one. All items land on
+  /// the sale with the lowest invoice number (the "survivor" — treated as
+  /// the original/main sale); items pulled in from the other sale(s) are
+  /// tagged with that sale's original date via [SaleItem.addedOn], so the
+  /// merged sale/receipt can still show what was bought when. The other
+  /// sale documents are deleted, and a note recording which invoice
+  /// numbers were folded in is appended to the survivor for audit purposes.
+  ///
+  /// Both sales already applied their own stock deduction and
+  /// revenue/profit/sold-count effects when they were originally created —
+  /// merging only consolidates the records after the fact, it isn't a new
+  /// sale and isn't undoing one, so none of those counters are touched here.
+  Future<Sale> mergeSales(List<Sale> sales) async {
+    if (sales.length < 2) {
+      throw Exception('Select at least 2 sales to merge');
+    }
+    if (sales.map((s) => s.isMock).toSet().length > 1) {
+      throw Exception('Cannot merge a mock (test) sale with a real sale');
+    }
+
+    final sorted = [...sales]
+      ..sort((a, b) => a.invoiceNumber.compareTo(b.invoiceNumber));
+    final survivor = sorted.first;
+    final others = sorted.skip(1).toList();
+
+    final mergedItems = [
+      ...survivor.items,
+      for (final other in others)
+        ...other.items.map(
+          (item) => item.copyWith(addedOn: item.addedOn ?? other.createdAt),
+        ),
+    ];
+
+    final mergedNotes = [
+      if (survivor.notes?.isNotEmpty ?? false) survivor.notes!,
+      for (final other in others)
+        'Merged sale #${other.invoiceNumber} '
+            '(${DateFormat('dd/MM/yyyy').format(other.createdAt)})',
+    ].join('\n');
+
+    final mergedSale = survivor.copyWith(
+      items: mergedItems,
+      totalAmount: sorted.fold<double>(0.0, (sum, s) => sum + s.totalAmount),
+      amountPaid: sorted.fold<double>(0.0, (sum, s) => sum + s.amountPaid),
+      payments: [for (final s in sorted) ...s.payments],
+      notes: mergedNotes,
+    );
+
+    final batch = _firestore.batch();
+    batch.update(
+      _firestore.collection(_salesCollection).doc(survivor.id),
+      mergedSale.toFirestore(),
+    );
+    for (final other in others) {
+      batch.delete(_firestore.collection(_salesCollection).doc(other.id));
+    }
+    await batch.commit();
+
+    clearCache();
+    debugPrint(
+        '✅ Merged ${others.length + 1} sales into #${survivor.invoiceNumber}');
+    return mergedSale;
   }
 
   // ==========================================

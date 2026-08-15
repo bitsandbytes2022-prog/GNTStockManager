@@ -64,6 +64,14 @@ class _SalesListScreenState extends State<SalesListScreen> {
   String _searchQuery = '';
   bool _creditDueOnly = false;
 
+  // Merge-sales selection mode. `_lastLoadedSales` is refreshed (without
+  // setState) every time `_buildSalesContent` builds, so the merge action
+  // always has the currently-visible `Sale` objects behind the selected ids
+  // without needing its own separate fetch.
+  bool _selectionMode = false;
+  Set<String> _selectedSaleIds = {};
+  List<Sale> _lastLoadedSales = [];
+
   static const String _shopGstin = '02FDUPK4649R1ZK';
   static const String _dealerTagline1 =
       'Authorised Dealer of Nerolac Paints & Prakash Surya PVC Pipes';
@@ -114,6 +122,130 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
   }
 
+  void _enterSelectionMode(Sale sale) {
+    setState(() {
+      _selectionMode = true;
+      _selectedSaleIds = {sale.id};
+    });
+  }
+
+  void _toggleSelection(Sale sale) {
+    setState(() {
+      if (_selectedSaleIds.contains(sale.id)) {
+        _selectedSaleIds.remove(sale.id);
+        if (_selectedSaleIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedSaleIds.add(sale.id);
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedSaleIds = {};
+    });
+  }
+
+  Future<void> _confirmMergeSelected() async {
+    final selected = _lastLoadedSales
+        .where((s) => _selectedSaleIds.contains(s.id))
+        .toList();
+    if (selected.length < 2) return;
+
+    if (selected.map((s) => s.isMock).toSet().length > 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot merge a mock (test) sale with a real sale'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final sorted = [...selected]
+      ..sort((a, b) => a.invoiceNumber.compareTo(b.invoiceNumber));
+    final survivor = sorted.first;
+    final others = sorted.skip(1).toList();
+    final newTotal = sorted.fold(0.0, (sum, s) => sum + s.totalAmount);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Merge Sales'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Invoice #${survivor.invoiceNumber} '
+              '(${DateFormat('dd MMM yyyy').format(survivor.createdAt)}) '
+              'stays as the main sale.',
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'These will be added into it, then removed:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            for (final other in others)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '#${other.invoiceNumber} '
+                  '(${DateFormat('dd MMM yyyy').format(other.createdAt)}) '
+                  '— ₹${other.totalAmount.toStringAsFixed(0)}',
+                ),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              'New total: ₹${newTotal.toStringAsFixed(0)}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Merge'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _salesService.mergeSales(selected);
+      if (mounted) {
+        _exitSelectionMode();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sales merged'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _refreshSales();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error merging sales: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
 
   /// Calculate number of columns based on screen width
   int _getCrossAxisCount(BuildContext context) {
@@ -386,12 +518,39 @@ class _SalesListScreenState extends State<SalesListScreen> {
       (sale.buyerPhone?.isNotEmpty ?? false) ||
       (sale.buyerAddress?.isNotEmpty ?? false);
 
+  /// True once a sale has items from more than one calendar day — i.e. it
+  /// was produced by "Merge Sales" — so print/detail views know to show
+  /// each item's date instead of rendering as an ordinary single-date sale.
+  bool _isMergedSale(Sale sale) => sale.items
+          .map((item) {
+            final d = item.effectiveDate(sale);
+            return DateTime(d.year, d.month, d.day);
+          })
+          .toSet()
+          .length >
+      1;
+
+  /// Groups a sale's items by calendar day (oldest first), so a merged
+  /// sale's print/detail views can show the date once per batch instead of
+  /// repeating it on every line.
+  List<MapEntry<DateTime, List<SaleItem>>> _groupItemsByDate(Sale sale) {
+    final groups = <DateTime, List<SaleItem>>{};
+    for (final item in sale.items) {
+      final d = item.effectiveDate(sale);
+      groups.putIfAbsent(DateTime(d.year, d.month, d.day), () => []).add(item);
+    }
+    final entries = groups.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return entries;
+  }
+
   Future<pw.Document> _generateInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
     final logoImage = await loadShopLogo();
     final due = sale.amountDue;
+    final merged = _isMergedSale(sale);
 
     pdf.addPage(
       pw.MultiPage(
@@ -524,53 +683,25 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 ),
               ),
 
-            // Items table — a plain Table can span across pages on its own,
-            // unlike a Container, so a long item list no longer silently
-            // fails to render when it doesn't fit on one page.
-            pw.Table(
-              border: pw.TableBorder(
-                top: const pw.BorderSide(color: PdfColors.black, width: 0.8),
-                bottom: const pw.BorderSide(color: PdfColors.black, width: 0.8),
-                left: const pw.BorderSide(color: PdfColors.black, width: 0.8),
-                right: const pw.BorderSide(color: PdfColors.black, width: 0.8),
-                horizontalInside:
-                    const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
-                verticalInside:
-                    const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
-              ),
-              columnWidths: const {
-                0: pw.FlexColumnWidth(3),
-                1: pw.FlexColumnWidth(1),
-                2: pw.FlexColumnWidth(1.5),
-                3: pw.FlexColumnWidth(1.5),
-              },
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-                  children: [
-                    _buildPdfTableCell('Description of Goods', bold: true),
-                    _buildPdfTableCell('Qty', bold: true),
-                    _buildPdfTableCell('Rate (Excl. GST)', bold: true),
-                    _buildPdfTableCell('Amount', bold: true),
-                  ],
-                ),
-                ...sale.items.map((item) {
-                  // Item rows show the tax-exclusive rate/amount, so the
-                  // Amount column sums to the Taxable Value shown below.
-                  final displayPrice = _taxableValue(item.salePrice);
-                  final amount = item.quantity * displayPrice;
-                  return pw.TableRow(
-                    children: [
-                      _buildPdfTableCell('${item.productName} (${item.productSize})'),
-                      _buildPdfTableCell(
-                          item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
-                      _buildPdfTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
-                      _buildPdfTableCell('INR ${amount.toStringAsFixed(2)}'),
-                    ],
-                  );
-                }),
-              ],
-            ),
+            // Items table(s) — a plain Table can span across pages on its
+            // own, unlike a Container, so a long item list no longer
+            // silently fails to render when it doesn't fit on one page. A
+            // merged sale gets one table per original purchase date, each
+            // preceded by a date label shown once for that whole batch
+            // rather than repeated on every line.
+            if (merged)
+              ..._groupItemsByDate(sale).expand((group) => [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.only(top: 8, bottom: 3),
+                      child: pw.Text(
+                        'Added: ${DateFormat('dd MMM yyyy').format(group.key)}',
+                        style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                      ),
+                    ),
+                    _itemsTable(group.value),
+                  ])
+            else
+              _itemsTable(sale.items),
 
             // Totals
             pw.Container(
@@ -720,6 +851,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
     final logoImage = await loadShopLogo();
     final due = sale.amountDue;
+    final merged = _isMergedSale(sale);
 
     pw.Widget dashedDivider() => pw.Text(
           '--------------------------------',
@@ -817,32 +949,45 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 pw.SizedBox(height: 4),
               ],
 
-              ...sale.items.map((item) {
-                final displayPrice = _taxableValue(item.salePrice);
-                final amount = item.quantity * displayPrice;
-                final qtyLabel = item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
-                return pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 4),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
+              // A merged sale shows the date once per batch, right before
+              // that batch's items, rather than repeating it on every line.
+              ..._groupItemsByDate(sale).expand((group) => [
+                    if (merged) ...[
                       pw.Text(
-                        '${item.productName} (${item.productSize})',
+                        'Added: ${DateFormat('dd MMM yyyy').format(group.key)}',
                         style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
                       ),
-                      pw.Row(
-                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
-                          pw.Text('$qtyLabel x ${displayPrice.toStringAsFixed(2)}',
-                              style: const pw.TextStyle(fontSize: 8)),
-                          pw.Text('INR ${amount.toStringAsFixed(2)}',
-                              style: const pw.TextStyle(fontSize: 8)),
-                        ],
-                      ),
+                      pw.SizedBox(height: 2),
                     ],
-                  ),
-                );
-              }),
+                    ...group.value.map((item) {
+                      final displayPrice = _taxableValue(item.salePrice);
+                      final amount = item.quantity * displayPrice;
+                      final qtyLabel =
+                          item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
+                      return pw.Padding(
+                        padding: const pw.EdgeInsets.only(bottom: 4),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              '${item.productName} (${item.productSize})',
+                              style:
+                                  pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                            ),
+                            pw.Row(
+                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                              children: [
+                                pw.Text('$qtyLabel x ${displayPrice.toStringAsFixed(2)}',
+                                    style: const pw.TextStyle(fontSize: 8)),
+                                pw.Text('INR ${amount.toStringAsFixed(2)}',
+                                    style: const pw.TextStyle(fontSize: 8)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ]),
 
               dashedDivider(),
               pw.SizedBox(height: 4),
@@ -967,6 +1112,54 @@ class _SalesListScreenState extends State<SalesListScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// The standard Description/Qty/Rate/Amount items table used on the A4
+  /// invoice, built once per date batch for a merged sale or once for the
+  /// whole sale otherwise.
+  pw.Widget _itemsTable(List<SaleItem> items) {
+    return pw.Table(
+      border: pw.TableBorder(
+        top: const pw.BorderSide(color: PdfColors.black, width: 0.8),
+        bottom: const pw.BorderSide(color: PdfColors.black, width: 0.8),
+        left: const pw.BorderSide(color: PdfColors.black, width: 0.8),
+        right: const pw.BorderSide(color: PdfColors.black, width: 0.8),
+        horizontalInside: const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
+        verticalInside: const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
+      ),
+      columnWidths: const {
+        0: pw.FlexColumnWidth(3),
+        1: pw.FlexColumnWidth(1),
+        2: pw.FlexColumnWidth(1.5),
+        3: pw.FlexColumnWidth(1.5),
+      },
+      children: [
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+          children: [
+            _buildPdfTableCell('Description of Goods', bold: true),
+            _buildPdfTableCell('Qty', bold: true),
+            _buildPdfTableCell('Rate (Excl. GST)', bold: true),
+            _buildPdfTableCell('Amount', bold: true),
+          ],
+        ),
+        ...items.map((item) {
+          // Item rows show the tax-exclusive rate/amount, so the Amount
+          // column sums to the Taxable Value shown below.
+          final displayPrice = _taxableValue(item.salePrice);
+          final amount = item.quantity * displayPrice;
+          return pw.TableRow(
+            children: [
+              _buildPdfTableCell('${item.productName} (${item.productSize})'),
+              _buildPdfTableCell(
+                  item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
+              _buildPdfTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
+              _buildPdfTableCell('INR ${amount.toStringAsFixed(2)}'),
+            ],
+          );
+        }),
+      ],
     );
   }
 
@@ -1168,7 +1361,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
       backgroundColor: Colors.grey[50],
       body: Column(
         children: [
-          // Header with filters
+          // Header with filters — replaced by a selection toolbar while
+          // picking sales to merge.
+          if (_selectionMode)
+            _buildSelectionBar()
+          else
           Container(
             padding: EdgeInsets.all(_isDesktop ? 24 : 16),
             decoration: BoxDecoration(
@@ -1342,8 +1539,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
           ),
         ],
       ),
-      floatingActionButton:
-          FloatingActionButton.extended(
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton.extended(
         onPressed: () {
           Navigator.push(
             context,
@@ -1353,6 +1551,47 @@ class _SalesListScreenState extends State<SalesListScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Record Sale'),
         backgroundColor: Colors.blue,
+      ),
+    );
+  }
+
+  Widget _buildSelectionBar() {
+    final selectedCount = _selectedSaleIds.length;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: _isDesktop ? 24 : 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            IconButton(
+              onPressed: _exitSelectionMode,
+              icon: const Icon(Icons.close),
+              tooltip: 'Cancel',
+            ),
+            Text(
+              selectedCount == 0
+                  ? 'Select sales to merge'
+                  : '$selectedCount selected',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: selectedCount >= 2 ? _confirmMergeSelected : null,
+              icon: const Icon(Icons.call_merge, size: 18),
+              label: const Text('Merge'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1419,6 +1658,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
   }
 
   Widget _buildSalesContent(List<Sale> sales) {
+    _lastLoadedSales = sales;
     if (sales.isEmpty) {
       return Center(
         child: Column(
@@ -1528,7 +1768,22 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   final sale = entry.value[index];
                   return _SaleCard(
                     sale: sale,
-                    onTap: () => _showSaleDetails(sale),
+                    selectionMode: _selectionMode,
+                    selected: _selectedSaleIds.contains(sale.id),
+                    onTap: () {
+                      if (_selectionMode) {
+                        _toggleSelection(sale);
+                      } else {
+                        _showSaleDetails(sale);
+                      }
+                    },
+                    onLongPress: () {
+                      if (_selectionMode) {
+                        _toggleSelection(sale);
+                      } else {
+                        _enterSelectionMode(sale);
+                      }
+                    },
                     onEdit: () => _editSale(sale),
                     onDelete: () => _deleteSale(sale),
                     onReturn: () => _returnItems(sale),
@@ -1819,20 +2074,26 @@ class _StatItem extends StatelessWidget {
 class _SaleCard extends StatelessWidget {
   final Sale sale;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
   final VoidCallback onDelete;
   final VoidCallback onEdit;
   final VoidCallback onReturn;
   final VoidCallback onPrint;
   final VoidCallback onRecordPayment;
+  final bool selectionMode;
+  final bool selected;
 
   const _SaleCard({
     required this.sale,
     required this.onTap,
+    required this.onLongPress,
     required this.onDelete,
     required this.onReturn,
     required this.onEdit,
     required this.onPrint,
     required this.onRecordPayment,
+    this.selectionMode = false,
+    this.selected = false,
   });
 
   @override
@@ -1840,12 +2101,16 @@ class _SaleCard extends StatelessWidget {
     final itemCount = sale.items.fold(0, (sum, item) => sum + item.quantity);
 
     return Card(
-      elevation: 2,
+      elevation: selected ? 4 : 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
+        side: selected
+            ? const BorderSide(color: Colors.blue, width: 2)
+            : BorderSide.none,
       ),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -1940,7 +2205,15 @@ class _SaleCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  // Action buttons
+                  // Action buttons — swapped for a selection indicator while
+                  // picking sales to merge.
+                  if (selectionMode)
+                    Icon(
+                      selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                      color: selected ? Colors.blue : Colors.grey.shade400,
+                      size: 24,
+                    )
+                  else
                   PopupMenuButton<String>(
                     padding: EdgeInsets.zero,
                     icon: Icon(Icons.more_vert, color: Colors.grey[600], size: 18),
@@ -2211,10 +2484,19 @@ class _TimeSpanPickerBottomSheet extends StatelessWidget {
 }
 
 // Sale Details Dialog
-class _SaleDetailsDialog extends StatelessWidget {
+class _SaleDetailsDialog extends StatefulWidget {
   final Sale sale;
 
   const _SaleDetailsDialog({required this.sale});
+
+  @override
+  State<_SaleDetailsDialog> createState() => _SaleDetailsDialogState();
+}
+
+class _SaleDetailsDialogState extends State<_SaleDetailsDialog> {
+  bool _showProfitDetails = false;
+
+  Sale get sale => widget.sale;
 
   double _calculateItemProfit(item) {
     return (item.salePrice - item.purchasePrice) * item.quantity;
@@ -2226,9 +2508,37 @@ class _SaleDetailsDialog extends StatelessWidget {
     });
   }
 
+  double _calculateTotalCost() {
+    return sale.items.fold(0.0, (sum, item) {
+      return sum + item.purchasePrice * item.quantity;
+    });
+  }
+
+  DateTime _dayOf(SaleItem item) {
+    final d = item.effectiveDate(sale);
+    return DateTime(d.year, d.month, d.day);
+  }
+
+  /// True once this sale has items from more than one calendar day, i.e.
+  /// it was produced by "Merge Sales" rather than a single checkout.
+  bool get _isMerged =>
+      sale.items.map(_dayOf).toSet().length > 1;
+
+  /// Items grouped by day, oldest first, for a merged sale's detail view.
+  List<MapEntry<DateTime, List<SaleItem>>> _groupedItems() {
+    final groups = <DateTime, List<SaleItem>>{};
+    for (final item in sale.items) {
+      groups.putIfAbsent(_dayOf(item), () => []).add(item);
+    }
+    final entries = groups.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return entries;
+  }
+
   @override
   Widget build(BuildContext context) {
     final totalProfit = _calculateTotalProfit();
+    final totalCost = _calculateTotalCost();
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -2341,7 +2651,54 @@ class _SaleDetailsDialog extends StatelessWidget {
                         ),
                       ),
                     ],
-                    ...sale.items.map((item) {
+                    if (sale.notes?.isNotEmpty ?? false) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'NOTES',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(sale.notes!, style: const TextStyle(fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    ],
+                    for (final group in _groupedItems()) ...[
+                      if (_isMerged)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8, top: 4),
+                          child: Row(
+                            children: [
+                              Icon(Icons.calendar_today,
+                                  size: 12, color: Colors.grey.shade600),
+                              const SizedBox(width: 6),
+                              Text(
+                                DateFormat('EEEE, d MMM yyyy').format(group.key),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ...group.value.map((item) {
                       final itemProfit = _calculateItemProfit(item);
                       final itemTotal = item.quantity * item.salePrice;
 
@@ -2389,54 +2746,57 @@ class _SaleDetailsDialog extends StatelessWidget {
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: itemProfit >= 0
-                                      ? Colors.green.shade50
-                                      : Colors.red.shade50,
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: itemProfit >= 0
-                                        ? Colors.green.shade200
-                                        : Colors.red.shade200,
+                              if (_showProfitDetails) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
                                   ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      itemProfit >= 0
-                                          ? Icons.trending_up
-                                          : Icons.trending_down,
-                                      size: 12,
+                                  decoration: BoxDecoration(
+                                    color: itemProfit >= 0
+                                        ? Colors.green.shade50
+                                        : Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
                                       color: itemProfit >= 0
-                                          ? Colors.green.shade700
-                                          : Colors.red.shade700,
+                                          ? Colors.green.shade200
+                                          : Colors.red.shade200,
                                     ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Profit: ₹${itemProfit.toStringAsFixed(0)}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        itemProfit >= 0
+                                            ? Icons.trending_up
+                                            : Icons.trending_down,
+                                        size: 12,
                                         color: itemProfit >= 0
                                             ? Colors.green.shade700
                                             : Colors.red.shade700,
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Profit: ₹${itemProfit.toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: itemProfit >= 0
+                                              ? Colors.green.shade700
+                                              : Colors.red.shade700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),
                       );
                     }),
+                    ],
                     const Divider(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2458,45 +2818,65 @@ class _SaleDetailsDialog extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              totalProfit >= 0
-                                  ? Icons.trending_up
-                                  : Icons.trending_down,
-                              size: 18,
-                              color: totalProfit >= 0
-                                  ? Colors.green.shade700
-                                  : Colors.red.shade700,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Total Profit',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                    if (_showProfitDetails) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                totalProfit >= 0
+                                    ? Icons.trending_up
+                                    : Icons.trending_down,
+                                size: 18,
                                 color: totalProfit >= 0
                                     ? Colors.green.shade700
                                     : Colors.red.shade700,
                               ),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          '₹${totalProfit.toStringAsFixed(0)}',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: totalProfit >= 0
-                                ? Colors.green.shade700
-                                : Colors.red.shade700,
+                              const SizedBox(width: 4),
+                              Text(
+                                'Total Profit',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: totalProfit >= 0
+                                      ? Colors.green.shade700
+                                      : Colors.red.shade700,
+                                ),
+                              ),
+                            ],
                           ),
+                          Text(
+                            '₹${totalProfit.toStringAsFixed(0)} (${totalCost > 0 ? (totalProfit / totalCost * 100).toStringAsFixed(1) : '0.0'}%)',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: totalProfit >= 0
+                                  ? Colors.green.shade700
+                                  : Colors.red.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _showProfitDetails = false),
+                          icon: const Icon(Icons.visibility_off, size: 16),
+                          label: const Text('Hide'),
                         ),
-                      ],
-                    ),
+                      ),
+                    ] else
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _showProfitDetails = true),
+                          icon: const Icon(Icons.expand_more, size: 18),
+                          label: const Text('See More'),
+                        ),
+                      ),
                   ],
                 ),
               ),
