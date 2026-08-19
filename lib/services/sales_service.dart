@@ -451,18 +451,6 @@ class SalesService {
     return _coOccurrenceCache!;
   }
 
-  /// Products most often bought alongside [productId], highest count first.
-  Future<List<MapEntry<String, int>>> getFrequentlyBoughtWith(
-    String productId, {
-    int limit = 10,
-  }) async {
-    await _ensureCoOccurrenceComputed();
-    final related = _coOccurrenceCache![productId] ?? {};
-    final entries = related.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return entries.take(limit).toList();
-  }
-
   // ==========================================
   // PAGINATED FETCH
   // ==========================================

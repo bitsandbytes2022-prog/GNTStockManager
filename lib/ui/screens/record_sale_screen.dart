@@ -113,11 +113,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   Map<String, CustomItem> _customItems = {};
   List<String> _customItemOrder = []; // Track order of custom items
 
-  // "Frequently bought together" suggestions for the most recently added
-  // cart item, refreshed on every add-to-cart.
-  String? _frequentlyBoughtSourceId;
-  List<Product> _frequentlyBoughtProducts = [];
-
   String _searchQuery = '';
   String _cartSearchQuery = '';
   bool _isLoading = true;
@@ -136,6 +131,17 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   // Size filtering (multi-select, ANDed with category)
   Set<String> _selectedSizes = {};
+
+  // Quick category picker (left-side rail: PPR / CPVC / PVC — the shop's
+  // top sellers). Independent of the category/subcategory/search filters
+  // above: picking one here takes over the product grid until cleared, so
+  // it stays a fast, single-purpose path rather than interacting with the
+  // general filter state. A category alone isn't enough to narrow results
+  // usefully (a pipe type spans many sizes), so the grid stays empty until
+  // a size is picked too.
+  static const List<String> _quickCategories = ['PPR', 'CPVC', 'PVC'];
+  String? _quickCategory;
+  String? _quickSize;
 
   // Stock filtering
   bool _inStockOnly = false;
@@ -490,6 +496,54 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         category: _selectedCategory,
         subcategory: _selectedSubcategory,
       );
+
+  // Real product data is inconsistent about where a pipe type lives — some
+  // products have it as the category directly (category "PPR"), others as
+  // a subcategory under "Sanitary" (category "Sanitary", subcategory "PPR")
+  // — so the quick rail matches either shape rather than assuming one.
+  bool _matchesQuickCategory(Product p, String target) {
+    final category = p.category.toLowerCase();
+    final t = target.toLowerCase();
+    if (category == t) return true;
+    return category == 'sanitary' && (p.subcategory?.toLowerCase() == t);
+  }
+
+  List<String> _quickAvailableSizes() {
+    if (_quickCategory == null) return [];
+    final sizes = _allProducts
+        .where((p) => _matchesQuickCategory(p, _quickCategory!))
+        .map((p) => p.size)
+        .where((s) => s.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    sizes.sort();
+    return sizes;
+  }
+
+  List<Product> _quickFilteredProducts() {
+    if (_quickCategory == null || _quickSize == null) return [];
+    return _allProducts
+        .where((p) =>
+            _matchesQuickCategory(p, _quickCategory!) && p.size == _quickSize)
+        .toList();
+  }
+
+  // Tapping the active category again exits quick mode. Switching category
+  // drops the previously-selected size — sizes are scoped per category.
+  void _setQuickCategory(String category) {
+    setState(() {
+      if (_quickCategory == category) {
+        _quickCategory = null;
+      } else {
+        _quickCategory = category;
+      }
+      _quickSize = null;
+    });
+  }
+
+  void _setQuickSize(String? size) {
+    setState(() => _quickSize = size);
+  }
 
   // Changing category can make previously-selected sizes unavailable (and
   // invisible in the chip row), so drop any that no longer apply. Subcategory
@@ -1032,8 +1086,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       _perFootItems[lineKey] = isPerFoot;
     });
 
-    _loadFrequentlyBoughtTogether(product.id);
-
     // Show feedback
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1057,42 +1109,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       _perFootItems.remove(lineKey);
       _lineProductId.remove(lineKey);
       _cartItemOrder.remove(lineKey);
-      if (_cartItemOrder.isEmpty) {
-        _frequentlyBoughtSourceId = null;
-        _frequentlyBoughtProducts = [];
-      }
     });
-  }
-
-  // Refreshes the "frequently bought together" strip for the item that was
-  // just added, using SalesService's cached co-occurrence data (built from
-  // recent sales history) rather than a fresh Firestore read every time.
-  Future<void> _loadFrequentlyBoughtTogether(String productId) async {
-    try {
-      final related = await _salesService.getFrequentlyBoughtWith(productId, limit: 8);
-      // The cart may have changed again (or moved on to a different item)
-      // by the time this resolves — only apply if it's still relevant.
-      if (!mounted ||
-          _cartItemOrder.isEmpty ||
-          _lineProductId[_cartItemOrder.last] != productId) {
-        return;
-      }
-
-      final suggestions = <Product>[];
-      for (final entry in related) {
-        final product = _findProductById(entry.key);
-        if (product != null && !_isProductInCart(product.id)) {
-          suggestions.add(product);
-        }
-      }
-
-      setState(() {
-        _frequentlyBoughtSourceId = productId;
-        _frequentlyBoughtProducts = suggestions;
-      });
-    } catch (e) {
-      debugPrint('Error loading frequently bought together: $e');
-    }
   }
 
   // Show dialog to add custom item
@@ -2102,6 +2119,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       ),
       body: Row(
         children: [
+          // Quick category rail — fast switch between the shop's top
+          // sellers (PPR / CPVC / PVC) without touching the general filters.
+          _buildQuickCategoryRail(),
+
           // Product Grid
           Expanded(
             flex: 3,
@@ -2110,7 +2131,6 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               child: Column(
                 children: [
                   _buildSearchBar(),
-                  _buildSuggestionsSection(),
                   Expanded(child: _buildProductGrid()),
                 ],
               ),
@@ -2162,16 +2182,22 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           ),
         ],
       ),
-      body: Container(
-        color: Colors.white,
-        child: Column(
-          children: [
-            _buildSearchBar(),
-            _buildSuggestionsSection(),
-            Expanded(child: _buildProductGrid()),
-            if (_selectedQuantities.isNotEmpty) _buildMobileBottomBar(),
-          ],
-        ),
+      body: Row(
+        children: [
+          _buildQuickCategoryRail(),
+          Expanded(
+            child: Container(
+              color: Colors.white,
+              child: Column(
+                children: [
+                  _buildSearchBar(),
+                  Expanded(child: _buildProductGrid()),
+                  if (_selectedQuantities.isNotEmpty) _buildMobileBottomBar(),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2194,7 +2220,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       body: Column(
         children: [
           _buildSearchBar(),
-          _buildSuggestionsSection(),
+          _buildQuickCategoryBar(),
           Expanded(child: _buildProductGrid()),
           if (_totalItemsInCart > 0) _buildMobileBottomBar(),
         ],
@@ -2550,120 +2576,164 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     return null;
   }
 
-  Product? get _lastAddedProduct {
-    if (_cartItemOrder.isEmpty) return null;
-    final productId = _lineProductId[_cartItemOrder.last];
-    if (productId == null) return null;
-    return _findProductById(productId);
-  }
-
-  // Combines both suggestion strips shown above the product grid. Kept as a
-  // single insertion point so all three responsive layouts stay untouched.
-  Widget _buildSuggestionsSection() {
-    final strips = <Widget?>[
-      _buildFrequentlyBoughtStrip(),
-      _buildSimilarItemsStrip(),
-    ].whereType<Widget>().toList();
-
-    if (strips.isEmpty) return const SizedBox.shrink();
-    return Column(children: strips);
-  }
-
-  // "Frequently Bought Together" — learned from past sales baskets via
-  // SalesService's co-occurrence cache, keyed to the most recently added
-  // cart item. Excludes anything already in the cart.
-  Widget? _buildFrequentlyBoughtStrip() {
-    final reference = _lastAddedProduct;
-    if (reference == null || _frequentlyBoughtSourceId != reference.id) {
-      return null;
-    }
-    if (_frequentlyBoughtProducts.isEmpty) return null;
-
-    return _buildSuggestionStrip(
-      title: 'Frequently Bought Together',
-      icon: Icons.auto_awesome,
-      products: _frequentlyBoughtProducts,
-    );
-  }
-
-  // "More in <size> <category>" — same category+size as the most recently
-  // added cart item, so a job that needs several fittings of one size is
-  // fast to keep building without re-searching each time.
-  Widget? _buildSimilarItemsStrip() {
-    final reference = _lastAddedProduct;
-    if (reference == null) return null;
-
-    final similar = _allProducts.where((p) =>
-        p.id != reference.id &&
-        p.category.toLowerCase() == reference.category.toLowerCase() &&
-        p.size == reference.size).toList();
-
-    if (similar.isEmpty) return null;
-
-    return _buildSuggestionStrip(
-      title: 'More in ${reference.size} ${reference.category}',
-      icon: Icons.category_outlined,
-      products: similar,
-    );
-  }
-
-  Widget _buildSuggestionStrip({
-    required String title,
-    required IconData icon,
-    required List<Product> products,
-  }) {
+  // Vertical rail (desktop/tablet): a fast, always-visible way to switch
+  // between the shop's top-selling pipe types without opening the general
+  // Filters sheet. Tapping the active category again clears it.
+  Widget _buildQuickCategoryRail() {
     return Container(
-      padding: const EdgeInsets.only(top: 12, bottom: 4),
+      width: 88,
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        color: Colors.grey.shade50,
+        border: Border(right: BorderSide(color: Colors.grey.shade200)),
       ),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Icon(icon, size: 16, color: Colors.grey.shade600),
-                const SizedBox(width: 6),
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 108,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: products.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final product = products[index];
-                return _SuggestionCard(
-                  product: product,
-                  isInCart: _isProductInCart(product.id),
-                  onTap: () => _showQuantityDialog(product),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 4),
+          for (final category in _quickCategories) ...[
+            _buildQuickCategoryButton(category),
+            const SizedBox(height: 8),
+          ],
         ],
       ),
+    );
+  }
+
+  // Same categories, laid out as a horizontal bar — used on mobile where
+  // there isn't room for a permanent side rail.
+  Widget _buildQuickCategoryBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          for (final category in _quickCategories) ...[
+            Expanded(child: _buildQuickCategoryButton(category)),
+            if (category != _quickCategories.last) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickCategoryButton(String category) {
+    final color = _getCategoryColor(category);
+    final selected = _quickCategory == category;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _setQuickCategory(category),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          color: selected ? color.withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? color : Colors.grey.shade300,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.plumbing,
+                color: selected ? color : Colors.grey.shade500, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              category,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                color: selected ? color : Colors.grey.shade700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Replaces the normal grid while a quick category is active: a row of
+  // sizes for that category, then matching items in compact cells once a
+  // size is picked. Ordering within results is a placeholder for now.
+  Widget _buildQuickGrid() {
+    final sizes = _quickAvailableSizes();
+    final products = _quickFilteredProducts();
+    final color = _getCategoryColor(_quickCategory!);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final size in sizes)
+                ChoiceChip(
+                  label: Text(size),
+                  selected: _quickSize == size,
+                  onSelected: (_) =>
+                      _setQuickSize(_quickSize == size ? null : size),
+                  selectedColor: color.withOpacity(0.2),
+                  labelStyle: TextStyle(
+                    color: _quickSize == size ? color : Colors.grey.shade800,
+                    fontWeight:
+                        _quickSize == size ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _quickSize == null
+              ? Center(
+                  child: Text(
+                    'Pick a size to see $_quickCategory items',
+                    style: TextStyle(color: Colors.grey.shade500),
+                  ),
+                )
+              : products.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No $_quickCategory items in $_quickSize',
+                        style: TextStyle(color: Colors.grey.shade500),
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: _isDesktop ? 8 : (_isTablet ? 6 : 4),
+                        childAspectRatio: 0.85,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      itemCount: products.length,
+                      itemBuilder: (context, index) {
+                        final product = products[index];
+                        return _QuickProductCell(
+                          product: product,
+                          isInCart: _isProductInCart(product.id),
+                          quantity: _cartQuantityForProduct(product.id),
+                          onTap: () => _showQuantityDialog(product),
+                        );
+                      },
+                    ),
+        ),
+      ],
     );
   }
 
   Widget _buildProductGrid() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_quickCategory != null) {
+      return _buildQuickGrid();
     }
 
     if (_filteredProducts.isEmpty) {
@@ -3546,14 +3616,19 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 // Compact horizontal card used by suggestion strips (similar items,
 // frequently bought together) — narrower than _ProductCard since it scrolls
 // horizontally in a fixed-height row rather than sitting in the main grid.
-class _SuggestionCard extends StatelessWidget {
+// Compact grid cell for the quick category picker — denser than
+// _ProductCard since the size is already fixed by the size-chip selection,
+// so there's less to show per item.
+class _QuickProductCell extends StatelessWidget {
   final Product product;
   final bool isInCart;
+  final int quantity;
   final VoidCallback onTap;
 
-  const _SuggestionCard({
+  const _QuickProductCell({
     required this.product,
     required this.isInCart,
+    required this.quantity,
     required this.onTap,
   });
 
@@ -3561,57 +3636,97 @@ class _SuggestionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isOutOfStock = product.stock == 0;
 
-    return SizedBox(
-      width: 120,
-      child: Card(
-        elevation: isInCart ? 3 : 1,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(
-            color: isInCart ? Colors.blue : Colors.grey.shade200,
-            width: isInCart ? 2 : 1,
-          ),
+    return Card(
+      elevation: isInCart ? 3 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: isInCart ? Colors.blue : Colors.grey.shade200,
+          width: isInCart ? 2 : 1,
         ),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  product.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  product.size,
-                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      isOutOfStock ? 'Out of stock' : '₹${product.salePrice.toStringAsFixed(0)}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: isOutOfStock ? Colors.red : Colors.green.shade700,
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _buildThumbnail()),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          isOutOfStock
+                              ? 'Out of stock'
+                              : '₹${product.salePrice.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isOutOfStock ? Colors.red : Colors.green.shade700,
+                          ),
+                        ),
                       ),
-                    ),
-                    if (isInCart)
-                      const Icon(Icons.check_circle, size: 14, color: Colors.blue),
-                  ],
-                ),
-              ],
+                      if (isInCart)
+                        Text(
+                          '×$quantity',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildThumbnail() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(10),
+          topRight: Radius.circular(10),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(10),
+          topRight: Radius.circular(10),
+        ),
+        child: product.imageBase64 != null
+            ? Image.memory(
+                base64Decode(product.imageBase64!),
+                fit: BoxFit.cover,
+                width: double.infinity,
+                errorBuilder: (context, error, stackTrace) => Center(
+                  child: Icon(Icons.inventory_2_outlined,
+                      size: 22, color: Colors.grey.shade400),
+                ),
+              )
+            : Center(
+                child: Icon(Icons.inventory_2_outlined,
+                    size: 22, color: Colors.grey.shade400),
+              ),
       ),
     );
   }
