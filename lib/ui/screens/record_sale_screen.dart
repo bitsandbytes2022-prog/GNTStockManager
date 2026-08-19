@@ -132,15 +132,19 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // Size filtering (multi-select, ANDed with category)
   Set<String> _selectedSizes = {};
 
-  // Quick category picker (left-side rail: PPR / CPVC / PVC — the shop's
+  // Quick category picker (left-side rail: PPR / CPVC / PVC / GI — the shop's
   // top sellers). Independent of the category/subcategory/search filters
   // above: picking one here takes over the product grid until cleared, so
   // it stays a fast, single-purpose path rather than interacting with the
   // general filter state. A category alone isn't enough to narrow results
   // usefully (a pipe type spans many sizes), so the grid stays empty until
   // a size is picked too.
-  static const List<String> _quickCategories = ['PPR', 'CPVC', 'PVC'];
+  static const List<String> _quickCategories = ['PPR', 'CPVC', 'PVC', 'GI'];
   String? _quickCategory;
+  // GI is sold as both pipe and nipple fittings, tagged via subcategory
+  // (e.g. subcategory "Nipple"), sharing the same diameter sizes — so GI
+  // needs an extra Pipe/Nipple split the other quick categories don't.
+  String? _quickGiType;
   String? _quickSize;
 
   // Stock filtering
@@ -508,10 +512,21 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     return category == 'sanitary' && (p.subcategory?.toLowerCase() == t);
   }
 
+  bool _isNippleProduct(Product p) =>
+      (p.subcategory ?? '').toLowerCase().contains('nipple');
+
+  // Only meaningful when browsing GI: splits pipe from nipple so the two
+  // don't get mixed in the same size grid despite sharing diameter sizes.
+  bool _matchesQuickGiType(Product p) {
+    if (_quickCategory != 'GI') return true;
+    return _isNippleProduct(p) == (_quickGiType == 'Nipple');
+  }
+
   List<String> _quickAvailableSizes() {
     if (_quickCategory == null) return [];
     final sizes = _allProducts
-        .where((p) => _matchesQuickCategory(p, _quickCategory!))
+        .where((p) =>
+            _matchesQuickCategory(p, _quickCategory!) && _matchesQuickGiType(p))
         .map((p) => p.size)
         .where((s) => s.trim().isNotEmpty)
         .toSet()
@@ -524,7 +539,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     if (_quickCategory == null || _quickSize == null) return [];
     return _allProducts
         .where((p) =>
-            _matchesQuickCategory(p, _quickCategory!) && p.size == _quickSize)
+            _matchesQuickCategory(p, _quickCategory!) &&
+            _matchesQuickGiType(p) &&
+            p.size == _quickSize)
         .toList();
   }
 
@@ -534,9 +551,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() {
       if (_quickCategory == category) {
         _quickCategory = null;
+        _quickGiType = null;
       } else {
         _quickCategory = category;
+        _quickGiType = category == 'GI' ? 'Pipe' : null;
       }
+      _quickSize = null;
+    });
+  }
+
+  void _setQuickGiType(String type) {
+    setState(() {
+      _quickGiType = type;
       _quickSize = null;
     });
   }
@@ -2662,10 +2688,36 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final sizes = _quickAvailableSizes();
     final products = _quickFilteredProducts();
     final color = _getCategoryColor(_quickCategory!);
+    final label = _quickCategory == 'GI' && _quickGiType != null
+        ? '$_quickCategory $_quickGiType'
+        : _quickCategory;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_quickCategory == 'GI')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Row(
+              children: [
+                for (final type in const ['Pipe', 'Nipple']) ...[
+                  ChoiceChip(
+                    label: Text(type),
+                    selected: _quickGiType == type,
+                    onSelected: (_) => _setQuickGiType(type),
+                    selectedColor: color.withOpacity(0.2),
+                    labelStyle: TextStyle(
+                      color: _quickGiType == type ? color : Colors.grey.shade800,
+                      fontWeight: _quickGiType == type
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Wrap(
@@ -2692,14 +2744,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           child: _quickSize == null
               ? Center(
                   child: Text(
-                    'Pick a size to see $_quickCategory items',
+                    'Pick a size to see $label items',
                     style: TextStyle(color: Colors.grey.shade500),
                   ),
                 )
               : products.isEmpty
                   ? Center(
                       child: Text(
-                        'No $_quickCategory items in $_quickSize',
+                        'No $label items in $_quickSize',
                         style: TextStyle(color: Colors.grey.shade500),
                       ),
                     )
