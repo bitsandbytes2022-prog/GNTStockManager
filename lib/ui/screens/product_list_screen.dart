@@ -39,6 +39,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Map<String, List<String>> _subcategories = {};
   String? _selectedSubcategory; // null means "All" within the category
 
+  // Quick category rail — same fast PPR/CPVC/PVC/GI narrowing used on the
+  // record sale screen, for browsing without touching the general filters.
+  static const List<String> _quickCategories = ['PPR', 'CPVC', 'PVC', 'GI'];
+  String? _quickCategory;
+  String? _quickGiType; // 'Fitting' or 'Nipple', only meaningful for GI
+  String? _quickSize;
+
   @override
   void initState() {
     super.initState();
@@ -124,6 +131,75 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
 
     return filtered;
+  }
+
+  // Some products have PPR/CPVC/PVC/GI as the category directly, others as
+  // a subcategory under "Sanitary" — so the quick rail matches either shape.
+  bool _matchesQuickCategory(Product p, String target) {
+    final category = p.category.toLowerCase();
+    final t = target.toLowerCase();
+    if (category == t) return true;
+    return category == 'sanitary' && (p.subcategory?.toLowerCase() == t);
+  }
+
+  bool _isNippleProduct(Product p) =>
+      (p.subcategory ?? '').toLowerCase().contains('nipple') ||
+      p.name.toLowerCase().contains('nipple');
+
+  // Only meaningful when browsing GI: splits fittings from nipples so the
+  // two don't get mixed in the same size grid despite sharing diameter sizes.
+  bool _matchesQuickGiType(Product p) {
+    if (_quickCategory != 'GI') return true;
+    return _isNippleProduct(p) == (_quickGiType == 'Nipple');
+  }
+
+  List<String> _quickAvailableSizes(List<Product> products) {
+    if (_quickCategory == null) return [];
+    final sizes = products
+        .where((p) =>
+            _matchesQuickCategory(p, _quickCategory!) && _matchesQuickGiType(p))
+        .map((p) => p.size)
+        .where((s) => s.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    sizes.sort();
+    return sizes;
+  }
+
+  List<Product> _quickFilteredProducts(List<Product> products) {
+    if (_quickCategory == null || _quickSize == null) return [];
+    return products
+        .where((p) =>
+            _matchesQuickCategory(p, _quickCategory!) &&
+            _matchesQuickGiType(p) &&
+            p.size == _quickSize)
+        .toList();
+  }
+
+  // Tapping the active category again exits quick mode. Switching category
+  // drops the previously-selected size — sizes are scoped per category.
+  void _setQuickCategory(String category) {
+    setState(() {
+      if (_quickCategory == category) {
+        _quickCategory = null;
+        _quickGiType = null;
+      } else {
+        _quickCategory = category;
+        _quickGiType = category == 'GI' ? 'Fitting' : null;
+      }
+      _quickSize = null;
+    });
+  }
+
+  void _setQuickGiType(String type) {
+    setState(() {
+      _quickGiType = type;
+      _quickSize = null;
+    });
+  }
+
+  void _setQuickSize(String? size) {
+    setState(() => _quickSize = size);
   }
 
   List<Product> _sortProducts(List<Product> products) {
@@ -597,11 +673,23 @@ class _ProductListScreenState extends State<ProductListScreen> {
             ),
           ),
 
+          // Quick category bar (Mobile) — rail sits beside the grid instead
+          // on wider layouts, see below.
+          if (!isDesktop && !isTablet) _buildQuickCategoryBar(),
+
           // Product grid
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refreshProducts,
-              child: _useStreamMode ? _buildStreamView() : _buildCachedView(),
+            child: Row(
+              children: [
+                if (isDesktop || isTablet) _buildQuickCategoryRail(),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _refreshProducts,
+                    child:
+                        _useStreamMode ? _buildStreamView() : _buildCachedView(),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -852,7 +940,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final filteredProducts = _filterProducts(snapshot.data ?? []);
+        final products = snapshot.data ?? [];
+        if (_quickCategory != null) {
+          return _buildQuickGrid(products);
+        }
+        final filteredProducts = _filterProducts(products);
         final sortedProducts = _sortProducts(filteredProducts);
         return _buildProductGrid(sortedProducts);
       },
@@ -871,10 +963,169 @@ class _ProductListScreenState extends State<ProductListScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final filteredProducts = _filterProducts(snapshot.data ?? []);
+        final products = snapshot.data ?? [];
+        if (_quickCategory != null) {
+          return _buildQuickGrid(products);
+        }
+        final filteredProducts = _filterProducts(products);
         final sortedProducts = _sortProducts(filteredProducts);
         return _buildProductGrid(sortedProducts);
       },
+    );
+  }
+
+  // Replaces the normal grid while a quick category is active: a row of
+  // sizes for that category, then matching items once a size is picked.
+  Widget _buildQuickGrid(List<Product> products) {
+    final sizes = _quickAvailableSizes(products);
+    final quickProducts = _quickFilteredProducts(products);
+    final color = _getCategoryColor(_quickCategory!);
+    final label = _quickCategory == 'GI' && _quickGiType != null
+        ? '$_quickCategory $_quickGiType'
+        : _quickCategory;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_quickCategory == 'GI')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Row(
+              children: [
+                for (final type in const ['Fitting', 'Nipple']) ...[
+                  ChoiceChip(
+                    label: Text(type),
+                    selected: _quickGiType == type,
+                    onSelected: (_) => _setQuickGiType(type),
+                    selectedColor: color.withOpacity(0.2),
+                    labelStyle: TextStyle(
+                      color: _quickGiType == type ? color : Colors.grey.shade800,
+                      fontWeight: _quickGiType == type
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final size in sizes)
+                ChoiceChip(
+                  label: Text(size),
+                  selected: _quickSize == size,
+                  onSelected: (_) =>
+                      _setQuickSize(_quickSize == size ? null : size),
+                  selectedColor: color.withOpacity(0.2),
+                  labelStyle: TextStyle(
+                    color: _quickSize == size ? color : Colors.grey.shade800,
+                    fontWeight:
+                        _quickSize == size ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _quickSize == null
+              ? Center(
+                  child: Text(
+                    'Pick a size to see $label items',
+                    style: TextStyle(color: Colors.grey.shade500),
+                  ),
+                )
+              : quickProducts.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No $label items in $_quickSize',
+                        style: TextStyle(color: Colors.grey.shade500),
+                      ),
+                    )
+                  : _buildProductGrid(_sortProducts(quickProducts)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickCategoryRail() {
+    return Container(
+      width: 88,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: Border(right: BorderSide(color: Colors.grey.shade200)),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      child: Column(
+        children: [
+          for (final category in _quickCategories) ...[
+            _buildQuickCategoryButton(category),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Same categories, laid out as a horizontal bar — used on mobile where
+  // there isn't room for a permanent side rail.
+  Widget _buildQuickCategoryBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          for (final category in _quickCategories) ...[
+            Expanded(child: _buildQuickCategoryButton(category)),
+            if (category != _quickCategories.last) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickCategoryButton(String category) {
+    final color = _getCategoryColor(category);
+    final selected = _quickCategory == category;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _setQuickCategory(category),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          color: selected ? color.withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? color : Colors.grey.shade300,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.plumbing,
+                color: selected ? color : Colors.grey.shade500, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              category,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                color: selected ? color : Colors.grey.shade700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

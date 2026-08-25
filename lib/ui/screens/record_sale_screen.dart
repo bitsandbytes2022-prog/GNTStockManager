@@ -513,7 +513,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   }
 
   bool _isNippleProduct(Product p) =>
-      (p.subcategory ?? '').toLowerCase().contains('nipple');
+      (p.subcategory ?? '').toLowerCase().contains('nipple') ||
+      p.name.toLowerCase().contains('nipple');
 
   // Only meaningful when browsing GI: splits pipe from nipple so the two
   // don't get mixed in the same size grid despite sharing diameter sizes.
@@ -554,7 +555,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _quickGiType = null;
       } else {
         _quickCategory = category;
-        _quickGiType = category == 'GI' ? 'Pipe' : null;
+        _quickGiType = category == 'GI' ? 'Fitting' : null;
       }
       _quickSize = null;
     });
@@ -2700,7 +2701,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Row(
               children: [
-                for (final type in const ['Pipe', 'Nipple']) ...[
+                for (final type in const ['Fitting', 'Nipple']) ...[
                   ChoiceChip(
                     label: Text(type),
                     selected: _quickGiType == type,

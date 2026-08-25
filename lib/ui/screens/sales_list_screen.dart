@@ -1248,6 +1248,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     final query = _searchQuery.toLowerCase();
     return sales.where((sale) {
+      if (sale.buyerName != null &&
+          sale.buyerName!.toLowerCase().contains(query)) {
+        return true;
+      }
       // Check if any item in the sale contains the search query
       return sale.items.any((item) =>
           item.productName.toLowerCase().contains(query) ||
@@ -1483,7 +1487,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     });
                   },
                   decoration: InputDecoration(
-                    hintText: 'Search products...',
+                    hintText: 'Search products or buyer name...',
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: _searchQuery.isNotEmpty
                         ? IconButton(
