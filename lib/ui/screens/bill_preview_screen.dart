@@ -76,6 +76,18 @@ class BillPreviewScreen extends StatefulWidget {
   /// [paymentMethod] is Credit (0 means nothing received yet).
   final double initialPayment;
 
+  /// When true, this is a print/view-only preview — no "Complete Sale"
+  /// button, since [_completeSale] always creates a brand-new sale via
+  /// `SalesService.createSale`. Used by EditSaleScreen, where saving must go
+  /// through `SalesService.updateSale` on the existing sale instead.
+  final bool readOnly;
+
+  /// The already-assigned invoice number to display, for a preview of a
+  /// sale that already exists (editing). When null (the default, used when
+  /// previewing a brand-new sale not yet saved), the next-available invoice
+  /// number is looked up and shown as a preview.
+  final int? existingInvoiceNumber;
+
   const BillPreviewScreen({
     super.key,
     required this.lineItems,
@@ -86,6 +98,8 @@ class BillPreviewScreen extends StatefulWidget {
     this.buyerPhone,
     this.buyerAddress,
     this.initialPayment = 0,
+    this.readOnly = false,
+    this.existingInvoiceNumber,
   });
 
   @override
@@ -161,8 +175,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   Future<void> _initialize() async {
     setState(() => _isLoading = true);
     try {
-      // Get next invoice number (but don't commit it yet)
-      final nextNumber = await _invoiceService.getCurrentInvoiceNumber();
+      // An existing sale (editing) already has a real invoice number —
+      // don't look up/preview the next one, which would show the wrong
+      // number on the bill.
+      final previewNumber = widget.existingInvoiceNumber ??
+          (await _invoiceService.getCurrentInvoiceNumber()) + 1;
 
       // Load logo from assets
       try {
@@ -173,7 +190,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       }
 
       setState(() {
-        _invoiceNumber = nextNumber + 1; // Preview the next number
+        _invoiceNumber = previewNumber;
         _isLoading = false;
       });
     } catch (e) {
@@ -1573,29 +1590,31 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: ElevatedButton.icon(
-              onPressed: _isSaving ? null : _completeSale,
-              icon: _isSaving
-                  ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
+          if (!widget.readOnly) ...[
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton.icon(
+                onPressed: _isSaving ? null : _completeSale,
+                icon: _isSaving
+                    ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+                    : const Icon(Icons.check_circle),
+                label: Text(_isSaving ? 'Processing...' : 'Complete Sale'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
                 ),
-              )
-                  : const Icon(Icons.check_circle),
-              label: Text(_isSaving ? 'Processing...' : 'Complete Sale'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
