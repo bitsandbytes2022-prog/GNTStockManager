@@ -166,14 +166,29 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return sizes;
   }
 
+  // With a size picked, shows that size's items; typing a search narrows
+  // (or, with no size picked yet, searches the whole category directly).
   List<Product> _quickFilteredProducts(List<Product> products) {
-    if (_quickCategory == null || _quickSize == null) return [];
-    return products
-        .where((p) =>
-            _matchesQuickCategory(p, _quickCategory!) &&
-            _matchesQuickGiType(p) &&
-            p.size == _quickSize)
-        .toList();
+    if (_quickCategory == null) return [];
+    if (_quickSize == null && _searchQuery.isEmpty) return [];
+
+    var filtered = products.where((p) =>
+        _matchesQuickCategory(p, _quickCategory!) && _matchesQuickGiType(p));
+
+    if (_quickSize != null) {
+      filtered = filtered.where((p) => p.size == _quickSize);
+    }
+
+    if (_searchQuery.isNotEmpty) {
+      final queryWords = _searchQuery.split(' ').where((w) => w.isNotEmpty);
+      filtered = filtered.where((product) {
+        final name = product.name.toLowerCase();
+        final size = product.size.toLowerCase();
+        return queryWords.every((word) => name.contains(word) || size.contains(word));
+      });
+    }
+
+    return filtered.toList();
   }
 
   // Tapping the active category again exits quick mode. Switching category
@@ -1033,17 +1048,19 @@ class _ProductListScreenState extends State<ProductListScreen> {
           ),
         ),
         Expanded(
-          child: _quickSize == null
+          child: (_quickSize == null && _searchQuery.isEmpty)
               ? Center(
                   child: Text(
-                    'Pick a size to see $label items',
+                    'Pick a size or search to see $label items',
                     style: TextStyle(color: Colors.grey.shade500),
                   ),
                 )
               : quickProducts.isEmpty
                   ? Center(
                       child: Text(
-                        'No $label items in $_quickSize',
+                        _searchQuery.isNotEmpty
+                            ? 'No $label items match "${_searchController.text}"'
+                            : 'No $label items in $_quickSize',
                         style: TextStyle(color: Colors.grey.shade500),
                       ),
                     )
