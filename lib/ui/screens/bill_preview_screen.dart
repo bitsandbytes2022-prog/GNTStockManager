@@ -335,8 +335,15 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           thermalSize != null ? _thermalPageFormat(thermalSize) : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
+        // Ignore the negotiated `format` entirely — same reasoning as the
+        // thermal branch below: the OS/browser print dialog's reported
+        // paper size is unreliable (e.g. it can reflect a different
+        // previously-used printer's paper instead of what was actually
+        // picked in the "Print As" sheet), so an A4 choice here could
+        // otherwise get silently rendered at some other printer's narrow
+        // width instead of true A4.
         onLayout: (PdfPageFormat format) async {
-          final pdf = await _generatePdf(format: format, thermalSize: thermalSize);
+          final pdf = await _generatePdf(thermalSize: thermalSize);
           return pdf.save();
         },
       );
@@ -350,7 +357,6 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   }
 
   Future<pw.Document> _generatePdf({
-    PdfPageFormat? format,
     _ThermalRollSize? thermalSize,
   }) async {
     final pdf = pw.Document(
@@ -408,7 +414,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: format ?? PdfPageFormat.a4,
+        pageFormat: PdfPageFormat.a4,
         maxPages: 50,
         build: (context) {
           final subtotal = _calculateSubtotal();

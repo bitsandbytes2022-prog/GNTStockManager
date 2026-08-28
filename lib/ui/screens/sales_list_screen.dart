@@ -493,10 +493,17 @@ class _SalesListScreenState extends State<SalesListScreen> {
           thermalSize != null ? _thermalPageFormat(thermalSize) : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
+        // Ignore the negotiated `format` entirely — same reasoning as the
+        // thermal branch: the OS/browser print dialog's reported paper size
+        // is unreliable (e.g. it can reflect a different previously-used
+        // printer's paper instead of what was actually picked in the
+        // "Print As" sheet), so an A4 choice here could otherwise get
+        // silently rendered at some other printer's narrow width instead
+        // of true A4.
         onLayout: (PdfPageFormat format) async {
           final pdf = thermalSize != null
               ? await _generateThermalInvoicePdf(sale, thermalSize)
-              : await _generateInvoicePdf(sale, format: format);
+              : await _generateInvoicePdf(sale);
           return pdf.save();
         },
       );
@@ -544,7 +551,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return entries;
   }
 
-  Future<pw.Document> _generateInvoicePdf(Sale sale, {PdfPageFormat? format}) async {
+  Future<pw.Document> _generateInvoicePdf(Sale sale) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -554,7 +561,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: format ?? PdfPageFormat.a4,
+        pageFormat: PdfPageFormat.a4,
         maxPages: 50,
         build: (context) {
           return [
