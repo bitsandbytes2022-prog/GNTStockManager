@@ -76,6 +76,9 @@ class BillPreviewScreen extends StatefulWidget {
   /// deduction, excluded from analytics).
   final bool isMock;
 
+  /// Recorded on the sale when it was priced at wholesale rates.
+  final bool isWholesale;
+
   // Optional buyer details, recorded for future reference on the bill.
   final String? buyerName;
   final String? buyerPhone;
@@ -110,6 +113,7 @@ class BillPreviewScreen extends StatefulWidget {
     required this.paymentMethod,
     this.notes,
     this.isMock = false,
+    this.isWholesale = false,
     this.buyerName,
     this.buyerPhone,
     this.buyerAddress,
@@ -274,6 +278,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         notes: widget.notes,
         invoiceNumber: invoiceNumber, // Add invoice number to sale
         isMock: widget.isMock,
+        isWholesale: widget.isWholesale,
         buyerName: widget.buyerName,
         buyerPhone: widget.buyerPhone,
         buyerAddress: widget.buyerAddress,

@@ -157,6 +157,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   // a sale that was wrongly marked mock (or vice versa) is a legitimate edit.
   bool _isMockSale = false;
 
+  // Wholesale sale (to a shopkeeper): new lines start at each product's
+  // wholesale price instead of its retail sale price. Seeded from the
+  // original sale.
+  bool _isWholesale = false;
+
   bool _showMarginSection = false;
   bool _showSaleDetails = true;
 
@@ -190,6 +195,25 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       if (_lineProductId[key] == productId) return _customPrices[key];
     }
     return null;
+  }
+
+  /// The per-unit price a new line starts at: the wholesale price on a
+  /// wholesale sale, otherwise the retail sale price.
+  double _listPriceOf(Product product) =>
+      _isWholesale ? product.effectiveWholesalePrice : product.salePrice;
+
+  /// Switches the sale between retail and wholesale pricing, re-pricing
+  /// every cart line to the new list price (this replaces any discount or
+  /// hand-typed price on those lines).
+  void _setWholesale(bool value) {
+    setState(() {
+      _isWholesale = value;
+      _discountPercent = 0;
+      for (final line in _cartLines) {
+        _customPrices[line.lineKey] =
+            _effectiveListPrice(line.product, line.isPerFoot);
+      }
+    });
   }
 
   bool _lastPerFootForProduct(String productId) {
@@ -279,6 +303,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _buyerAddressController.text = widget.sale.buyerAddress ?? '';
     _amountPaidController.text = widget.sale.amountPaid.toStringAsFixed(2);
     _isMockSale = widget.sale.isMock;
+    _isWholesale = widget.sale.isWholesale;
 
     // Populate selected items, preserving the original sale's item order.
     // Each sale item becomes its own cart line — if the original sale
@@ -688,8 +713,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         ? _customPrices[editingLineKey]!
         : (_lastPriceForProduct(product.id) ??
             (sellPerFoot && feetPerPipe != null
-                ? product.salePrice / feetPerPipe
-                : product.salePrice));
+                ? _listPriceOf(product) / feetPerPipe
+                : _listPriceOf(product)));
 
     final TextEditingController qtyController =
         TextEditingController(text: currentQuantity.toString());
@@ -831,8 +856,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             setDialogState(() {
                               sellPerFoot = value;
                               priceController.text = (value
-                                      ? product.salePrice / feetPerPipe
-                                      : product.salePrice)
+                                      ? _listPriceOf(product) / feetPerPipe
+                                      : _listPriceOf(product))
                                   .toStringAsFixed(2);
                             });
                           },
@@ -936,7 +961,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                             Text(
-                              'Default: ₹${product.salePrice.toStringAsFixed(2)}',
+                              '${_isWholesale ? 'Wholesale' : 'Default'}: ₹${_listPriceOf(product).toStringAsFixed(2)}',
                               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                             ),
                           ],
@@ -947,7 +972,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: InputDecoration(
                             prefixText: '₹',
-                            hintText: product.salePrice.toStringAsFixed(2),
+                            hintText: _listPriceOf(product).toStringAsFixed(2),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                             contentPadding:
                                 const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -1237,9 +1262,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   double _effectiveListPrice(Product product, bool isPerFoot) {
     if (isPerFoot) {
       final feet = _feetPerPipeFor(product);
-      if (feet != null && feet > 0) return product.salePrice / feet;
+      if (feet != null && feet > 0) return _listPriceOf(product) / feet;
     }
-    return product.salePrice;
+    return _listPriceOf(product);
   }
 
   double get _totalAmount {
@@ -1434,6 +1459,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     final parts = <String>[_paymentMethod];
     final buyerName = _buyerNameController.text.trim();
     if (buyerName.isNotEmpty) parts.add(buyerName);
+    if (_isWholesale) parts.add('Wholesale');
     if (_isMockSale) parts.add('Mock');
     return parts.join(' · ');
   }
@@ -1491,6 +1517,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             _buildPaymentMethodDropdown(afterChange: afterChange),
             const SizedBox(height: 12),
             _buildBuyerAndCreditFields(afterChange: afterChange),
+            _buildWholesaleTile(afterChange: afterChange),
             _buildMockSaleTile(afterChange: afterChange),
             const SizedBox(height: 16),
             TextField(
@@ -1504,6 +1531,52 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildWholesaleTile({VoidCallback? afterChange}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Tooltip(
+        message: 'Price every item at its wholesale rate (for shopkeepers)',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          decoration: BoxDecoration(
+            color: _isWholesale ? Colors.purple.shade50 : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color:
+                  _isWholesale ? Colors.purple.shade200 : Colors.grey.shade200,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.storefront,
+                size: 16,
+                color: _isWholesale ? Colors.purple.shade700 : Colors.grey,
+              ),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Wholesale rates',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Transform.scale(
+                scale: 0.75,
+                child: Switch(
+                  value: _isWholesale,
+                  onChanged: (value) {
+                    _setWholesale(value);
+                    afterChange?.call();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1814,6 +1887,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         paymentMethod: paymentMethodEnum,
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         isMock: _isMockSale,
+        isWholesale: _isWholesale,
         buyerName:
             _buyerNameController.text.trim().isEmpty ? null : _buyerNameController.text.trim(),
         buyerPhone:
@@ -2418,6 +2492,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           effectiveStock: _effectiveStock(product),
                           isInCart: _isProductInCart(product.id),
                           quantity: _cartQuantityForProduct(product.id),
+                          price: _listPriceOf(product),
                           onTap: () => _showQuantityDialog(product),
                         );
                       },
@@ -2475,6 +2550,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           effectiveStock: _effectiveStock(product),
           isSelected: isSelected,
           quantity: quantity,
+          isWholesale: _isWholesale,
           onTap: () => _showQuantityDialog(product),
           showPurchasePrice: showPurchasePrices,
           showSalesInfo: _currentSortOption == ProductSortOption.highSelling,
@@ -3029,6 +3105,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           paymentMethod: _paymentMethod,
           notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
           isMock: _isMockSale,
+          isWholesale: _isWholesale,
           buyerName: _buyerNameController.text.trim().isEmpty ? null : _buyerNameController.text.trim(),
           buyerPhone: _buyerPhoneController.text.trim().isEmpty ? null : _buyerPhoneController.text.trim(),
           buyerAddress: _buyerAddressController.text.trim().isEmpty ? null : _buyerAddressController.text.trim(),
@@ -3061,6 +3138,7 @@ class _QuickProductCell extends StatelessWidget {
   final int effectiveStock;
   final bool isInCart;
   final int quantity;
+  final double price;
   final VoidCallback onTap;
 
   const _QuickProductCell({
@@ -3068,6 +3146,7 @@ class _QuickProductCell extends StatelessWidget {
     required this.effectiveStock,
     required this.isInCart,
     required this.quantity,
+    required this.price,
     required this.onTap,
   });
 
@@ -3104,7 +3183,7 @@ class _QuickProductCell extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          isOutOfStock ? 'Out of stock' : '₹${product.salePrice.toStringAsFixed(0)}',
+                          isOutOfStock ? 'Out of stock' : '₹${price.toStringAsFixed(0)}',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
@@ -3163,6 +3242,7 @@ class _ProductCard extends StatelessWidget {
   final VoidCallback onTap;
   final bool showPurchasePrice;
   final bool showSalesInfo;
+  final bool isWholesale;
 
   const _ProductCard({
     required this.product,
@@ -3170,6 +3250,7 @@ class _ProductCard extends StatelessWidget {
     required this.isSelected,
     required this.quantity,
     required this.onTap,
+    this.isWholesale = false,
     this.showPurchasePrice = false,
     this.showSalesInfo = false,
   });
@@ -3283,7 +3364,14 @@ class _ProductCard extends StatelessWidget {
                           _buildPriceRowWithFormat('Cost', product.purchasePrice, Colors.grey.shade700, Icons.shopping_cart_outlined),
                           const SizedBox(height: 2),
                         ],
-                        _buildPriceRow('Sale', product.salePrice, Colors.green.shade700, Icons.currency_rupee),
+                        isWholesale
+                            ? _buildPriceRow(
+                                'Wholesale',
+                                double.parse(product.effectiveWholesalePrice.toStringAsFixed(2)),
+                                Colors.purple.shade700,
+                                Icons.storefront,
+                              )
+                            : _buildPriceRow('Sale', product.salePrice, Colors.green.shade700, Icons.currency_rupee),
                         if (showSalesInfo && product.totalSold > 0) ...[
                           const SizedBox(height: 2),
                           Row(

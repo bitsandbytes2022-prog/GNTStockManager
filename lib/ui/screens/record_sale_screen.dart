@@ -177,6 +177,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // and stays out of revenue/profit analytics.
   bool _isMockSale = false;
 
+  // Wholesale sale (to a shopkeeper): every product is priced at its
+  // wholesale price instead of its retail sale price.
+  bool _isWholesale = false;
+
   // Margin & discount readout is hidden by default (it's internal-only, not
   // needed for a quick sale) — shown via a toggle when actually wanted.
   bool _showMarginSection = false;
@@ -228,6 +232,25 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       if (_lineProductId[key] == productId) return _customPrices[key];
     }
     return null;
+  }
+
+  /// The per-unit price a new line starts at: the wholesale price on a
+  /// wholesale sale, otherwise the retail sale price.
+  double _listPriceOf(Product product) =>
+      _isWholesale ? product.effectiveWholesalePrice : product.salePrice;
+
+  /// Switches the sale between retail and wholesale pricing, re-pricing
+  /// every cart line to the new list price (this replaces any discount or
+  /// hand-typed price on those lines).
+  void _setWholesale(bool value) {
+    setState(() {
+      _isWholesale = value;
+      _discountPercent = 0;
+      for (final line in _cartLines) {
+        _customPrices[line.lineKey] =
+            _effectiveListPrice(line.product, line.isPerFoot);
+      }
+    });
   }
 
   /// Same idea as [_lastPriceForProduct] but for the per-foot toggle.
@@ -716,8 +739,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         ? _customPrices[editingLineKey]!
         : (_lastPriceForProduct(product.id) ??
             (sellPerFoot && feetPerPipe != null
-                ? product.salePrice / feetPerPipe
-                : product.salePrice));
+                ? _listPriceOf(product) / feetPerPipe
+                : _listPriceOf(product)));
 
     final TextEditingController qtyController = TextEditingController(
       text: currentQuantity.toString(),
@@ -904,8 +927,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             setDialogState(() {
                               sellPerFoot = value;
                               priceController.text = (value
-                                      ? product.salePrice / feetPerPipe
-                                      : product.salePrice)
+                                      ? _listPriceOf(product) / feetPerPipe
+                                      : _listPriceOf(product))
                                   .toStringAsFixed(2);
                             });
                           },
@@ -1033,7 +1056,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               ),
                             ),
                             Text(
-                              'Default: ₹${product.salePrice.toStringAsFixed(2)}',
+                              '${_isWholesale ? 'Wholesale' : 'Default'}: ₹${_listPriceOf(product).toStringAsFixed(2)}',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey[600],
@@ -1047,7 +1070,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: InputDecoration(
                             prefixText: '₹',
-                            hintText: product.salePrice.toStringAsFixed(2),
+                            hintText: _listPriceOf(product).toStringAsFixed(2),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -1411,9 +1434,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   double _effectiveListPrice(Product product, bool isPerFoot) {
     if (isPerFoot) {
       final feet = _feetPerPipeFor(product);
-      if (feet != null && feet > 0) return product.salePrice / feet;
+      if (feet != null && feet > 0) return _listPriceOf(product) / feet;
     }
-    return product.salePrice;
+    return _listPriceOf(product);
   }
 
   double get _totalAmount {
@@ -1645,6 +1668,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final parts = <String>[_paymentMethod];
     final buyerName = _buyerNameController.text.trim();
     if (buyerName.isNotEmpty) parts.add(buyerName);
+    if (_isWholesale) parts.add('Wholesale');
     if (_isMockSale) parts.add('Mock');
     return parts.join(' · ');
   }
@@ -1701,6 +1725,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ),
           ),
           if (_showSaleDetails) ...[
+            _buildWholesaleTile(afterChange: afterChange),
             _buildCreditCheckbox(afterChange: afterChange),
             _buildBuyerAndCreditSection(afterChange: afterChange),
             _buildMockSaleTile(afterChange: afterChange),
@@ -1718,6 +1743,52 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildWholesaleTile({VoidCallback? afterChange}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Tooltip(
+        message: 'Price every item at its wholesale rate (for shopkeepers)',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          decoration: BoxDecoration(
+            color: _isWholesale ? Colors.purple.shade50 : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color:
+                  _isWholesale ? Colors.purple.shade200 : Colors.grey.shade200,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.storefront,
+                size: 16,
+                color: _isWholesale ? Colors.purple.shade700 : Colors.grey,
+              ),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Wholesale rates',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Transform.scale(
+                scale: 0.75,
+                child: Switch(
+                  value: _isWholesale,
+                  onChanged: (value) {
+                    _setWholesale(value);
+                    afterChange?.call();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2074,6 +2145,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             ? null
             : _notesController.text.trim(),
         isMock: _isMockSale,
+        isWholesale: _isWholesale,
         buyerName: _buyerNameController.text.trim().isEmpty
             ? null
             : _buyerNameController.text.trim(),
@@ -2111,6 +2183,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _searchController.clear();
           _cartSearchController.clear();
           _isMockSale = false;
+          _isWholesale = false;
           _discountPercent = 0;
         });
 
@@ -2839,6 +2912,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           product: product,
                           isInCart: _isProductInCart(product.id),
                           quantity: _cartQuantityForProduct(product.id),
+                          price: _listPriceOf(product),
                           onTap: () => _showQuantityDialog(product),
                         );
                       },
@@ -2900,6 +2974,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           product: product,
           isSelected: isSelected,
           quantity: quantity,
+          isWholesale: _isWholesale,
           onTap: () => _showQuantityDialog(product),
           showPurchasePrice: showPurchasePrices,
           showSalesInfo: _currentSortOption == ProductSortOption.highSelling,
@@ -3723,6 +3798,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               ? null
               : _notesController.text.trim(),
           isMock: _isMockSale,
+          isWholesale: _isWholesale,
           buyerName: _buyerNameController.text.trim().isEmpty
               ? null
               : _buyerNameController.text.trim(),
@@ -3759,6 +3835,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _buyerAddressController.clear();
         _creditPaidController.clear();
         _isMockSale = false;
+        _isWholesale = false;
         _discountPercent = 0;
       });
 
@@ -3799,12 +3876,14 @@ class _QuickProductCell extends StatelessWidget {
   final Product product;
   final bool isInCart;
   final int quantity;
+  final double price;
   final VoidCallback onTap;
 
   const _QuickProductCell({
     required this.product,
     required this.isInCart,
     required this.quantity,
+    required this.price,
     required this.onTap,
   });
 
@@ -3846,7 +3925,7 @@ class _QuickProductCell extends StatelessWidget {
                         child: Text(
                           isOutOfStock
                               ? 'Out of stock'
-                              : '₹${product.salePrice.toStringAsFixed(0)}',
+                              : '₹${price.toStringAsFixed(0)}',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
@@ -3916,12 +3995,14 @@ class _ProductCard extends StatelessWidget {
   final VoidCallback onTap;
   final bool showPurchasePrice;
   final bool showSalesInfo;
+  final bool isWholesale;
 
   const _ProductCard({
     required this.product,
     required this.isSelected,
     required this.quantity,
     required this.onTap,
+    this.isWholesale = false,
     this.showPurchasePrice = false,
     this.showSalesInfo = false,
   });
@@ -4057,12 +4138,20 @@ class _ProductCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                         ],
-                        _buildPriceRow(
-                          'Sale',
-                          product.salePrice,
-                          Colors.green.shade700,
-                          Icons.currency_rupee,
-                        ),
+                        isWholesale
+                            ? _buildPriceRow(
+                                'Wholesale',
+                                double.parse(product.effectiveWholesalePrice
+                                    .toStringAsFixed(2)),
+                                Colors.purple.shade700,
+                                Icons.storefront,
+                              )
+                            : _buildPriceRow(
+                                'Sale',
+                                product.salePrice,
+                                Colors.green.shade700,
+                                Icons.currency_rupee,
+                              ),
                         if (showSalesInfo && product.totalSold > 0) ...[
                           const SizedBox(height: 2),
                           Row(

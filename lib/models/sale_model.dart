@@ -192,6 +192,10 @@ class Sale {
   /// revenue/profit analytics. Used to check profit on a hypothetical sale.
   final bool isMock;
 
+  /// Sold to a shopkeeper at wholesale rates (each product's wholesale
+  /// price instead of its retail sale price).
+  final bool isWholesale;
+
   // Optional buyer details, recorded for future reference on the bill.
   final String? buyerName;
   final String? buyerPhone;
@@ -215,6 +219,7 @@ class Sale {
     this.notes,
     this.paymentMethod = PaymentMethod.cash,
     this.isMock = false,
+    this.isWholesale = false,
     this.buyerName,
     this.buyerPhone,
     this.buyerAddress,
@@ -237,6 +242,7 @@ class Sale {
     'notes': notes,
     'paymentMethod': paymentMethod.value,
     'isMock': isMock,
+    'isWholesale': isWholesale,
     'buyerName': buyerName,
     'buyerPhone': buyerPhone,
     'buyerAddress': buyerAddress,
@@ -261,6 +267,7 @@ class Sale {
           ? PaymentMethodExtension.fromString(data['paymentMethod'])
           : PaymentMethod.cash,
       isMock: data['isMock'] == true,
+      isWholesale: data['isWholesale'] == true,
       buyerName: data['buyerName'],
       buyerPhone: data['buyerPhone'],
       buyerAddress: data['buyerAddress'],
@@ -285,6 +292,7 @@ class Sale {
     String? notes,
     PaymentMethod? paymentMethod,
     bool? isMock,
+    bool? isWholesale,
     String? buyerName,
     String? buyerPhone,
     String? buyerAddress,
@@ -300,6 +308,7 @@ class Sale {
       notes: notes ?? this.notes,
       paymentMethod: paymentMethod ?? this.paymentMethod,
       isMock: isMock ?? this.isMock,
+      isWholesale: isWholesale ?? this.isWholesale,
       buyerName: buyerName ?? this.buyerName,
       buyerPhone: buyerPhone ?? this.buyerPhone,
       buyerAddress: buyerAddress ?? this.buyerAddress,
