@@ -205,6 +205,14 @@ class ProductCard extends StatelessWidget {
                         ),
                         if (showPurchasePrice) ...[
                           const SizedBox(height: 4),
+                          _buildPriceRow(
+                            'Wholesale',
+                            double.parse(product.effectiveWholesalePrice
+                                .toStringAsFixed(2)),
+                            Colors.purple.shade700,
+                            Icons.storefront,
+                          ),
+                          const SizedBox(height: 4),
                           _buildProfitRow(),
                         ],
                         if (showSalesInfo && product.totalSold > 0) ...[

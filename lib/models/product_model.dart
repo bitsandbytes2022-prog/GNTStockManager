@@ -17,6 +17,8 @@ class Product {
   final double? discountReceived; // Discount received from supplier (%)
   final double? sellingDiscount; // Discount offered to customers (%)
   final double? margin; // Profit margin percentage
+  final double? wholesaleMargin; // Margin (%) over purchase price for shopkeeper buyers
+  final double? wholesalePrice; // Price charged to shopkeepers (lower margin than retail)
   final int totalSold;
   final int saleCount;
   final double salesFrequency;
@@ -36,6 +38,8 @@ class Product {
     this.discountReceived,
     this.sellingDiscount,
     this.margin,
+    this.wholesaleMargin,
+    this.wholesalePrice,
     this.totalSold = 0,
     this.saleCount = 0,
     this.salesFrequency = 0.0,
@@ -60,6 +64,8 @@ class Product {
       'discountReceived': discountReceived,
       'sellingDiscount': sellingDiscount,
       'margin': margin,
+      'wholesaleMargin': wholesaleMargin,
+      'wholesalePrice': wholesalePrice,
       'totalSold': totalSold,
       'saleCount': saleCount,
       'salesFrequency': salesFrequency,
@@ -101,6 +107,12 @@ class Product {
       margin: map['margin'] != null
           ? (map['margin'] as num).toDouble()
           : null,
+      wholesaleMargin: map['wholesaleMargin'] != null
+          ? (map['wholesaleMargin'] as num).toDouble()
+          : null,
+      wholesalePrice: map['wholesalePrice'] != null
+          ? (map['wholesalePrice'] as num).toDouble()
+          : null,
       totalSold: map['totalSold'] ?? 0,
       saleCount: map['saleCount'] ?? 0,
       salesFrequency: (map['salesFrequency'] ?? 0.0).toDouble(),
@@ -123,6 +135,8 @@ class Product {
     double? discountReceived,
     double? sellingDiscount,
     double? margin,
+    double? wholesaleMargin,
+    double? wholesalePrice,
     int? totalSold,
     int? saleCount,
     double? salesFrequency,
@@ -142,6 +156,8 @@ class Product {
       discountReceived: discountReceived ?? this.discountReceived,
       sellingDiscount: sellingDiscount ?? this.sellingDiscount,
       margin: margin ?? this.margin,
+      wholesaleMargin: wholesaleMargin ?? this.wholesaleMargin,
+      wholesalePrice: wholesalePrice ?? this.wholesalePrice,
       totalSold: totalSold ?? this.totalSold,
       saleCount: saleCount ?? this.saleCount,
       salesFrequency: salesFrequency ?? this.salesFrequency,
@@ -167,12 +183,25 @@ class Product {
   double get profitPercentage =>
       purchasePrice > 0 ? ((profitPerUnit / purchasePrice) * 100) : 0;
 
+  // Default margin for shopkeeper (wholesale) buyers, used until a product
+  // has its own wholesale price saved.
+  static const double defaultWholesaleMargin = 5.0;
+
+  /// Wholesale price to charge — the saved one, or purchase price plus the
+  /// wholesale margin for products saved before wholesale pricing existed.
+  double get effectiveWholesalePrice =>
+      wholesalePrice ??
+      purchasePrice *
+          (1 + (wholesaleMargin ?? defaultWholesaleMargin) / 100);
+
   // Check if product is low in stock (less than 10)
   bool get isLowStock => stock < 10;
 
   // Get display price with rupee symbol
   String get displayPurchasePrice => '₹${purchasePrice.toStringAsFixed(2)}';
   String get displaySalePrice => '₹${salePrice.toStringAsFixed(2)}';
+  String get displayWholesalePrice =>
+      '₹${effectiveWholesalePrice.toStringAsFixed(2)}';
 
   // Standard pipe length (feet) per pipe type — lets pipes be sold by the
   // foot instead of by whole unit (e.g. cutting 12ft off a 20ft PVC pipe).

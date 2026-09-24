@@ -41,6 +41,9 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
   final _purchasePriceController = TextEditingController();
   final _priceWithoutGstController = TextEditingController(); // Base price (GST removed)
   final _salePriceController = TextEditingController();
+  final _wholesaleMarginController = TextEditingController(
+      text: _fmtPercent(Product.defaultWholesaleMargin));
+  final _wholesalePriceController = TextEditingController();
   final _stockController = TextEditingController();
   final _gstController = TextEditingController(text: '18'); // Default 18%
 
@@ -187,6 +190,10 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
       // Populate prices - these will be editable
       _purchasePriceController.text = widget.product!.purchasePrice.toString();
       _salePriceController.text = widget.product!.salePrice.toString();
+      _wholesaleMarginController.text = _fmtPercent(
+          widget.product!.wholesaleMargin ?? Product.defaultWholesaleMargin);
+      _wholesalePriceController.text =
+          widget.product!.effectiveWholesalePrice.toStringAsFixed(2);
 
       // Calculate bill price from purchase price if GST is available
       // This is a reverse calculation for editing
@@ -214,6 +221,8 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
       _marginController.addListener(_calculatePrices);
       _gstController.addListener(_calculatePrices);
       _purchasePriceController.addListener(_onPurchasePriceEdited);
+      _wholesaleMarginController.addListener(_onWholesaleMarginEdited);
+      _wholesalePriceController.addListener(_onWholesalePriceEdited);
     } else {
       // Setup auto-calculation listeners
       _billPriceController.addListener(_calculatePrices);
@@ -222,6 +231,8 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
       _marginController.addListener(_calculatePrices);
       _gstController.addListener(_calculatePrices);
       _purchasePriceController.addListener(_onPurchasePriceEdited);
+      _wholesaleMarginController.addListener(_onWholesaleMarginEdited);
+      _wholesalePriceController.addListener(_onWholesalePriceEdited);
     }
   }
 
@@ -442,6 +453,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         _purchasePriceController.text = '';
         _priceWithoutGstController.text = '';
         _salePriceController.text = '';
+        _wholesalePriceController.text = '';
         return;
       }
 
@@ -482,6 +494,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         final salePrice = purchasePrice + (purchasePrice * margin / 100);
         _salePriceController.text = salePrice.toStringAsFixed(2);
       }
+      _recalcWholesalePrice();
     } finally {
       _updatingProgrammatically = false;
     }
@@ -527,6 +540,47 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         _salePriceController.text =
             (purchase + (purchase * margin / 100)).toStringAsFixed(2);
       }
+      _recalcWholesalePrice();
+    } finally {
+      _updatingProgrammatically = false;
+    }
+  }
+
+  static String _fmtPercent(double v) =>
+      v.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+
+  /// Wholesale Price = Purchase Price + Wholesale Margin%. Callers must hold
+  /// [_updatingProgrammatically].
+  void _recalcWholesalePrice() {
+    final purchase = double.tryParse(_purchasePriceController.text) ?? 0.0;
+    if (purchase <= 0) return;
+    final margin = double.tryParse(_wholesaleMarginController.text) ??
+        Product.defaultWholesaleMargin;
+    _wholesalePriceController.text =
+        (purchase + (purchase * margin / 100)).toStringAsFixed(2);
+  }
+
+  void _onWholesaleMarginEdited() {
+    if (_updatingProgrammatically) return;
+    _updatingProgrammatically = true;
+    try {
+      _recalcWholesalePrice();
+    } finally {
+      _updatingProgrammatically = false;
+    }
+  }
+
+  /// Typing a wholesale price directly back-calculates its margin, so the
+  /// margin stays in step if the purchase price changes later.
+  void _onWholesalePriceEdited() {
+    if (_updatingProgrammatically) return;
+    final purchase = double.tryParse(_purchasePriceController.text) ?? 0.0;
+    final wholesale = double.tryParse(_wholesalePriceController.text);
+    if (purchase <= 0 || wholesale == null) return;
+    _updatingProgrammatically = true;
+    try {
+      _wholesaleMarginController.text =
+          _fmtPercent((wholesale - purchase) / purchase * 100);
     } finally {
       _updatingProgrammatically = false;
     }
@@ -603,6 +657,10 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
       final discountReceivedValue = double.tryParse(_discountReceivedController.text);
       final sellingDiscountValue = double.tryParse(_sellingDiscountController.text);
       final marginValue = double.tryParse(_marginController.text);
+      final wholesalePriceValue =
+          double.tryParse(_wholesalePriceController.text);
+      final wholesaleMarginValue =
+          double.tryParse(_wholesaleMarginController.text);
 
       final product = Product(
         id: isEditing ? widget.product!.id : '',
@@ -619,6 +677,8 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         discountReceived: discountReceivedValue,
         sellingDiscount: sellingDiscountValue,
         margin: marginValue,
+        wholesaleMargin: wholesaleMarginValue,
+        wholesalePrice: wholesalePriceValue,
         totalSold: isEditing ? widget.product!.totalSold : 0,
         saleCount: isEditing ? widget.product!.saleCount : 0,
         salesFrequency: isEditing ? widget.product!.salesFrequency : 0.0,
@@ -1217,6 +1277,73 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
                           color: Colors.blue.shade700,
                         ),
                       ),
+                      const SizedBox(height: 16),
+
+                      // Wholesale pricing — a lower-margin price for
+                      // shopkeeper buyers.
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _wholesaleMarginController,
+                              decoration: InputDecoration(
+                                labelText: 'Wholesale Margin (%)',
+                                prefixIcon: const Icon(Icons.storefront),
+                                suffixText: '%',
+                                helperText:
+                                    'For shopkeepers (default: ${_fmtPercent(Product.defaultWholesaleMargin)}%)',
+                                filled: true,
+                                fillColor: Colors.purple.shade50,
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true, signed: true),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'^-?\d*\.?\d{0,2}'),
+                                ),
+                              ],
+                              validator: (value) {
+                                if (value?.isEmpty ?? true) return null;
+                                if (double.tryParse(value!) == null) {
+                                  return 'Invalid number';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _wholesalePriceController,
+                              decoration: const InputDecoration(
+                                labelText: 'Wholesale Price',
+                                prefixIcon: Icon(Icons.currency_rupee),
+                                prefixText: '₹ ',
+                                helperText:
+                                    'Purchase Price + Wholesale% · editable',
+                              ),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d*\.?\d{0,2}'),
+                                ),
+                              ],
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.purple.shade700,
+                              ),
+                              validator: (value) {
+                                if (value?.isEmpty ?? true) return null;
+                                if (double.tryParse(value!) == null) {
+                                  return 'Invalid number';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 24),
                     ],
                   ),
@@ -1264,6 +1391,8 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
     _purchasePriceController.dispose();
     _priceWithoutGstController.dispose();
     _salePriceController.dispose();
+    _wholesaleMarginController.dispose();
+    _wholesalePriceController.dispose();
     _stockController.dispose();
     _gstController.dispose();
     super.dispose();
