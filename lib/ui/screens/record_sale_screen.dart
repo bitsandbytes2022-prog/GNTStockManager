@@ -60,12 +60,17 @@ class _CartLine {
   final double price;
   final bool isPerFoot;
 
+  /// Customer-facing name override for this line only (estimates only —
+  /// see [_lineNameOverride]); null means show the product's real name.
+  final String? nameOverride;
+
   const _CartLine({
     required this.lineKey,
     required this.product,
     required this.quantity,
     required this.price,
     required this.isPerFoot,
+    this.nameOverride,
   });
 }
 
@@ -103,6 +108,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   List<String> _cartItemOrder = []; // Track order of lines added to cart
   Map<String, String> _lineProductId = {}; // lineKey -> productId
   int _lineKeyCounter = 0;
+
+  // Per-line display-name override, keyed by lineKey — lets a line be
+  // relabeled for a customer-facing document without touching the real
+  // Product.name in the catalog. Only ever applied to an *estimate*
+  // printout (see BillLineItem.displayName / _showBillPreview); a real
+  // bill/invoice always uses the product's actual name.
+  Map<String, String> _lineNameOverride = {};
 
   // Pipe lines sold by the foot instead of by whole unit (see
   // Product.feetPerPipe) — keyed by lineKey, same as _customPrices. Stock
@@ -713,6 +725,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final TextEditingController priceController = TextEditingController(
       text: currentPrice.toStringAsFixed(2),
     );
+    final TextEditingController nameController = TextEditingController(
+      text: isEditingExisting
+          ? (_lineNameOverride[editingLineKey] ?? product.name)
+          : product.name,
+    );
 
     // Focus node for auto-focus
     final FocusNode qtyFocusNode = FocusNode();
@@ -763,6 +780,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 'quantity': qty,
                 'price': price,
                 'isPerFoot': sellPerFoot,
+                'name': nameController.text.trim(),
               });
             }
 
@@ -846,6 +864,25 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             ),
                           ),
                         ],
+                      ),
+                    ),
+
+                    // Custom display name — lets this line be relabeled for
+                    // a customer-facing document without renaming the real
+                    // product. Only takes effect on an Estimate printout;
+                    // a Bill/Invoice and the product catalog are unaffected.
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Item name',
+                        helperText:
+                            'Only affects this line on an Estimate — the '
+                            'saved product name and any real Bill/Invoice '
+                            'are unchanged.',
+                        helperMaxLines: 2,
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
                     ),
 
@@ -1102,6 +1139,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           result['price'],
           isPerFoot: result['isPerFoot'] == true,
           editLineKey: editingLineKey,
+          nameOverride: result['name'] as String?,
         );
       }
     }
@@ -1116,6 +1154,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     double price, {
     bool isPerFoot = false,
     String? editLineKey,
+    String? nameOverride,
   }) {
     setState(() {
       final lineKey = editLineKey ?? _newLineKey(product.id);
@@ -1126,6 +1165,15 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       _selectedQuantities[lineKey] = quantity;
       _customPrices[lineKey] = price;
       _perFootItems[lineKey] = isPerFoot;
+      // Only keep an override when it actually differs from the real
+      // product name — an untouched/reset field should fall back cleanly.
+      if (nameOverride != null &&
+          nameOverride.isNotEmpty &&
+          nameOverride != product.name) {
+        _lineNameOverride[lineKey] = nameOverride;
+      } else {
+        _lineNameOverride.remove(lineKey);
+      }
     });
 
     // Show feedback
@@ -1150,6 +1198,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       _customPrices.remove(lineKey);
       _perFootItems.remove(lineKey);
       _lineProductId.remove(lineKey);
+      _lineNameOverride.remove(lineKey);
       _cartItemOrder.remove(lineKey);
     });
   }
@@ -1888,6 +1937,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         quantity: quantity,
         price: price,
         isPerFoot: _perFootItems[key] ?? false,
+        nameOverride: _lineNameOverride[key],
       ));
     }
     return lines;
@@ -2050,6 +2100,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _perFootItems.clear();
           _cartItemOrder.clear();
           _lineProductId.clear();
+          _lineNameOverride.clear();
           _customItems.clear();
           _customItemOrder.clear();
           _notesController.clear();
@@ -2890,6 +2941,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       _perFootItems.clear();
                       _cartItemOrder.clear();
                       _lineProductId.clear();
+                      _lineNameOverride.clear();
                       _customItems.clear();
                       _customItemOrder.clear();
                       _cartSearchController.clear();
@@ -3013,6 +3065,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               _filteredCartLines[i].product, _filteredCartLines[i].isPerFoot),
                           isPerFoot: _filteredCartLines[i].isPerFoot,
                           itemNumber: i + 1,
+                          nameOverride: _filteredCartLines[i].nameOverride,
                         ),
                       // Custom items
                       for (int i = 0; i < _customItemOrder.length; i++)
@@ -3076,7 +3129,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _showBillPreview,
+                        onPressed: _showPreviewChoice,
                         icon: const Icon(Icons.receipt_long),
                         label: const Text('Preview'),
                         style: OutlinedButton.styleFrom(
@@ -3268,6 +3321,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                                         _filteredCartLines[i].isPerFoot),
                                     isPerFoot: _filteredCartLines[i].isPerFoot,
                                     itemNumber: i + 1,
+                                    nameOverride: _filteredCartLines[i].nameOverride,
                                   ),
                                 // Custom items
                                 for (int i = 0; i < _customItemOrder.length; i++)
@@ -3346,7 +3400,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               child: OutlinedButton.icon(
                                 onPressed: () {
                                   Navigator.pop(context);
-                                  _showBillPreview();
+                                  _showPreviewChoice();
                                 },
                                 icon: const Icon(Icons.receipt_long),
                                 label: const Text('Preview'),
@@ -3562,7 +3616,54 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     return result ?? false;
   }
 
-  Future<void> _showBillPreview() async {
+  /// Lets the user pick between previewing a real bill (which can go on to
+  /// complete the sale) and generating a price estimate for a customer who
+  /// hasn't committed to buy yet — same cart, same printed format, but an
+  /// estimate never records a sale or touches stock.
+  Future<void> _showPreviewChoice() async {
+    if (_selectedQuantities.isEmpty && _customItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one product or add a custom item')),
+      );
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Preview Bill'),
+                subtitle: const Text('Can be completed as a sale'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showBillPreview();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.request_quote_outlined),
+                title: const Text('Generate Estimate'),
+                subtitle: const Text('Just a price quote — no sale recorded'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showBillPreview(isEstimate: true);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showBillPreview({bool isEstimate = false}) async {
     if (_selectedQuantities.isEmpty && _customItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select at least one product or add a custom item')),
@@ -3605,6 +3706,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               isPerFoot: line.isPerFoot,
               unitCost: _effectiveUnitCost(line.product, line.isPerFoot),
               stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
+              // A renamed line only ever shows on the Estimate — a real
+              // Bill/Invoice always prints the product's actual name.
+              displayName: isEstimate ? line.nameOverride : null,
             ))
         .toList();
 
@@ -3631,6 +3735,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           initialPayment: _paymentMethod == 'Credit'
               ? (double.tryParse(_creditPaidController.text) ?? 0)
               : 0,
+          isEstimate: isEstimate,
         ),
       ),
     );
@@ -3643,6 +3748,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _perFootItems.clear();
         _cartItemOrder.clear();
         _lineProductId.clear();
+        _lineNameOverride.clear();
         _customItems.clear();
         _customItemOrder.clear();
         _notesController.clear();
@@ -4309,6 +4415,11 @@ class _CartItem extends StatefulWidget {
   final bool isPerFoot;
   final int itemNumber;
 
+  /// Custom name set for this line — see [_lineNameOverride]. Only shown
+  /// here as a hint that this line will print differently on an Estimate;
+  /// the real product name below it is unaffected.
+  final String? nameOverride;
+
   const _CartItem({
     required this.product,
     required this.quantity,
@@ -4320,6 +4431,7 @@ class _CartItem extends StatefulWidget {
     required this.minimumPrice,
     this.isPerFoot = false,
     required this.itemNumber,
+    this.nameOverride,
   });
 
   @override
@@ -4391,7 +4503,7 @@ class _CartItemState extends State<_CartItem> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.product.name,
+                        widget.nameOverride ?? widget.product.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -4399,6 +4511,13 @@ class _CartItemState extends State<_CartItem> {
                           fontSize: 13,
                         ),
                       ),
+                      if (widget.nameOverride != null)
+                        Text(
+                          'Was: ${widget.product.name}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                        ),
                       Wrap(
                         crossAxisAlignment: WrapCrossAlignment.center,
                         spacing: 6,
@@ -4410,6 +4529,23 @@ class _CartItemState extends State<_CartItem> {
                               color: Colors.grey[600],
                             ),
                           ),
+                          if (widget.nameOverride != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.purple.shade200),
+                              ),
+                              child: Text(
+                                'RENAMED FOR ESTIMATE',
+                                style: TextStyle(
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.purple.shade700,
+                                ),
+                              ),
+                            ),
                           if (widget.isPerFoot)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),

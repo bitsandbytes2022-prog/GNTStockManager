@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
+import '../../utils/product_excel_columns.dart';
+import 'excel_import_screen.dart';
 
 // Web-only import
 // ignore: avoid_web_libraries_in_flutter
@@ -18,23 +20,6 @@ class ExcelExportScreen extends StatefulWidget {
   @override
   State<ExcelExportScreen> createState() => _ExcelExportScreenState();
 }
-
-// All available export columns
-const List<Map<String, String>> _kAvailableColumns = [
-  {'key': 'name', 'label': 'Product Name'},
-  {'key': 'size', 'label': 'Size'},
-  {'key': 'category', 'label': 'Category'},
-  {'key': 'purchasePrice', 'label': 'Purchase Price (₹)'},
-  {'key': 'margin', 'label': 'Margin (%)'},
-  {'key': 'salePrice', 'label': 'Sale Price (₹)'},
-  {'key': 'minSalePrice', 'label': 'Min Sale Price (₹)'},
-  {'key': 'stock', 'label': 'Stock'},
-  {'key': 'gst', 'label': 'GST (%)'},
-  {'key': 'discountReceived', 'label': 'Discount Received (%)'},
-  {'key': 'sellingDiscount', 'label': 'Selling Discount (%)'},
-  {'key': 'totalSold', 'label': 'Total Sold'},
-  {'key': 'saleCount', 'label': 'Sale Count'},
-];
 
 enum _AdjustMode { setTo, adjustBy }
 enum _AdjustType { margin, discount }
@@ -65,7 +50,7 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
 
   // Keys that vary per size variant (become sub-columns in pivot mode)
   static const _perSizeKeys = {
-    'purchasePrice', 'margin', 'salePrice', 'minSalePrice',
+    'purchasePrice', 'margin', 'salePrice', 'minSalePrice', 'wholesalePrice',
     'stock', 'gst', 'discountReceived', 'sellingDiscount',
   };
 
@@ -479,23 +464,23 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          '${tempSelected.length} of ${_kAvailableColumns.length} selected',
+                          '${tempSelected.length} of ${kProductExcelColumns.length} selected',
                           style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                         ),
                         TextButton(
                           onPressed: () {
                             setDialogState(() {
-                              if (tempSelected.length == _kAvailableColumns.length) {
+                              if (tempSelected.length == kProductExcelColumns.length) {
                                 tempSelected.clear();
                               } else {
-                                for (final col in _kAvailableColumns) {
+                                for (final col in kProductExcelColumns) {
                                   tempSelected.add(col['key']!);
                                 }
                               }
                             });
                           },
                           child: Text(
-                            tempSelected.length == _kAvailableColumns.length
+                            tempSelected.length == kProductExcelColumns.length
                                 ? 'Deselect All'
                                 : 'Select All',
                           ),
@@ -503,7 +488,7 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
                       ],
                     ),
                     const Divider(),
-                    ..._kAvailableColumns.map((col) {
+                    ...kProductExcelColumns.map((col) {
                       final key = col['key']!;
                       final label = col['label']!;
                       final isChecked = tempSelected.contains(key);
@@ -553,7 +538,7 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
   static const _colWidths = <String, double>{
     'name': 30, 'size': 15, 'category': 18,
     'purchasePrice': 18, 'margin': 14, 'salePrice': 16,
-    'minSalePrice': 20, 'stock': 12, 'gst': 12,
+    'minSalePrice': 20, 'wholesalePrice': 20, 'stock': 12, 'gst': 12,
     'discountReceived': 20, 'sellingDiscount': 20,
     'totalSold': 14, 'saleCount': 14,
   };
@@ -570,6 +555,7 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
       case 'margin':         return TextCellValue('${margin.toStringAsFixed(2)}%');
       case 'salePrice':      return DoubleCellValue(double.parse(salePrice.toStringAsFixed(2)));
       case 'minSalePrice':   return DoubleCellValue(double.parse(minSale.toStringAsFixed(2)));
+      case 'wholesalePrice': return DoubleCellValue(double.parse(p.effectiveWholesalePrice.toStringAsFixed(2)));
       case 'stock':          return IntCellValue(p.stock);
       case 'gst':            return p.gst != null ? TextCellValue('${p.gst!.toStringAsFixed(1)}%') : TextCellValue('-');
       case 'discountReceived': return p.discountReceived != null ? TextCellValue('${p.discountReceived!.toStringAsFixed(1)}%') : TextCellValue('-');
@@ -590,9 +576,21 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
   // ── flat export ───────────────────────────────────────────────────────────
 
   void _writeFlatSheet(Sheet sheet, List<Product> products, CellStyle headerStyle) {
-    final orderedColumns = _kAvailableColumns
+    final orderedColumns = kProductExcelColumns
         .where((c) => _selectedColumns.contains(c['key']))
         .toList();
+    // Product ID always rides along as the last column, regardless of which
+    // display columns were picked — it's what lets "Import from Excel"
+    // match an edited row back to the right product. Styled to look
+    // deliberately unimportant so it doesn't invite editing.
+    final idCol = orderedColumns.length;
+    final idHeaderStyle = CellStyle(
+      bold: true,
+      backgroundColorHex: ExcelColor.fromHexString('#9E9E9E'),
+      fontColorHex: ExcelColor.fromHexString('#FFFFFF'),
+      horizontalAlign: HorizontalAlign.Center,
+      verticalAlign: VerticalAlign.Center,
+    );
 
     for (int col = 0; col < orderedColumns.length; col++) {
       final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 0));
@@ -600,6 +598,10 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
       cell.cellStyle = headerStyle;
       sheet.setColumnWidth(col, _colWidths[orderedColumns[col]['key']] ?? 18);
     }
+    final idHeaderCell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: idCol, rowIndex: 0));
+    idHeaderCell.value = TextCellValue(kProductIdColumnLabel);
+    idHeaderCell.cellStyle = idHeaderStyle;
+    sheet.setColumnWidth(idCol, 28);
 
     for (int i = 0; i < products.length; i++) {
       final product = products[i];
@@ -621,6 +623,9 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
         cell.value = _cellValueFor(key, product);
         cell.cellStyle = _isNumericKey(key) ? numStyle : (key == 'margin' || key == 'gst' || key == 'discountReceived' || key == 'sellingDiscount' ? rightStyle : baseStyle);
       }
+      final idCell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: idCol, rowIndex: rowIndex));
+      idCell.value = TextCellValue(product.id);
+      idCell.cellStyle = CellStyle(backgroundColorHex: rowBg, fontColorHex: ExcelColor.fromHexString('#AAAAAA'));
     }
 
     _writeSummary(sheet, products.length, products.length + 2);
@@ -629,7 +634,7 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
   // ── pivot export ──────────────────────────────────────────────────────────
 
   void _writePivotSheet(Sheet sheet, List<Product> products, CellStyle headerStyle) {
-    final orderedColumns = _kAvailableColumns
+    final orderedColumns = kProductExcelColumns
         .where((c) => _selectedColumns.contains(c['key']))
         .toList();
 
@@ -912,6 +917,19 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
         title: const Text('Export to Excel'),
         backgroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              final imported = await Navigator.push<bool>(
+                context,
+                MaterialPageRoute(builder: (_) => const ExcelImportScreen()),
+              );
+              if (imported == true) _loadData();
+            },
+            icon: const Icon(Icons.upload_file_outlined),
+            label: const Text('Import'),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -1130,8 +1148,8 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
                                     ),
                                     Text(
                                       _pivotBySize
-                                          ? 'One row per product name — sizes become column groups'
-                                          : 'Each product variant on its own row (default)',
+                                          ? 'One row per product name — sizes become column groups. Not re-importable — use flat format if you plan to edit and import this back.'
+                                          : 'Each product variant on its own row (default) — re-importable via "Import" above',
                                       style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                                     ),
                                   ],

@@ -10,6 +10,7 @@ import 'package:printing/printing.dart';
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../../utils/amount_in_words.dart';
+import '../../utils/monthly_bill_book_pdf.dart';
 import '../../utils/pdf_fonts.dart';
 import '../../utils/pdf_logo.dart';
 import 'package:inventory_manager/ui/screens/return_items_screen.dart';
@@ -442,7 +443,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
-  Future<void> _showPrintOptions(Sale sale) async {
+  Future<void> _showPrintOptions(Sale sale, {bool isEstimate = false}) async {
     await showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -466,7 +467,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 subtitle: const Text('Full-page printer'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _printInvoice(sale, thermalSize: null);
+                  _printInvoice(sale, thermalSize: null, isEstimate: isEstimate);
                 },
               ),
               for (final size in _ThermalRollSize.values)
@@ -476,7 +477,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   subtitle: const Text('Thermal roll printer'),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    _printInvoice(sale, thermalSize: size);
+                    _printInvoice(sale, thermalSize: size, isEstimate: isEstimate);
                   },
                 ),
               const SizedBox(height: 8),
@@ -487,7 +488,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
-  Future<void> _printInvoice(Sale sale, {required _ThermalRollSize? thermalSize}) async {
+  Future<void> _printInvoice(
+    Sale sale, {
+    required _ThermalRollSize? thermalSize,
+    bool isEstimate = false,
+  }) async {
     try {
       final initialFormat =
           thermalSize != null ? _thermalPageFormat(thermalSize) : PdfPageFormat.a4;
@@ -502,8 +507,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
         // of true A4.
         onLayout: (PdfPageFormat format) async {
           final pdf = thermalSize != null
-              ? await _generateThermalInvoicePdf(sale, thermalSize)
-              : await _generateInvoicePdf(sale);
+              ? await _generateThermalInvoicePdf(sale, thermalSize, isEstimate: isEstimate)
+              : await _generateInvoicePdf(sale, isEstimate: isEstimate);
           return pdf.save();
         },
       );
@@ -511,7 +516,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error printing invoice: $e'),
+            content: Text('Error printing ${isEstimate ? 'estimate' : 'invoice'}: $e'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
@@ -551,13 +556,14 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return entries;
   }
 
-  Future<pw.Document> _generateInvoicePdf(Sale sale) async {
+  Future<pw.Document> _generateInvoicePdf(Sale sale, {bool isEstimate = false}) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
     final logoImage = await loadShopLogo();
     final due = sale.amountDue;
     final merged = _isMergedSale(sale);
+    final docTitle = isEstimate ? 'Estimate' : 'Tax Invoice';
 
     pdf.addPage(
       pw.MultiPage(
@@ -567,7 +573,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
           return [
             pw.Center(
               child: pw.Text(
-                'Tax Invoice',
+                docTitle,
                 style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
               ),
             ),
@@ -645,12 +651,16 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
-                          _invoiceMetaRow('Invoice No.', '${sale.invoiceNumber}'),
+                          _invoiceMetaRow(
+                              isEstimate ? 'Estimate No.' : 'Invoice No.',
+                              '${sale.invoiceNumber}'),
                           pw.SizedBox(height: 4),
                           _invoiceMetaRow(
                               'Dated', DateFormat('dd/MM/yyyy').format(sale.createdAt)),
-                          pw.SizedBox(height: 4),
-                          _invoiceMetaRow('Mode of Payment', sale.paymentMethod.label),
+                          if (!isEstimate) ...[
+                            pw.SizedBox(height: 4),
+                            _invoiceMetaRow('Mode of Payment', sale.paymentMethod.label),
+                          ],
                         ],
                       ),
                     ),
@@ -744,7 +754,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       ],
                     ),
                   ),
-                  if (sale.isCredit && due > 0) ...[
+                  if (!isEstimate && sale.isCredit && due > 0) ...[
                     pw.SizedBox(height: 4),
                     pw.Text(
                       'Amount Due: INR ${due.toStringAsFixed(2)}',
@@ -807,9 +817,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                         ),
                         pw.SizedBox(height: 2),
                         pw.Text(
-                          'We declare that this invoice shows the actual '
-                          'price of the goods described and that all '
-                          'particulars are true and correct.',
+                          isEstimate
+                              ? 'This is a price estimate, not a tax '
+                                  'invoice or a demand for payment. Prices '
+                                  'are subject to change.'
+                              : 'We declare that this invoice shows the '
+                                  'actual price of the goods described and '
+                                  'that all particulars are true and correct.',
                           style: pw.TextStyle(fontSize: 8),
                         ),
                       ],
@@ -837,7 +851,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
             pw.SizedBox(height: 8),
             pw.Center(
               child: pw.Text(
-                'This is a Computer Generated Invoice',
+                isEstimate
+                    ? 'This is a Computer Generated Estimate'
+                    : 'This is a Computer Generated Invoice',
                 style: pw.TextStyle(fontSize: 9, fontStyle: pw.FontStyle.italic),
               ),
             ),
@@ -851,8 +867,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   Future<pw.Document> _generateThermalInvoicePdf(
     Sale sale,
-    _ThermalRollSize thermalSize,
-  ) async {
+    _ThermalRollSize thermalSize, {
+    bool isEstimate = false,
+  }) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -930,12 +947,14 @@ class _SalesListScreenState extends State<SalesListScreen> {
               pw.SizedBox(height: 4),
 
               pw.Text(
-                'Tax Invoice #: ${sale.invoiceNumber}',
+                '${isEstimate ? 'Estimate' : 'Tax Invoice'} #: ${sale.invoiceNumber}',
                 style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
               ),
               pw.Text(
-                'Date: ${DateFormat('dd/MM/yyyy').format(sale.createdAt)}  '
-                'Time: ${DateFormat('hh:mm a').format(sale.createdAt)}',
+                isEstimate
+                    ? 'Date: ${DateFormat('dd/MM/yyyy').format(sale.createdAt)}'
+                    : 'Date: ${DateFormat('dd/MM/yyyy').format(sale.createdAt)}  '
+                        'Time: ${DateFormat('hh:mm a').format(sale.createdAt)}',
                 style: const pw.TextStyle(fontSize: 8),
               ),
               pw.SizedBox(height: 4),
@@ -1038,15 +1057,17 @@ class _SalesListScreenState extends State<SalesListScreen> {
               dashedDivider(),
               pw.SizedBox(height: 4),
 
-              pw.Text(
-                'Payment: ${sale.paymentMethod.label}',
-                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-              ),
-              if (sale.isCredit && due > 0) ...[
+              if (!isEstimate) ...[
                 pw.Text(
-                  'Due: INR ${due.toStringAsFixed(2)}',
+                  'Payment: ${sale.paymentMethod.label}',
                   style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
                 ),
+                if (sale.isCredit && due > 0) ...[
+                  pw.Text(
+                    'Due: INR ${due.toStringAsFixed(2)}',
+                    style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                  ),
+                ],
               ],
 
               if (sale.notes != null && sale.notes!.isNotEmpty) ...[
@@ -1186,6 +1207,85 @@ class _SalesListScreenState extends State<SalesListScreen> {
   Future<void> _refreshSales() async {
     _salesService.clearCache();
     setState(() {});
+  }
+
+  /// Builds one PDF with every sale of a chosen month laid out as a compact
+  /// tax-invoice, one after another — a "bill book" to hand-copy into the
+  /// paper books submitted to the CA each month.
+  Future<void> _exportMonthlyBillBook() async {
+    final config = await showDialog<_BillBookConfig>(
+      context: context,
+      builder: (_) => const _MonthlyBillBookDialog(),
+    );
+    if (config == null || !mounted) return;
+
+    final start = DateTime(config.month.year, config.month.month, 1);
+    final end = DateTime(config.month.year, config.month.month + 1, 1)
+        .subtract(const Duration(seconds: 1));
+    final monthLabel = DateFormat('MMMM yyyy').format(start);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    List<Sale> monthSales;
+    try {
+      final sales =
+          await _salesService.getSalesInRange(startDate: start, endDate: end);
+      monthSales = sales.where((s) => !s.isMock).toList();
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // dismiss loader
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading sales: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context); // dismiss loader
+
+    if (monthSales.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No sales recorded for $monthLabel'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await Printing.layoutPdf(
+        name: 'Bill Book ${DateFormat('MMM yyyy').format(start)}',
+        onLayout: (_) async {
+          final doc = await buildMonthlyBillBookPdf(
+            sales: monthSales,
+            month: start,
+            showGst: config.showGst,
+            gstRate: config.gstRate,
+          );
+          return doc.save();
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error building bill book: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Map<String, DateTime> _getDateRange() {
@@ -1447,9 +1547,21 @@ class _SalesListScreenState extends State<SalesListScreen> {
                           });
                         } else if (value == 'refresh') {
                           _refreshSales();
+                        } else if (value == 'billbook') {
+                          _exportMonthlyBillBook();
                         }
                       },
                       itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: 'billbook',
+                          child: Row(
+                            children: [
+                              const Icon(Icons.menu_book_outlined, size: 20),
+                              const SizedBox(width: 12),
+                              const Text('Monthly bill book (PDF)'),
+                            ],
+                          ),
+                        ),
                         PopupMenuItem(
                           value: 'mode',
                           child: Row(
@@ -1799,6 +1911,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     onDelete: () => _deleteSale(sale),
                     onReturn: () => _returnItems(sale),
                     onPrint: () => _showPrintOptions(sale),
+                    onConvertToEstimate: () => _showPrintOptions(sale, isEstimate: true),
                     onRecordPayment: () => _recordPayment(sale),
                   );
                 },
@@ -2090,6 +2203,7 @@ class _SaleCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onReturn;
   final VoidCallback onPrint;
+  final VoidCallback onConvertToEstimate;
   final VoidCallback onRecordPayment;
   final bool selectionMode;
   final bool selected;
@@ -2102,6 +2216,7 @@ class _SaleCard extends StatelessWidget {
     required this.onReturn,
     required this.onEdit,
     required this.onPrint,
+    required this.onConvertToEstimate,
     required this.onRecordPayment,
     this.selectionMode = false,
     this.selected = false,
@@ -2242,6 +2357,16 @@ class _SaleCard extends StatelessWidget {
                           ],
                         ),
                       ),
+                      const PopupMenuItem(
+                        value: 'convertToEstimate',
+                        child: Row(
+                          children: [
+                            Icon(Icons.request_quote_outlined, size: 18, color: Colors.purple),
+                            SizedBox(width: 8),
+                            Text('Convert to Estimate', style: TextStyle(fontSize: 13)),
+                          ],
+                        ),
+                      ),
                       if (sale.isCredit && !sale.isFullyPaid)
                         const PopupMenuItem(
                           value: 'recordPayment',
@@ -2287,6 +2412,8 @@ class _SaleCard extends StatelessWidget {
                     onSelected: (value) {
                       if (value == 'print') {
                         onPrint();
+                      } else if (value == 'convertToEstimate') {
+                        onConvertToEstimate();
                       } else if (value == 'return') {
                         onReturn();
                       } else if (value == 'delete') {
@@ -2895,6 +3022,141 @@ class _SaleDetailsDialogState extends State<_SaleDetailsDialog> {
           ],
         ),
       ),
+    );
+  }
+}
+/// Result of [_MonthlyBillBookDialog]: which month to export and how to show
+/// tax on it.
+class _BillBookConfig {
+  final DateTime month; // first day of the chosen month
+  final bool showGst;
+  final double gstRate;
+
+  const _BillBookConfig({
+    required this.month,
+    required this.showGst,
+    required this.gstRate,
+  });
+}
+
+/// Picks the month (and GST treatment) for the monthly bill-book PDF.
+class _MonthlyBillBookDialog extends StatefulWidget {
+  const _MonthlyBillBookDialog();
+
+  @override
+  State<_MonthlyBillBookDialog> createState() => _MonthlyBillBookDialogState();
+}
+
+class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
+  late DateTime _month;
+  bool _showGst = true;
+  final TextEditingController _rateController =
+      TextEditingController(text: '18');
+
+  // Last 15 months, newest first — enough to cover a late CA submission.
+  late final List<DateTime> _months = List.generate(15, (i) {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month - i, 1);
+  });
+
+  @override
+  void initState() {
+    super.initState();
+    // Default to last month — the one a CA submission is usually for.
+    _month = _months.length > 1 ? _months[1] : _months.first;
+  }
+
+  @override
+  void dispose() {
+    _rateController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Monthly bill book'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'One PDF with every bill of the month, laid out like a printed '
+            'bill for copying into the CA books.',
+            style: TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<DateTime>(
+            initialValue: _month,
+            decoration: InputDecoration(
+              labelText: 'Month',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            items: [
+              for (final m in _months)
+                DropdownMenuItem(
+                  value: m,
+                  child: Text(DateFormat('MMMM yyyy').format(m)),
+                ),
+            ],
+            onChanged: (value) {
+              if (value != null) setState(() => _month = value);
+            },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Checkbox(
+                value: _showGst,
+                onChanged: (v) => setState(() => _showGst = v ?? true),
+              ),
+              const Expanded(
+                child: Text('Show GST breakup (CGST + SGST)',
+                    style: TextStyle(fontSize: 13)),
+              ),
+              if (_showGst)
+                SizedBox(
+                  width: 64,
+                  child: TextField(
+                    controller: _rateController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      suffixText: '%',
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            Navigator.pop(
+              context,
+              _BillBookConfig(
+                month: _month,
+                showGst: _showGst,
+                gstRate: double.tryParse(_rateController.text.trim()) ?? 18,
+              ),
+            );
+          },
+          icon: const Icon(Icons.picture_as_pdf, size: 18),
+          label: const Text('Generate'),
+        ),
+      ],
     );
   }
 }

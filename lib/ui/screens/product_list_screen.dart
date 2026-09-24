@@ -8,7 +8,9 @@ import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'downloads_screen.dart';
 import 'bulk_price_update_screen.dart';
+import 'bulk_edit_table_screen.dart';
 import 'excel_export_screen.dart';
+import 'excel_import_screen.dart';
 import 'gst_calculator_screen.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
@@ -471,6 +473,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                               builder: (context) => const BulkPriceUpdateScreen(),
                             ),
                           );
+                        } else if (value == 'edit_table') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const BulkEditTableScreen(),
+                            ),
+                          ).then((_) => _refreshProducts());
                         } else if (value == 'excel_export') {
                           Navigator.push(
                             context,
@@ -478,6 +487,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
                               builder: (context) => const ExcelExportScreen(),
                             ),
                           );
+                        } else if (value == 'excel_import') {
+                          Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const ExcelImportScreen(),
+                            ),
+                          ).then((imported) {
+                            if (imported == true) _refreshProducts();
+                          });
                         } else if (value == 'gst_calculator') {
                           Navigator.push(
                             context,
@@ -620,6 +638,20 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           ),
                         ),
                         PopupMenuItem(
+                          value: 'edit_table',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.grid_on_outlined,
+                                size: 20,
+                                color: Colors.indigo[600],
+                              ),
+                              const SizedBox(width: 12),
+                              const Text('Edit as Table'),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
                           value: 'bulk_update',
                           child: Row(
                             children: [
@@ -658,6 +690,20 @@ class _ProductListScreenState extends State<ProductListScreen> {
                               ),
                               const SizedBox(width: 12),
                               const Text('Export to Excel'),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'excel_import',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.upload_file_outlined,
+                                size: 20,
+                                color: Colors.blue[700],
+                              ),
+                              const SizedBox(width: 12),
+                              const Text('Import from Excel'),
                             ],
                           ),
                         ),

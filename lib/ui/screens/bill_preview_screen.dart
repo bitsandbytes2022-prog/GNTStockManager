@@ -34,6 +34,12 @@ class BillLineItem {
   /// Whole stock units (pipes) to deduct for this line.
   final int stockUnits;
 
+  /// Customer-facing name override for this line, used in place of
+  /// [product]'s real name — only ever set on an Estimate (see
+  /// RecordSaleScreen's per-line name override), never on a real
+  /// Bill/Invoice, so the product's catalog name stays untouched.
+  final String? displayName;
+
   const BillLineItem({
     required this.product,
     required this.quantity,
@@ -41,7 +47,10 @@ class BillLineItem {
     this.isPerFoot = false,
     required this.unitCost,
     required this.stockUnits,
+    this.displayName,
   });
+
+  String get effectiveName => displayName ?? product.name;
 }
 
 /// The physical thermal roll sizes the shop prints on. `printableWidthMm`
@@ -88,6 +97,13 @@ class BillPreviewScreen extends StatefulWidget {
   /// number is looked up and shown as a preview.
   final int? existingInvoiceNumber;
 
+  /// When true, this preview is a price estimate for a customer who hasn't
+  /// committed to buy yet — same layout as a real bill, but titled
+  /// "Estimate" throughout and with no "Complete Sale" action, since
+  /// generating one must never create a sale, deduct stock, or otherwise
+  /// touch real records.
+  final bool isEstimate;
+
   const BillPreviewScreen({
     super.key,
     required this.lineItems,
@@ -100,6 +116,7 @@ class BillPreviewScreen extends StatefulWidget {
     this.initialPayment = 0,
     this.readOnly = false,
     this.existingInvoiceNumber,
+    this.isEstimate = false,
   });
 
   @override
@@ -152,6 +169,15 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       _gstEnabled && _gstRate > 0 ? (total - _taxableValue(total)) / 2 : 0;
 
   double _sgstAmount(double total) => _cgstAmount(total);
+
+  /// The document heading, shown on-screen and on every printed format.
+  /// An estimate is always titled "Estimate" regardless of the GST toggle —
+  /// only a real bill switches between "Tax Invoice" and "Estimate" based
+  /// on whether GST is shown.
+  String get _docTitle {
+    if (widget.isEstimate) return 'Estimate';
+    return _gstEnabled && _gstRate > 0 ? 'Tax Invoice' : 'Estimate';
+  }
 
   String get _halfRateLabel {
     final half = _gstRate / 2;
@@ -427,7 +453,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           return [
             pw.Center(
               child: pw.Text(
-                showGst ? 'Tax Invoice' : 'Estimate',
+                _docTitle,
                 style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
               ),
             ),
@@ -506,12 +532,16 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
-                          _invoiceMetaRow('Invoice No.', '${_invoiceNumber ?? 'N/A'}'),
+                          _invoiceMetaRow(
+                              widget.isEstimate ? 'Estimate No.' : 'Invoice No.',
+                              '${_invoiceNumber ?? 'N/A'}'),
                           pw.SizedBox(height: 4),
                           _invoiceMetaRow(
                               'Dated', DateFormat('dd/MM/yyyy').format(DateTime.now())),
-                          pw.SizedBox(height: 4),
-                          _invoiceMetaRow('Mode of Payment', widget.paymentMethod),
+                          if (!widget.isEstimate) ...[
+                            pw.SizedBox(height: 4),
+                            _invoiceMetaRow('Mode of Payment', widget.paymentMethod),
+                          ],
                         ],
                       ),
                     ),
@@ -593,7 +623,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
                   return pw.TableRow(
                     children: [
-                      _buildTableCell('${product.name} (${product.size})'),
+                      _buildTableCell('${line.effectiveName} (${product.size})'),
                       _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
                       _buildTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
                       _buildTableCell('INR ${amount.toStringAsFixed(2)}'),
@@ -637,7 +667,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                       ],
                     ),
                   ),
-                  if (widget.paymentMethod == 'Credit' && due > 0) ...[
+                  if (!widget.isEstimate && widget.paymentMethod == 'Credit' && due > 0) ...[
                     pw.SizedBox(height: 4),
                     pw.Text(
                       'Amount Due: INR ${due.toStringAsFixed(2)}',
@@ -700,9 +730,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                         ),
                         pw.SizedBox(height: 2),
                         pw.Text(
-                          'We declare that this invoice shows the actual '
-                          'price of the goods described and that all '
-                          'particulars are true and correct.',
+                          widget.isEstimate
+                              ? 'This is a price estimate, not a tax '
+                                  'invoice or a demand for payment. Prices '
+                                  'are subject to change.'
+                              : 'We declare that this invoice shows the '
+                                  'actual price of the goods described and '
+                                  'that all particulars are true and correct.',
                           style: pw.TextStyle(fontSize: 8),
                         ),
                       ],
@@ -730,7 +764,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             pw.SizedBox(height: 8),
             pw.Center(
               child: pw.Text(
-                'This is a Computer Generated Invoice',
+                widget.isEstimate
+                    ? 'This is a Computer Generated Estimate'
+                    : 'This is a Computer Generated Invoice',
                 style: pw.TextStyle(fontSize: 9, fontStyle: pw.FontStyle.italic),
               ),
             ),
@@ -811,11 +847,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
         // Invoice details
         pw.Text(
-          '${_gstEnabled ? 'Tax Invoice' : 'Estimate'} #: ${_invoiceNumber ?? 'N/A'}',
+          '$_docTitle #: ${_invoiceNumber ?? 'N/A'}',
           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
         ),
         pw.Text(
-          'Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}  Time: ${DateFormat('hh:mm a').format(DateTime.now())}',
+          widget.isEstimate
+              ? 'Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}'
+              : 'Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}  Time: ${DateFormat('hh:mm a').format(DateTime.now())}',
           style: const pw.TextStyle(fontSize: 8),
         ),
         pw.SizedBox(height: 4),
@@ -855,7 +893,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  '${product.name} (${product.size})',
+                  '${line.effectiveName} (${product.size})',
                   style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.Row(
@@ -923,20 +961,22 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             ),
           ],
         ),
-        pw.SizedBox(height: 4),
-        dashedDivider(),
-        pw.SizedBox(height: 4),
+        if (!widget.isEstimate) ...[
+          pw.SizedBox(height: 4),
+          dashedDivider(),
+          pw.SizedBox(height: 4),
 
-        pw.Text(
-          'Payment: ${widget.paymentMethod}',
-          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-        ),
-        if (widget.paymentMethod == 'Credit' &&
-            (subtotal - widget.initialPayment) > 0) ...[
           pw.Text(
-            'Due: INR ${(subtotal - widget.initialPayment).toStringAsFixed(2)}',
+            'Payment: ${widget.paymentMethod}',
             style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
           ),
+          if (widget.paymentMethod == 'Credit' &&
+              (subtotal - widget.initialPayment) > 0) ...[
+            pw.Text(
+              'Due: INR ${(subtotal - widget.initialPayment).toStringAsFixed(2)}',
+              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+            ),
+          ],
         ],
 
         if (widget.notes != null && widget.notes!.isNotEmpty) ...[
@@ -1021,9 +1061,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final appBarTitle = widget.isEstimate ? 'Estimate Preview' : 'Bill Preview';
+
     if (_isLoading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Bill Preview')),
+        appBar: AppBar(title: Text(appBarTitle)),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -1033,7 +1075,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bill Preview'),
+        title: Text(appBarTitle),
         elevation: 0,
       ),
       body: Column(
@@ -1102,8 +1144,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           // Totals
           _buildTotals(subtotal, profit),
 
-          // Payment method
-          _buildPaymentInfo(),
+          // Payment method — not applicable to an estimate, since no
+          // payment has actually been taken yet.
+          if (!widget.isEstimate) _buildPaymentInfo(),
 
           // Footer
           _buildFooter(),
@@ -1232,7 +1275,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                _gstEnabled ? 'TAX INVOICE' : 'ESTIMATE',
+                _docTitle.toUpperCase(),
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
@@ -1250,10 +1293,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                 'Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}',
                 style: TextStyle(fontSize: 13, color: Colors.white),
               ),
-              Text(
-                'Time: ${DateFormat('hh:mm a').format(DateTime.now())}',
-                style: TextStyle(fontSize: 13, color: Colors.white),
-              ),
+              if (!widget.isEstimate)
+                Text(
+                  'Time: ${DateFormat('hh:mm a').format(DateTime.now())}',
+                  style: TextStyle(fontSize: 13, color: Colors.white),
+                ),
             ],
           ),)
         ],
@@ -1317,7 +1361,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  product.name,
+                  line.effectiveName,
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
@@ -1590,13 +1634,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             child: OutlinedButton.icon(
               onPressed: _isSaving ? null : _showPrintOptions,
               icon: const Icon(Icons.print),
-              label: const Text('Print Bill'),
+              label: Text(widget.isEstimate ? 'Print Estimate' : 'Print Bill'),
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
             ),
           ),
-          if (!widget.readOnly) ...[
+          if (!widget.readOnly && !widget.isEstimate) ...[
             const SizedBox(width: 12),
             Expanded(
               flex: 2,
