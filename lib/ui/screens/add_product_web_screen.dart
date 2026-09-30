@@ -7,6 +7,7 @@ import '../../models/product_model.dart';
 import '../../models/size_units.dart';
 import '../../services/firebase_service.dart';
 import '../../services/settings_service.dart';
+import '../widgets/product_picker_dialog.dart';
 import '../widgets/size_input_dialog.dart';
 
 class AddProductWebScreen extends StatefulWidget {
@@ -17,11 +18,16 @@ class AddProductWebScreen extends StatefulWidget {
   final List<Product>? products;
   final int? index;
 
+  /// Add mode only: pre-fill the form from this product so a new variant
+  /// (e.g. another stainer colour) only needs a different name.
+  final Product? cloneFrom;
+
   const AddProductWebScreen({
     super.key,
     this.product,
     this.products,
     this.index,
+    this.cloneFrom,
   });
 
   @override
@@ -34,6 +40,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
   final SettingsService _settingsService = SettingsService();
 
   final _nameController = TextEditingController();
+  final _nameFocusNode = FocusNode();
   final _billPriceController = TextEditingController();
   final _discountReceivedController = TextEditingController();
   final _sellingDiscountController = TextEditingController();
@@ -79,6 +86,10 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
   bool _updatingProgrammatically = false;
 
   bool get isEditing => widget.product != null;
+
+  /// The product this new one was cloned from (add mode only). Used to stop
+  /// saving an exact copy by accident, and to carry over its image.
+  Product? _cloneSource;
 
   /// Whether Next/Previous navigation is available.
   bool get _hasNav =>
@@ -150,90 +161,115 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
   void initState() {
     super.initState();
     _loadCategories();
+    if (widget.cloneFrom != null && widget.product == null) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _focusNameForNewVariant());
+    }
 
-    if (isEditing) {
-      // When editing, populate all values including pricing details
-      _nameController.text = widget.product!.name;
-      _selectedSize =
-          widget.product!.size.isEmpty ? null : widget.product!.size;
+    final source = widget.product ?? widget.cloneFrom;
+    if (source != null) _applyProduct(source, asClone: !isEditing);
+
+    _billPriceController.addListener(_calculatePrices);
+    _discountReceivedController.addListener(_calculatePrices);
+    _sellingDiscountController.addListener(_calculatePrices);
+    _marginController.addListener(_calculatePrices);
+    _gstController.addListener(_calculatePrices);
+    _purchasePriceController.addListener(_onPurchasePriceEdited);
+    _wholesaleMarginController.addListener(_onWholesaleMarginEdited);
+    _wholesalePriceController.addListener(_onWholesalePriceEdited);
+  }
+
+  /// Fill the form from [p]. With [asClone], it's the template for a new
+  /// variant: every detail is copied except stock, and the name is kept but
+  /// selected so typing replaces it.
+  void _applyProduct(Product p, {required bool asClone}) {
+    _updatingProgrammatically = true;
+    try {
+      _cloneSource = asClone ? p : null;
+      _nameController.text = p.name;
+      _stockController.text = asClone ? '' : p.stock.toString();
+      _selectedSize = p.size.isEmpty ? null : p.size;
       if (_selectedSize != null) {
         _selectedSizeUnit = unitOf(_selectedSize!) ?? sizeUnits.first;
       }
-      _stockController.text = widget.product!.stock.toString();
 
       // Set category - default to 'CPVC' if not set or empty
       _selectedCategory =
-      (widget.product!.category.isEmpty ||
-          widget.product!.category == 'Uncategorized')
-          ? 'CPVC'
-          : widget.product!.category;
-      _selectedSubcategory = widget.product!.subcategory;
+          (p.category.isEmpty || p.category == 'Uncategorized')
+              ? 'CPVC'
+              : p.category;
+      _selectedSubcategory = p.subcategory;
 
-      // Populate GST
-      if (widget.product!.gst != null) {
-        _gstController.text = widget.product!.gst.toString();
-      }
+      _gstController.text = p.gst?.toString() ?? '18';
 
-      // Populate discount and margin fields if available
-      if (widget.product!.discountReceived != null && widget.product!.discountReceived! > 0) {
-        _discountReceivedController.text = widget.product!.discountReceived.toString();
-        _hasDiscount = true; // Enable discount mode if discount exists
-      }
-      if (widget.product!.sellingDiscount != null && widget.product!.sellingDiscount! > 0) {
-        _sellingDiscountController.text = widget.product!.sellingDiscount.toString();
-        _hasDiscount = true; // Enable discount mode if discount exists
-      }
-      if (widget.product!.margin != null && widget.product!.margin! > 0) {
-        _marginController.text = widget.product!.margin.toString();
-      }
+      // Discount mode is on if the product has either discount.
+      _hasDiscount = (p.discountReceived ?? 0) > 0 || (p.sellingDiscount ?? 0) > 0;
+      _discountReceivedController.text =
+          (p.discountReceived ?? 0) > 0 ? p.discountReceived.toString() : '';
+      _sellingDiscountController.text =
+          (p.sellingDiscount ?? 0) > 0 ? p.sellingDiscount.toString() : '';
+      _marginController.text =
+          (p.margin ?? 0) > 0 ? p.margin.toString() : '20';
 
       // Populate prices - these will be editable
-      _purchasePriceController.text = widget.product!.purchasePrice.toString();
-      _salePriceController.text = widget.product!.salePrice.toString();
-      _wholesaleMarginController.text = _fmtPercent(
-          widget.product!.wholesaleMargin ?? Product.defaultWholesaleMargin);
+      _purchasePriceController.text = p.purchasePrice.toString();
+      _salePriceController.text = p.salePrice.toString();
+      _wholesaleMarginController.text =
+          _fmtPercent(p.wholesaleMargin ?? Product.defaultWholesaleMargin);
       _wholesalePriceController.text =
-          widget.product!.effectiveWholesalePrice.toStringAsFixed(2);
+          p.effectiveWholesalePrice.toStringAsFixed(2);
 
-      // Calculate bill price from purchase price if GST is available
-      // This is a reverse calculation for editing
-      if (widget.product!.gst != null && widget.product!.gst! > 0) {
-        final gstRate = widget.product!.gst! / 100;
-        if (_hasDiscount && widget.product!.discountReceived != null) {
+      // The Bill Price field holds the base price (the GST-inclusive toggle
+      // resets to off), so reverse it out of the purchase price.
+      _priceIncludesGst = false;
+      if (p.gst != null && p.gst! > 0) {
+        final gstRate = p.gst! / 100;
+        if (_hasDiscount && p.discountReceived != null) {
           // Reverse: Bill = (Purchase / (1 + GST)) / (1 - Discount%)
-          final basePrice = widget.product!.purchasePrice / (1 + gstRate);
-          final billPrice = basePrice / (1 - (widget.product!.discountReceived! / 100));
+          final basePrice = p.purchasePrice / (1 + gstRate);
+          final billPrice = basePrice / (1 - (p.discountReceived! / 100));
           _billPriceController.text = billPrice.toStringAsFixed(2);
         } else {
           // Simple reverse: Bill = Purchase / (1 + GST)
-          final billPrice = widget.product!.purchasePrice / (1 + gstRate);
+          final billPrice = p.purchasePrice / (1 + gstRate);
           _billPriceController.text = billPrice.toStringAsFixed(2);
         }
       } else {
         // If no GST, bill price = purchase price
-        _billPriceController.text = widget.product!.purchasePrice.toString();
+        _billPriceController.text = p.purchasePrice.toString();
       }
-
-      // Setup listeners for editing mode too
-      _billPriceController.addListener(_calculatePrices);
-      _discountReceivedController.addListener(_calculatePrices);
-      _sellingDiscountController.addListener(_calculatePrices);
-      _marginController.addListener(_calculatePrices);
-      _gstController.addListener(_calculatePrices);
-      _purchasePriceController.addListener(_onPurchasePriceEdited);
-      _wholesaleMarginController.addListener(_onWholesaleMarginEdited);
-      _wholesalePriceController.addListener(_onWholesalePriceEdited);
-    } else {
-      // Setup auto-calculation listeners
-      _billPriceController.addListener(_calculatePrices);
-      _discountReceivedController.addListener(_calculatePrices);
-      _sellingDiscountController.addListener(_calculatePrices);
-      _marginController.addListener(_calculatePrices);
-      _gstController.addListener(_calculatePrices);
-      _purchasePriceController.addListener(_onPurchasePriceEdited);
-      _wholesaleMarginController.addListener(_onWholesaleMarginEdited);
-      _wholesalePriceController.addListener(_onWholesalePriceEdited);
+    } finally {
+      _updatingProgrammatically = false;
     }
+  }
+
+  /// Add mode: pick an existing product and copy its details into the form.
+  Future<void> _copyFromExisting() async {
+    final picked = await showProductPickerDialog(context);
+    if (picked == null || !mounted) return;
+    setState(() => _applyProduct(picked, asClone: true));
+    _focusNameForNewVariant();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copied from "${picked.name}" — change the name')),
+    );
+  }
+
+  /// Edit mode: open a new Add Product form pre-filled from this product.
+  void _duplicateAsVariant() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddProductWebScreen(cloneFrom: widget.product),
+      ),
+    );
+  }
+
+  /// Focus the name field with its text selected, so the user can type the
+  /// new variant's name straight over it (or click to edit just part of it).
+  void _focusNameForNewVariant() {
+    _nameFocusNode.requestFocus();
+    _nameController.selection = TextSelection(
+        baseOffset: 0, extentOffset: _nameController.text.length);
   }
 
   Future<void> _loadCategories() async {
@@ -262,8 +298,10 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
           _categories.insert(2, 'CPVC');
         }
 
-        // Set default category only when adding new product
-        if (!isEditing && defaultCategory != null && categories.contains(defaultCategory)) {
+        // Set default category only when adding a new product from scratch
+        if (!isEditing &&
+            _cloneSource == null &&
+            defaultCategory != null && categories.contains(defaultCategory)) {
           _selectedCategory = defaultCategory;
         }
       });
@@ -644,8 +682,23 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
     }
   }
 
-  Future<void> _saveProduct() async {
+  Future<void> _saveProduct({bool addAnotherVariant = false}) async {
     if (!_formKey.currentState!.validate()) return;
+
+    final source = _cloneSource;
+    if (source != null &&
+        _nameController.text.trim().toLowerCase() ==
+            source.name.trim().toLowerCase() &&
+        (_selectedSize ?? '').trim() == source.size.trim()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Same name and size as the product you copied — change the name or size'),
+        ),
+      );
+      _focusNameForNewVariant();
+      return;
+    }
 
     // Set default category to Hardware if none selected
     final categoryToSave = _selectedCategory ?? 'CPVC';
@@ -669,7 +722,9 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
         purchasePrice: double.parse(_purchasePriceController.text),
         salePrice: double.parse(_salePriceController.text),
         stock: int.tryParse(_stockController.text) ?? 0,
-        imageBase64: isEditing ? widget.product?.imageBase64 : '',
+        imageBase64: isEditing
+            ? widget.product?.imageBase64
+            : (_cloneSource?.imageBase64 ?? ''),
         createdAt: isEditing ? widget.product!.createdAt : DateTime.now(),
         category: categoryToSave,
         subcategory: _selectedSubcategory,
@@ -693,6 +748,20 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
       }
       if (product.size.isNotEmpty) {
         await _firebaseService.markSizeUsed(product.size);
+      }
+
+      if (mounted && addAnotherVariant) {
+        // Keep every field and use the saved product as the template for the
+        // next variant — only the name needs changing.
+        setState(() => _applyProduct(savedProduct, asClone: true));
+        _focusNameForNewVariant();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '"${savedProduct.name}" added — enter the next variant name'),
+          ),
+        );
+        return;
       }
 
       if (mounted) {
@@ -739,6 +808,18 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
               : (isEditing ? 'Edit Product' : 'Add Product'),
         ),
         actions: [
+          if (!isEditing)
+            IconButton(
+              icon: const Icon(Icons.copy_all_outlined),
+              tooltip: 'Copy from existing product',
+              onPressed: _isLoading ? null : _copyFromExisting,
+            ),
+          if (isEditing)
+            IconButton(
+              icon: const Icon(Icons.copy_all_outlined),
+              tooltip: 'Duplicate as new variant',
+              onPressed: _isLoading ? null : _duplicateAsVariant,
+            ),
           if (isEditing)
             IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.red),
@@ -775,6 +856,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
                   flex: 2,
                   child: TextFormField(
                     controller: _nameController,
+                    focusNode: _nameFocusNode,
                     decoration: const InputDecoration(
                       labelText: 'Product Name',
                       prefixIcon: Icon(Icons.inventory_2),
@@ -1375,6 +1457,18 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
               ),
               style: FilledButton.styleFrom(padding: const EdgeInsets.all(16)),
             ),
+            if (!isEditing) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _isLoading
+                    ? null
+                    : () => _saveProduct(addAnotherVariant: true),
+                icon: const Icon(Icons.library_add_outlined),
+                label: const Text('Save & Add Another Variant'),
+                style:
+                    OutlinedButton.styleFrom(padding: const EdgeInsets.all(16)),
+              ),
+            ],
           ],
         ),
       ),
@@ -1384,6 +1478,7 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _nameFocusNode.dispose();
     _billPriceController.dispose();
     _discountReceivedController.dispose();
     _sellingDiscountController.dispose();
