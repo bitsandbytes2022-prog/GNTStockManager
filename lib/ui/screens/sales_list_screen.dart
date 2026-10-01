@@ -1843,6 +1843,16 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
+        // Credit Due total — only while the Credit due filter is on.
+        if (_creditDueOnly)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(spacing, spacing, spacing, 0),
+              child: _CreditDueTotalCard(
+                  sales: sales.where((s) => !s.isMock).toList()),
+            ),
+          ),
+
         // Summary Card
         SliverToBoxAdapter(
           child: Padding(
@@ -1936,6 +1946,79 @@ class _SalesListScreenState extends State<SalesListScreen> {
 // ==========================================
 // SUMMARY CARD - Single comprehensive card
 // ==========================================
+/// Total outstanding credit across the filtered (credit due) sales.
+class _CreditDueTotalCard extends StatelessWidget {
+  final List<Sale> sales;
+
+  const _CreditDueTotalCard({required this.sales});
+
+  @override
+  Widget build(BuildContext context) {
+    double totalDue = 0;
+    double totalBilled = 0;
+    double totalReceived = 0;
+    for (final sale in sales) {
+      totalDue += sale.amountDue;
+      totalBilled += sale.totalAmount;
+      totalReceived += sale.amountPaid;
+    }
+    final money = NumberFormat.currency(
+        locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.red.shade600, Colors.red.shade800],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.schedule, color: Colors.white, size: 28),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Total Credit Due',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  money.format(totalDue),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${sales.length} bill${sales.length == 1 ? '' : 's'} · '
+                  'Billed ${money.format(totalBilled)} · '
+                  'Received ${money.format(totalReceived)}',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SummaryCard extends StatelessWidget {
   final Map<String, dynamic> stats;
 
