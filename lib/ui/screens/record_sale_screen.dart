@@ -8,15 +8,18 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../models/party_model.dart';
 import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
 import '../../services/firebase_service.dart';
 import '../../services/invoice_service.dart';
+import '../../services/ledger_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../screens/add_product_screen.dart';
 import '../screens/add_product_web_screen.dart';
 import '../screens/bill_preview_screen.dart';
+import '../screens/ledger_screen.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
 
@@ -75,7 +78,11 @@ class _CartLine {
 }
 
 class RecordSaleScreen extends StatefulWidget {
-  const RecordSaleScreen({super.key});
+  /// Start the sale already linked to this shopkeeper's ledger (opened from
+  /// their ledger's "New Sale").
+  final Party? party;
+
+  const RecordSaleScreen({super.key, this.party});
 
   @override
   State<RecordSaleScreen> createState() => _RecordSaleScreenState();
@@ -181,6 +188,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // wholesale price instead of its retail sale price.
   bool _isWholesale = false;
 
+  /// The shopkeeper this sale goes on the ledger of, if any.
+  Party? _party;
+
   // Margin & discount readout is hidden by default (it's internal-only, not
   // needed for a quick sale) — shown via a toggle when actually wanted.
   bool _showMarginSection = false;
@@ -264,6 +274,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.party != null) {
+      _party = widget.party;
+      _fillBuyerFromParty(widget.party!);
+      _isWholesale = true;
+      _paymentMethod = 'Credit';
+    }
     _loadProducts();
     _loadCategories();
     _loadRecentSearches();
@@ -1557,12 +1573,79 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
+  void _fillBuyerFromParty(Party party) {
+    _buyerNameController.text = party.name;
+    _buyerPhoneController.text = party.phone ?? '';
+    _buyerAddressController.text = party.address ?? '';
+  }
+
+  /// Links the sale to a shopkeeper's ledger. A ledger sale defaults to
+  /// wholesale rates and Credit (it's settled through the ledger).
+  Future<void> _pickParty({VoidCallback? afterChange}) async {
+    final party = await showModalBottomSheet<Party>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const _PartyPickerSheet(),
+    );
+    if (party == null || !mounted) return;
+    setState(() {
+      _party = party;
+      _fillBuyerFromParty(party);
+      _paymentMethod = 'Credit';
+    });
+    if (!_isWholesale) _setWholesale(true);
+    afterChange?.call();
+  }
+
+  Widget _buildPartySelector({VoidCallback? afterChange}) {
+    final party = _party;
+    return Container(
+      decoration: BoxDecoration(
+        color: party != null ? Colors.teal.shade50 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: party != null ? Colors.teal.shade200 : Colors.grey.shade200,
+        ),
+      ),
+      child: ListTile(
+        dense: true,
+        leading: Icon(Icons.menu_book,
+            color: party != null ? Colors.teal.shade700 : Colors.grey),
+        title: Text(
+          party?.name ?? 'Shopkeeper ledger (optional)',
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          party != null
+              ? 'This sale goes on their ledger'
+              : 'Tap to add this sale to a shopkeeper\'s account',
+          style: const TextStyle(fontSize: 11),
+        ),
+        trailing: party != null
+            ? IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: 'Remove from ledger',
+                onPressed: () {
+                  setState(() => _party = null);
+                  afterChange?.call();
+                },
+              )
+            : const Icon(Icons.chevron_right),
+        onTap: () => _pickParty(afterChange: afterChange),
+      ),
+    );
+  }
+
   Widget _buildBuyerAndCreditSection({VoidCallback? afterChange}) {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildPartySelector(afterChange: afterChange),
           Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
@@ -2146,6 +2229,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             : _notesController.text.trim(),
         isMock: _isMockSale,
         isWholesale: _isWholesale,
+        partyId: _party?.id,
         buyerName: _buyerNameController.text.trim().isEmpty
             ? null
             : _buyerNameController.text.trim(),
@@ -2184,6 +2268,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _cartSearchController.clear();
           _isMockSale = false;
           _isWholesale = false;
+          _party = null;
           _discountPercent = 0;
         });
 
@@ -3799,6 +3884,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               : _notesController.text.trim(),
           isMock: _isMockSale,
           isWholesale: _isWholesale,
+          partyId: _party?.id,
           buyerName: _buyerNameController.text.trim().isEmpty
               ? null
               : _buyerNameController.text.trim(),
@@ -3836,6 +3922,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _creditPaidController.clear();
         _isMockSale = false;
         _isWholesale = false;
+        _party = null;
         _discountPercent = 0;
       });
 
@@ -5523,5 +5610,95 @@ class _CustomCartItemState extends State<_CustomCartItem> {
   void dispose() {
     _amountController.dispose();
     super.dispose();
+  }
+}
+/// Searchable list of shopkeepers (customer ledgers), with a shortcut to add
+/// a new one.
+class _PartyPickerSheet extends StatefulWidget {
+  const _PartyPickerSheet();
+
+  @override
+  State<_PartyPickerSheet> createState() => _PartyPickerSheetState();
+}
+
+class _PartyPickerSheetState extends State<_PartyPickerSheet> {
+  late final Future<List<Party>> _parties =
+      LedgerService().getParties(PartyType.customer);
+  String _query = '';
+
+  Future<void> _addNew() async {
+    final party = await showPartyFormDialog(context,
+        type: PartyType.customer, initialName: _query.trim());
+    if (party != null && mounted) Navigator.pop(context, party);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.6,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Search shopkeeper',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.person_add, color: Colors.teal),
+                title: const Text('Add new shopkeeper'),
+                onTap: _addNew,
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: FutureBuilder<List<Party>>(
+                  future: _parties,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Error: ${snapshot.error}'));
+                    }
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final q = _query.toLowerCase().trim();
+                    final parties = snapshot.data!
+                        .where((p) =>
+                            q.isEmpty ||
+                            p.name.toLowerCase().contains(q) ||
+                            (p.phone ?? '').contains(q))
+                        .toList();
+                    if (parties.isEmpty) {
+                      return const Center(child: Text('No shopkeepers found'));
+                    }
+                    return ListView.builder(
+                      itemCount: parties.length,
+                      itemBuilder: (context, i) => ListTile(
+                        leading: const Icon(Icons.storefront),
+                        title: Text(parties[i].name),
+                        subtitle: parties[i].phone?.isNotEmpty ?? false
+                            ? Text(parties[i].phone!)
+                            : null,
+                        onTap: () => Navigator.pop(context, parties[i]),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

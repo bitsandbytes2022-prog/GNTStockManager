@@ -161,13 +161,19 @@ class Payment {
   final DateTime date;
   final String? note;
 
-  Payment({required this.amount, DateTime? date, this.note})
+  /// Set when this payment is part of a lump-sum ledger payment that was
+  /// spread across the party's unpaid bills (the ledger shows that payment
+  /// once, as its own entry, rather than per bill).
+  final String? ledgerEntryId;
+
+  Payment({required this.amount, DateTime? date, this.note, this.ledgerEntryId})
       : date = date ?? DateTime.now();
 
   Map<String, dynamic> toMap() => {
     'amount': amount,
     'date': Timestamp.fromDate(date),
     'note': note,
+    if (ledgerEntryId != null) 'ledgerEntryId': ledgerEntryId,
   };
 
   factory Payment.fromMap(Map<String, dynamic> map) {
@@ -175,6 +181,7 @@ class Payment {
       amount: (map['amount'] ?? 0).toDouble(),
       date: (map['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       note: map['note'],
+      ledgerEntryId: map['ledgerEntryId'],
     );
   }
 }
@@ -195,6 +202,10 @@ class Sale {
   /// Sold to a shopkeeper at wholesale rates (each product's wholesale
   /// price instead of its retail sale price).
   final bool isWholesale;
+
+  /// The shopkeeper (ledger party) this sale was made to, if any — the sale
+  /// then appears in that party's ledger.
+  final String? partyId;
 
   // Optional buyer details, recorded for future reference on the bill.
   final String? buyerName;
@@ -220,6 +231,7 @@ class Sale {
     this.paymentMethod = PaymentMethod.cash,
     this.isMock = false,
     this.isWholesale = false,
+    this.partyId,
     this.buyerName,
     this.buyerPhone,
     this.buyerAddress,
@@ -243,6 +255,7 @@ class Sale {
     'paymentMethod': paymentMethod.value,
     'isMock': isMock,
     'isWholesale': isWholesale,
+    'partyId': partyId,
     'buyerName': buyerName,
     'buyerPhone': buyerPhone,
     'buyerAddress': buyerAddress,
@@ -268,6 +281,7 @@ class Sale {
           : PaymentMethod.cash,
       isMock: data['isMock'] == true,
       isWholesale: data['isWholesale'] == true,
+      partyId: data['partyId'],
       buyerName: data['buyerName'],
       buyerPhone: data['buyerPhone'],
       buyerAddress: data['buyerAddress'],
@@ -293,6 +307,7 @@ class Sale {
     PaymentMethod? paymentMethod,
     bool? isMock,
     bool? isWholesale,
+    String? partyId,
     String? buyerName,
     String? buyerPhone,
     String? buyerAddress,
@@ -309,6 +324,7 @@ class Sale {
       paymentMethod: paymentMethod ?? this.paymentMethod,
       isMock: isMock ?? this.isMock,
       isWholesale: isWholesale ?? this.isWholesale,
+      partyId: partyId ?? this.partyId,
       buyerName: buyerName ?? this.buyerName,
       buyerPhone: buyerPhone ?? this.buyerPhone,
       buyerAddress: buyerAddress ?? this.buyerAddress,

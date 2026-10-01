@@ -1920,6 +1920,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         isMock: _isMockSale,
         isWholesale: _isWholesale,
+        partyId: widget.sale.partyId,
         buyerName:
             _buyerNameController.text.trim().isEmpty ? null : _buyerNameController.text.trim(),
         buyerPhone:

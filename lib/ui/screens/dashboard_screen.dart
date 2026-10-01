@@ -4,6 +4,7 @@ import 'package:inventory_manager/ui/screens/add_product_screen.dart';
 import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
 import 'package:inventory_manager/ui/screens/category_settings_screen.dart';
 import 'package:inventory_manager/ui/screens/earnings_screen.dart';
+import 'package:inventory_manager/ui/screens/ledger_screen.dart';
  import 'package:inventory_manager/ui/screens/product_list_screen.dart';
 import 'package:inventory_manager/ui/screens/profile_screen.dart';
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
@@ -32,6 +33,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       selectedIcon: Icons.receipt_long,
       label: 'Sales',
       page: const SalesListScreen(),
+    ),
+    _NavItem(
+      icon: Icons.menu_book_outlined,
+      selectedIcon: Icons.menu_book,
+      label: 'Ledger',
+      page: const LedgerScreen(),
     ),
     _NavItem(
       icon: Icons.account_balance_wallet_outlined,
