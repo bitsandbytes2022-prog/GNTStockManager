@@ -9,10 +9,13 @@ import 'package:printing/printing.dart';
 
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
+import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
 import '../../utils/monthly_bill_book_pdf.dart';
 import '../../utils/pdf_fonts.dart';
 import '../../utils/pdf_logo.dart';
+import '../../utils/thermal_print.dart';
+import '../widgets/thermal_offset_dialog.dart';
 import 'package:inventory_manager/ui/screens/return_items_screen.dart';
 
 import 'edit_sales_screen.dart';
@@ -29,21 +32,6 @@ enum TimeSpan {
   thisYear,
   allTime,
   custom,
-}
-
-/// The physical thermal roll sizes the shop prints on. `printableWidthMm`
-/// is the actual printable width, not the nominal roll width — e.g. an
-/// "80mm" roll only prints ~72mm wide, and a "57mm" roll ~48mm, once the
-/// printer's own side margins are accounted for. Matches
-/// bill_preview_screen.dart's identical enum.
-enum _ThermalRollSize {
-  mm80(printableWidthMm: 72, label: 'Thermal Receipt (3" / 80mm)'),
-  mm57(printableWidthMm: 48, label: 'Thermal Receipt (2" / 57mm)');
-
-  const _ThermalRollSize({required this.printableWidthMm, required this.label});
-
-  final double printableWidthMm;
-  final String label;
 }
 
 class SalesListScreen extends StatefulWidget {
@@ -81,17 +69,6 @@ class _SalesListScreenState extends State<SalesListScreen> {
   // Reprinted invoices don't have an interactive rate picker (unlike the
   // new-sale bill preview), so use the same 18% default there is.
   static const double _gstRate = 18;
-
-  PdfPageFormat _thermalPageFormat(_ThermalRollSize size) => PdfPageFormat(
-        size.printableWidthMm * PdfPageFormat.mm,
-        double.infinity,
-        marginAll: 5 * PdfPageFormat.mm,
-      );
-
-  // A long thermal receipt is built as several fixed-height chunks rather
-  // than one arbitrarily tall auto-sized page — see the comment where this
-  // is used in _generateThermalInvoicePdf for why.
-  static const double _thermalPageChunkHeight = 297 * PdfPageFormat.mm;
 
   double _taxableValue(double total) => total / (1 + _gstRate / 100);
   double _cgstAmount(double total) => (total - _taxableValue(total)) / 2;
@@ -470,11 +447,18 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   _printInvoice(sale, thermalSize: null, isEstimate: isEstimate);
                 },
               ),
-              for (final size in _ThermalRollSize.values)
+              for (final size in ThermalRollSize.values)
                 ListTile(
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: Text(size.label),
-                  subtitle: const Text('Thermal roll printer'),
+                  subtitle: Text(size.subtitle),
+                  trailing: size.adjustable
+                      ? IconButton(
+                          icon: const Icon(Icons.tune),
+                          tooltip: 'Adjust position',
+                          onPressed: () => showThermalOffsetDialog(context),
+                        )
+                      : null,
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _printInvoice(sale, thermalSize: size, isEstimate: isEstimate);
@@ -490,12 +474,14 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   Future<void> _printInvoice(
     Sale sale, {
-    required _ThermalRollSize? thermalSize,
+    required ThermalRollSize? thermalSize,
     bool isEstimate = false,
   }) async {
     try {
-      final initialFormat =
-          thermalSize != null ? _thermalPageFormat(thermalSize) : PdfPageFormat.a4;
+      final offsetMm = await SettingsService().getThermalOffsetMm();
+      final initialFormat = thermalSize != null
+          ? thermalPageFormat(thermalSize, offsetMm: offsetMm)
+          : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
         // Ignore the negotiated `format` entirely — same reasoning as the
@@ -507,7 +493,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
         // of true A4.
         onLayout: (PdfPageFormat format) async {
           final pdf = thermalSize != null
-              ? await _generateThermalInvoicePdf(sale, thermalSize, isEstimate: isEstimate)
+              ? await _generateThermalInvoicePdf(sale, thermalSize,
+                  isEstimate: isEstimate, offsetMm: offsetMm)
               : await _generateInvoicePdf(sale, isEstimate: isEstimate);
           return pdf.save();
         },
@@ -867,8 +854,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   Future<pw.Document> _generateThermalInvoicePdf(
     Sale sale,
-    _ThermalRollSize thermalSize, {
+    ThermalRollSize thermalSize, {
     bool isEstimate = false,
+    double offsetMm = 0,
   }) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
@@ -1088,11 +1076,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat(
-          _thermalPageFormat(thermalSize).width,
-          _thermalPageChunkHeight,
-          marginAll: 5 * PdfPageFormat.mm,
-        ),
+        pageFormat: thermalPageFormat(thermalSize, offsetMm: offsetMm),
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         maxPages: 200,
         build: (context) => children,

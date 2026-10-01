@@ -11,6 +11,7 @@ class SettingsService {
   static const String _defaultCategoryKey = 'default_category';
   static const String _recentSearchesKey = 'recent_product_searches';
   static const int _maxRecentSearches = 8;
+  static const String _thermalOffsetKey = 'thermal_print_offset_mm';
 
   // Cache the SharedPreferences instance for better performance
   static SharedPreferences? _prefsInstance;
@@ -127,6 +128,27 @@ class SettingsService {
       await prefs.setStringList(_recentSearchesKey, current);
     } catch (e) {
       debugPrint('❌ Error removing recent search: $e');
+    }
+  }
+
+  /// Left/right nudge (mm, positive = right) for thermal receipts printed on
+  /// a narrow roll centred inside a wider printer.
+  Future<double> getThermalOffsetMm() async {
+    try {
+      final prefs = await _getPrefs();
+      return prefs?.getDouble(_thermalOffsetKey) ?? 0;
+    } catch (e) {
+      debugPrint('❌ Error getting thermal offset: $e');
+      return 0;
+    }
+  }
+
+  Future<void> setThermalOffsetMm(double value) async {
+    try {
+      final prefs = await _getPrefs();
+      await prefs?.setDouble(_thermalOffsetKey, value);
+    } catch (e) {
+      debugPrint('❌ Error saving thermal offset: $e');
     }
   }
 }

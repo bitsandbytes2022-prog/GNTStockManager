@@ -12,8 +12,11 @@ import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
 import '../../services/invoice_service.dart';
 import '../../services/sales_service.dart';
+import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
 import '../../utils/pdf_fonts.dart';
+import '../../utils/thermal_print.dart';
+import '../widgets/thermal_offset_dialog.dart';
 
 /// One line on the bill — a product plus the quantity/price/per-foot flag
 /// for that specific line. A product can appear more than once (e.g. a
@@ -51,20 +54,6 @@ class BillLineItem {
   });
 
   String get effectiveName => displayName ?? product.name;
-}
-
-/// The physical thermal roll sizes the shop prints on. `printableWidthMm`
-/// is the actual printable width, not the nominal roll width — e.g. an
-/// "80mm" roll only prints ~72mm wide, and a "57mm" roll ~48mm, once the
-/// printer's own side margins are accounted for.
-enum _ThermalRollSize {
-  mm80(printableWidthMm: 72, label: 'Thermal Receipt (3" / 80mm)'),
-  mm57(printableWidthMm: 48, label: 'Thermal Receipt (2" / 57mm)');
-
-  const _ThermalRollSize({required this.printableWidthMm, required this.label});
-
-  final double printableWidthMm;
-  final String label;
 }
 
 class BillPreviewScreen extends StatefulWidget {
@@ -137,18 +126,6 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       'Authorised Dealer of Nerolac Paints & Prakash Surya PVC Pipes';
   static const String _dealerTagline2 =
       'Your One-Stop Shop for Hardware, Sanitary Ware & Hand Tools';
-
-  PdfPageFormat _thermalPageFormat(_ThermalRollSize size) => PdfPageFormat(
-        size.printableWidthMm * PdfPageFormat.mm,
-        double.infinity,
-        marginAll: 5 * PdfPageFormat.mm,
-      );
-
-  // A long thermal receipt is built as several fixed-height chunks rather
-  // than one arbitrarily tall auto-sized page — see the comment where this
-  // is used in _generatePdf for why. A4's height is a safe, universally
-  // supported page length to chunk at.
-  static const double _thermalPageChunkHeight = 297 * PdfPageFormat.mm;
 
   int? _invoiceNumber;
   bool _isLoading = true;
@@ -342,11 +319,18 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   _printBill(thermalSize: null);
                 },
               ),
-              for (final size in _ThermalRollSize.values)
+              for (final size in ThermalRollSize.values)
                 ListTile(
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: Text(size.label),
-                  subtitle: const Text('Thermal roll printer'),
+                  subtitle: Text(size.subtitle),
+                  trailing: size.adjustable
+                      ? IconButton(
+                          icon: const Icon(Icons.tune),
+                          tooltip: 'Adjust position',
+                          onPressed: () => showThermalOffsetDialog(context),
+                        )
+                      : null,
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _printBill(thermalSize: size);
@@ -360,10 +344,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
   }
 
-  Future<void> _printBill({required _ThermalRollSize? thermalSize}) async {
+  Future<void> _printBill({required ThermalRollSize? thermalSize}) async {
     try {
-      final initialFormat =
-          thermalSize != null ? _thermalPageFormat(thermalSize) : PdfPageFormat.a4;
+      final offsetMm = await SettingsService().getThermalOffsetMm();
+      final initialFormat = thermalSize != null
+          ? thermalPageFormat(thermalSize, offsetMm: offsetMm)
+          : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
         // Ignore the negotiated `format` entirely — same reasoning as the
@@ -374,7 +360,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         // otherwise get silently rendered at some other printer's narrow
         // width instead of true A4.
         onLayout: (PdfPageFormat format) async {
-          final pdf = await _generatePdf(thermalSize: thermalSize);
+          final pdf = await _generatePdf(
+            thermalSize: thermalSize,
+            thermalOffsetMm: offsetMm,
+          );
           return pdf.save();
         },
       );
@@ -388,7 +377,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   }
 
   Future<pw.Document> _generatePdf({
-    _ThermalRollSize? thermalSize,
+    ThermalRollSize? thermalSize,
+    double thermalOffsetMm = 0,
   }) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
@@ -430,11 +420,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       // it takes.
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat(
-            _thermalPageFormat(thermalSize).width,
-            _thermalPageChunkHeight,
-            marginAll: 5 * PdfPageFormat.mm,
-          ),
+          pageFormat: thermalPageFormat(thermalSize, offsetMm: thermalOffsetMm),
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           maxPages: 200,
           build: (context) => _buildThermalContentChildren(logoImage),
