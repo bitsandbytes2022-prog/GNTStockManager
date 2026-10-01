@@ -252,6 +252,9 @@ class LedgerService {
     return controller.stream;
   }
 
+  /// One-off snapshot of [watch].
+  Future<LedgerData> load() => watch().first;
+
   Future<List<Party>> getParties(PartyType type) async {
     final snap =
         await _parties.where('type', isEqualTo: type.name).get();

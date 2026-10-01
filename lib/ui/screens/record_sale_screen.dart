@@ -20,6 +20,7 @@ import '../screens/add_product_screen.dart';
 import '../screens/add_product_web_screen.dart';
 import '../screens/bill_preview_screen.dart';
 import '../screens/ledger_screen.dart';
+import '../widgets/ledger_share_sheet.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
 
@@ -1573,6 +1574,19 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     );
   }
 
+  /// After a ledger sale, offers to send the shopkeeper their updated
+  /// statement straight away.
+  SnackBarAction? _shareLedgerAction(Party? party) {
+    if (party == null) return null;
+    return SnackBarAction(
+      label: 'Share ledger',
+      textColor: Colors.white,
+      onPressed: () {
+        if (mounted) showShareLedgerSheet(context, party);
+      },
+    );
+  }
+
   void _fillBuyerFromParty(Party party) {
     _buyerNameController.text = party.name;
     _buyerPhoneController.text = party.phone ?? '';
@@ -2248,6 +2262,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
       if (mounted) {
         final wasMock = _isMockSale;
+        final ledgerParty = wasMock ? null : _party;
 
         // Clear form
         setState(() {
@@ -2281,6 +2296,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 ? 'Mock sale saved (stock unchanged, excluded from analytics)'
                 : 'Sale completed successfully!'),
             backgroundColor: wasMock ? Colors.orange.shade700 : Colors.green,
+            action: _shareLedgerAction(ledgerParty),
           ),
         );
       }
@@ -3904,6 +3920,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
     // If sale was completed successfully, clear the form
     if (result == true && mounted) {
+      final ledgerParty = _isMockSale ? null : _party;
       setState(() {
         _selectedQuantities.clear();
         _customPrices.clear();
@@ -3931,9 +3948,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Sale completed successfully!'),
+          SnackBar(
+            content: const Text('✅ Sale completed successfully!'),
             backgroundColor: Colors.green,
+            action: _shareLedgerAction(ledgerParty),
           ),
         );
       }

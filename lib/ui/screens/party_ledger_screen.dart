@@ -9,6 +9,7 @@ import 'edit_sales_screen.dart';
 import 'ledger_screen.dart';
 import 'purchase_entry_screen.dart';
 import 'record_sale_screen.dart';
+import '../widgets/ledger_share_sheet.dart';
 
 /// One shopkeeper's / supplier's statement: every sale or purchase and
 /// every payment, with the running balance.
@@ -64,6 +65,11 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
       appBar: AppBar(
         title: Text(party.name),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            tooltip: 'Share statement (PDF)',
+            onPressed: () => showShareLedgerSheet(context, party),
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Edit details',
@@ -139,6 +145,11 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                       icon: const Icon(Icons.note_add_outlined),
                       label: const Text('Add Bill (no items)'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: () => showShareLedgerSheet(context, party),
+                      icon: const Icon(Icons.share),
+                      label: const Text('Share Statement'),
+                    ),
                   ]
                 : [
                     FilledButton.icon(
@@ -155,6 +166,11 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                           _showEntryDialog(party, LedgerEntryKind.payment),
                       icon: const Icon(Icons.payments_outlined),
                       label: const Text('Make Payment'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => showShareLedgerSheet(context, party),
+                      icon: const Icon(Icons.share),
+                      label: const Text('Share Statement'),
                     ),
                   ],
           ),
