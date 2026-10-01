@@ -228,10 +228,14 @@ class SalesService {
               ? (item.effectiveStockUnits * returnQty / item.quantity).round()
               : 0;
           final productRef = _firestore.collection(_productsCollection).doc(item.productId);
-          batch.update(productRef, {
-            'stock': FieldValue.increment(restoreUnits), // Restore stock
-            'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
-          });
+          // Skip products deleted since the sale — updating a missing doc
+          // would fail the whole return.
+          if ((await productRef.get()).exists) {
+            batch.update(productRef, {
+              'stock': FieldValue.increment(restoreUnits), // Restore stock
+              'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
+            });
+          }
         }
 
         // If not all quantity is returned, keep the item with reduced quantity
@@ -531,13 +535,16 @@ class SalesService {
         }
       }
 
-      // Apply stock adjustments
+      // Apply stock adjustments. A product deleted from the catalog since
+      // the sale has no doc to update — batch.update on it would fail the
+      // whole commit and block the edit — so it has no stock to adjust.
       for (final entry in stockAdjustments.entries) {
         final productId = entry.key;
         final adjustment = entry.value;
 
         if (adjustment != 0) {
           final productRef = _firestore.collection('products').doc(productId);
+          if (!(await productRef.get()).exists) continue;
           batch.update(productRef, {
             'stock': FieldValue.increment(adjustment),
           });
@@ -715,6 +722,9 @@ class SalesService {
         final productRef = _firestore
             .collection(_productsCollection)
             .doc(item.productId);
+        // Skip products deleted since the sale — updating a missing doc
+        // would fail the whole delete.
+        if (!(await productRef.get()).exists) continue;
 
         batch.update(productRef, {
           'stock': FieldValue.increment(item.effectiveStockUnits),

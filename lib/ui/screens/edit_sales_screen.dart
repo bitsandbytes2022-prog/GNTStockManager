@@ -88,6 +88,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   final TextEditingController _amountPaidController = TextEditingController();
 
   List<Product> _allProducts = [];
+
+  /// Stand-ins for products on this sale that have since been deleted from
+  /// the catalog, built from the sale's own item data. Without them those
+  /// lines would vanish from the cart and the sale could never be saved.
+  final Map<String, Product> _deletedProducts = {};
   List<Product> _filteredProducts = [];
 
   // The cart holds independent *lines*, not one slot per product — the same
@@ -301,7 +306,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _buyerNameController.text = widget.sale.buyerName ?? '';
     _buyerPhoneController.text = widget.sale.buyerPhone ?? '';
     _buyerAddressController.text = widget.sale.buyerAddress ?? '';
-    _amountPaidController.text = widget.sale.amountPaid.toStringAsFixed(2);
+    // A non-credit sale counts as fully paid, so only carry its amountPaid
+    // over when it was already credit. Otherwise switching Cash → Credit
+    // would pre-fill the full total and save the bill as already received,
+    // hiding it from the Credit due filter.
+    _amountPaidController.text = widget.sale.isCredit
+        ? widget.sale.amountPaid.toStringAsFixed(2)
+        : '0';
     _isMockSale = widget.sale.isMock;
     _isWholesale = widget.sale.isWholesale;
 
@@ -322,6 +333,22 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         );
         continue;
       }
+      _deletedProducts.putIfAbsent(
+        item.productId,
+        () => Product(
+          id: item.productId,
+          name: item.productName,
+          size: item.productSize,
+          // SaleItem prices are already per-foot for per-foot lines, and the
+          // stand-in has no pipe category, so no further per-foot division
+          // is applied to them.
+          purchasePrice: item.purchasePrice,
+          salePrice: item.salePrice,
+          stock: 0,
+          imageBase64: item.imageBase64,
+          createdAt: widget.sale.createdAt,
+        ),
+      );
       final lineKey = _newLineKey(item.productId);
       _cartItemOrder.add(lineKey);
       _lineProductId[lineKey] = item.productId;
@@ -674,8 +701,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     for (final p in _allProducts) {
       if (p.id == id) return p;
     }
-    return null;
+    // Deleted from the catalog since this sale — fall back to the stand-in.
+    return _deletedProducts[id];
   }
+
+  /// True once the catalog has loaded and [id] isn't in it.
+  bool _isDeletedProduct(String id) =>
+      _allProducts.isNotEmpty && !_allProducts.any((p) => p.id == id);
 
   /// Tapping a product in the browse grid always adds a fresh cart line.
   Future<void> _showQuantityDialog(Product product) =>
@@ -2663,6 +2695,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           minimumPrice: _getMinimumPrice(_filteredCartLines[i].product, _filteredCartLines[i].isPerFoot),
                           isPerFoot: _filteredCartLines[i].isPerFoot,
                           itemNumber: i + 1,
+                          isDeleted: _isDeletedProduct(_filteredCartLines[i].product.id),
                         ),
                       for (int i = 0; i < _customItemOrder.length; i++)
                         if (_customItems[_customItemOrder[i]] != null)
@@ -2841,6 +2874,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                     minimumPrice: _getMinimumPrice(_filteredCartLines[i].product, _filteredCartLines[i].isPerFoot),
                                     isPerFoot: _filteredCartLines[i].isPerFoot,
                                     itemNumber: i + 1,
+                                    isDeleted: _isDeletedProduct(_filteredCartLines[i].product.id),
                                   ),
                                 for (int i = 0; i < _customItemOrder.length; i++)
                                   if (_customItems[_customItemOrder[i]] != null)
@@ -3592,6 +3626,10 @@ class _CartItem extends StatefulWidget {
   final bool isPerFoot;
   final int itemNumber;
 
+  /// The product has been deleted from inventory since this sale; the line
+  /// is shown from the sale's own saved details.
+  final bool isDeleted;
+
   const _CartItem({
     required this.product,
     required this.effectiveStock,
@@ -3604,6 +3642,7 @@ class _CartItem extends StatefulWidget {
     required this.minimumPrice,
     this.isPerFoot = false,
     required this.itemNumber,
+    this.isDeleted = false,
   });
 
   @override
@@ -3681,6 +3720,19 @@ class _CartItemState extends State<_CartItem> {
                               child: Text(
                                 'PER FOOT',
                                 style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.indigo.shade700),
+                              ),
+                            ),
+                          if (widget.isDeleted)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade200),
+                              ),
+                              child: Text(
+                                'DELETED FROM INVENTORY',
+                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.red.shade700),
                               ),
                             ),
                           IconButton(
