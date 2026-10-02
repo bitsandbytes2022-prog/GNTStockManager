@@ -4,6 +4,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../models/sale_model.dart';
 import 'amount_in_words.dart';
+import 'bill_book_batching.dart';
 import 'pdf_fonts.dart';
 import 'pdf_logo.dart';
 
@@ -26,28 +27,42 @@ const String _shopGstin = '02FDUPK4649R1ZK';
 /// Sale prices are treated as GST-inclusive (the same assumption the rest of
 /// the app makes): when [showGst] is on, each bill reverse-computes the
 /// taxable value and the CGST/SGST split baked into its total at [gstRate]%,
-/// so the customer-facing total never changes.
+/// all in whole rupees (see [roundedGstBreakup]), with a "Round off" line so
+/// the customer-facing total never changes.
+///
+/// With [combine] on, the month's sales are first packed into as few bills
+/// as possible, each with at most [maxItemsPerBill] lines — see
+/// [combineSalesIntoBills]. [separateBuyers] keeps different customers'
+/// sales on separate bills.
 Future<pw.Document> buildMonthlyBillBookPdf({
   required List<Sale> sales,
   required DateTime month,
   double gstRate = 18,
   bool showGst = true,
+  bool combine = false,
+  int maxItemsPerBill = 15,
+  bool separateBuyers = true,
 }) async {
   final pdf = pw.Document(
     theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
   );
   final logo = await loadShopLogo();
 
-  final ordered = sales.where((s) => !s.isMock).toList()
+  final realSales = sales.where((s) => !s.isMock).toList()
     ..sort((a, b) {
       final byInvoice = a.invoiceNumber.compareTo(b.invoiceNumber);
       return byInvoice != 0 ? byInvoice : a.createdAt.compareTo(b.createdAt);
     });
+  final ordered = combine
+      ? combineSalesIntoBills(realSales,
+          maxItems: maxItemsPerBill, separateBuyers: separateBuyers)
+      : realSales.map(BookBill.fromSale).toList();
 
-  double taxable(double total) =>
-      showGst && gstRate > 0 ? total / (1 + gstRate / 100) : total;
-  double halfGst(double total) =>
-      showGst && gstRate > 0 ? (total - taxable(total)) / 2 : 0;
+  final withGst = showGst && gstRate > 0;
+  final breakups = {
+    for (final b in ordered)
+      b: withGst ? roundedGstBreakup(b.items, b.totalAmount, gstRate) : null,
+  };
 
   final halfRate = gstRate / 2;
   final halfRateLabel = halfRate == halfRate.roundToDouble()
@@ -57,9 +72,9 @@ Future<pw.Document> buildMonthlyBillBookPdf({
   final monthLabel = DateFormat('MMMM yyyy').format(month);
   final grandTotal = ordered.fold<double>(0, (s, x) => s + x.totalAmount);
   final grandTaxable =
-      ordered.fold<double>(0, (s, x) => s + taxable(x.totalAmount));
+      breakups.values.fold<double>(0, (s, g) => s + (g?.taxable ?? 0));
   final grandGst =
-      ordered.fold<double>(0, (s, x) => s + halfGst(x.totalAmount) * 2);
+      breakups.values.fold<double>(0, (s, g) => s + (g?.halfGst ?? 0) * 2);
 
   pw.Widget boxed(pw.Widget child) => pw.Container(
         width: double.infinity,
@@ -73,9 +88,8 @@ Future<pw.Document> buildMonthlyBillBookPdf({
   // its own, and each bordered box stays small enough to never be silently
   // dropped for not fitting a page — the same constraint the A4 single-bill
   // layout works around.
-  List<pw.Widget> billChildren(Sale sale) {
-    final t = taxable(sale.totalAmount);
-    final half = halfGst(sale.totalAmount);
+  List<pw.Widget> billChildren(BookBill sale) {
+    final gst = breakups[sale];
     final due = sale.amountDue;
 
     return [
@@ -108,21 +122,27 @@ Future<pw.Document> buildMonthlyBillBookPdf({
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text('Bill No.  ${sale.invoiceNumber}',
+                pw.Text('Bill No.  ${sale.number}',
                     style: pw.TextStyle(
                         fontSize: 11, fontWeight: pw.FontWeight.bold)),
                 pw.Text(
-                    'Date  ${DateFormat('dd/MM/yyyy').format(sale.createdAt)}',
+                    'Date  ${DateFormat('dd/MM/yyyy').format(sale.date)}',
                     style: const pw.TextStyle(fontSize: 9)),
-                pw.Text('Payment  ${sale.paymentMethod.label}',
+                pw.Text('Payment  ${sale.paymentLabel}',
                     style: const pw.TextStyle(fontSize: 9)),
+                if (sale.isCombined)
+                  pw.Text(
+                      'Covers sales '
+                      '${sale.sourceInvoices.map((n) => '#$n').join(', ')}',
+                      style: const pw.TextStyle(
+                          fontSize: 7, color: PdfColors.grey700)),
               ],
             ),
           ),
         ],
       )),
 
-      if (_hasBuyer(sale))
+      if (sale.hasBuyer)
         boxed(pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
@@ -163,18 +183,21 @@ Future<pw.Document> buildMonthlyBillBookPdf({
               _cell('Amount', bold: true),
             ],
           ),
-          ...sale.items.map((it) {
-            final rate = showGst ? taxable(it.salePrice) : it.salePrice;
-            final amount = rate * it.quantity;
-            final qtyLabel =
-                it.isPerFoot ? '${it.quantity} ft' : '${it.quantity}';
-            return pw.TableRow(children: [
-              _cell('${it.productName} (${it.productSize})'),
-              _cell(qtyLabel),
-              _cell(rate.toStringAsFixed(2)),
-              _cell(amount.toStringAsFixed(2)),
-            ]);
-          }),
+          for (var i = 0; i < sale.items.length; i++)
+            () {
+              final it = sale.items[i];
+              final line = gst?.lines[i];
+              final rate = line?.rate ?? it.salePrice;
+              final amount = line?.amount ?? it.total;
+              final qtyLabel =
+                  it.isPerFoot ? '${it.quantity} ft' : '${it.quantity}';
+              return pw.TableRow(children: [
+                _cell('${it.productName} (${it.productSize})'),
+                _cell(qtyLabel),
+                _cell(_money(rate)),
+                _cell(amount.toStringAsFixed(2)),
+              ]);
+            }(),
         ],
       ),
 
@@ -182,10 +205,12 @@ Future<pw.Document> buildMonthlyBillBookPdf({
       boxed(pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.end,
         children: [
-          if (showGst) ...[
-            _amountRow('Taxable Value', t),
-            _amountRow('CGST @ $halfRateLabel%', half),
-            _amountRow('SGST @ $halfRateLabel%', half),
+          if (gst != null) ...[
+            _amountRow('Taxable Value', gst.taxable),
+            _amountRow('CGST @ $halfRateLabel%', gst.halfGst),
+            _amountRow('SGST @ $halfRateLabel%', gst.halfGst),
+            if (gst.roundOff.abs() >= 0.005)
+              _amountRow('Round off', gst.roundOff, signed: true),
             pw.SizedBox(height: 2),
           ],
           pw.Container(
@@ -208,7 +233,7 @@ Future<pw.Document> buildMonthlyBillBookPdf({
               ],
             ),
           ),
-          if (sale.isCredit && due > 0)
+          if (due > 0.005)
             pw.Text('Amount Due: INR ${due.toStringAsFixed(2)}',
                 style: pw.TextStyle(
                     fontSize: 9,
@@ -273,9 +298,12 @@ Future<pw.Document> buildMonthlyBillBookPdf({
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             _summaryRow('Bills in month', '${ordered.length}'),
+            if (combine)
+              _summaryRow('Combined from',
+                  '${realSales.length} sales (max $maxItemsPerBill items per bill)'),
             if (ordered.isNotEmpty)
               _summaryRow('Bill no. range',
-                  '${ordered.first.invoiceNumber} to ${ordered.last.invoiceNumber}'),
+                  '${ordered.first.number} to ${ordered.last.number}'),
             if (showGst) ...[
               _summaryRow('Total taxable value',
                   'INR ${grandTaxable.toStringAsFixed(2)}'),
@@ -299,10 +327,55 @@ Future<pw.Document> buildMonthlyBillBookPdf({
   return pdf;
 }
 
-bool _hasBuyer(Sale s) =>
-    (s.buyerName?.isNotEmpty ?? false) ||
-    (s.buyerPhone?.isNotEmpty ?? false) ||
-    (s.buyerAddress?.isNotEmpty ?? false);
+/// One bill line with its GST-exclusive rate and amount, in whole rupees.
+class GstLine {
+  final double rate;
+  final double amount;
+  const GstLine(this.rate, this.amount);
+}
+
+/// A bill's GST split, rounded the way it is written into the bill book:
+/// whole-rupee rates, line amounts, taxable value and CGST/SGST, plus the
+/// [roundOff] that brings taxable + GST back to the actual bill total.
+class GstBreakup {
+  final List<GstLine> lines;
+  final double taxable;
+  final double halfGst; // CGST, and equally SGST
+  final double roundOff;
+  const GstBreakup(this.lines, this.taxable, this.halfGst, this.roundOff);
+}
+
+/// Splits a GST-inclusive bill of [items] totalling [total] at [gstRate]%.
+///
+/// Each line's rate is rounded to the whole rupee. On a cheap item sold in
+/// bulk that could throw the line off by rupees (₹2 screws: 1.69 → 2, ×100
+/// = ₹31 too much), so a line whose rounding would move its amount by more
+/// than ₹1 keeps its rate in paise and rounds only the amount.
+GstBreakup roundedGstBreakup(
+    List<SaleItem> items, double total, double gstRate) {
+  final factor = 1 + gstRate / 100;
+  final lines = <GstLine>[];
+  for (final it in items) {
+    final exact = it.salePrice / factor;
+    final whole = exact.roundToDouble();
+    if ((whole - exact).abs() * it.quantity <= 1) {
+      lines.add(GstLine(whole, whole * it.quantity));
+    } else {
+      final paise = (exact * 100).roundToDouble() / 100;
+      lines.add(GstLine(paise, (paise * it.quantity).roundToDouble()));
+    }
+  }
+  final taxable = lines.fold<double>(0, (s, l) => s + l.amount);
+  final half = (taxable * gstRate / 200).roundToDouble();
+  final roundOff =
+      ((total - taxable - 2 * half) * 100).roundToDouble() / 100;
+  return GstBreakup(lines, taxable, half, roundOff);
+}
+
+/// Whole rupees without decimals, anything else to the paisa.
+String _money(double v) => v == v.roundToDouble()
+    ? v.toStringAsFixed(0)
+    : v.toStringAsFixed(2);
 
 pw.Widget _cell(String text, {bool bold = false}) => pw.Padding(
       padding: const pw.EdgeInsets.all(2),
@@ -315,7 +388,8 @@ pw.Widget _cell(String text, {bool bold = false}) => pw.Padding(
       ),
     );
 
-pw.Widget _amountRow(String label, double amount) => pw.Padding(
+pw.Widget _amountRow(String label, double amount, {bool signed = false}) =>
+    pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 1),
       child: pw.Row(
         mainAxisSize: pw.MainAxisSize.min,
@@ -329,7 +403,9 @@ pw.Widget _amountRow(String label, double amount) => pw.Padding(
           pw.SizedBox(width: 10),
           pw.SizedBox(
             width: 90,
-            child: pw.Text('INR ${amount.toStringAsFixed(2)}',
+            child: pw.Text(
+                'INR ${signed && amount > 0 ? '+' : ''}'
+                '${amount.toStringAsFixed(2)}',
                 textAlign: pw.TextAlign.right,
                 style: const pw.TextStyle(fontSize: 9)),
           ),

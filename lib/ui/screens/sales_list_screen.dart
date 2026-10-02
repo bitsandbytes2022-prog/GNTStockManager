@@ -1255,6 +1255,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
             month: start,
             showGst: config.showGst,
             gstRate: config.gstRate,
+            combine: config.combine,
+            maxItemsPerBill: config.maxItemsPerBill,
+            separateBuyers: config.separateBuyers,
           );
           return doc.save();
         },
@@ -3129,11 +3132,17 @@ class _BillBookConfig {
   final DateTime month; // first day of the chosen month
   final bool showGst;
   final double gstRate;
+  final bool combine;
+  final int maxItemsPerBill;
+  final bool separateBuyers;
 
   const _BillBookConfig({
     required this.month,
     required this.showGst,
     required this.gstRate,
+    required this.combine,
+    required this.maxItemsPerBill,
+    required this.separateBuyers,
   });
 }
 
@@ -3150,6 +3159,10 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
   bool _showGst = true;
   final TextEditingController _rateController =
       TextEditingController(text: '18');
+  bool _combine = false;
+  bool _separateBuyers = true;
+  final TextEditingController _maxItemsController =
+      TextEditingController(text: '15');
 
   // Last 15 months, newest first — enough to cover a late CA submission.
   late final List<DateTime> _months = List.generate(15, (i) {
@@ -3167,6 +3180,7 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
   @override
   void dispose() {
     _rateController.dispose();
+    _maxItemsController.dispose();
     super.dispose();
   }
 
@@ -3175,6 +3189,7 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Text('Monthly bill book'),
+      scrollable: true,
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3233,6 +3248,53 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
                 ),
             ],
           ),
+          Row(
+            children: [
+              Checkbox(
+                value: _combine,
+                onChanged: (v) => setState(() => _combine = v ?? false),
+              ),
+              const Expanded(
+                child: Text('Combine sales into fewer bills',
+                    style: TextStyle(fontSize: 13)),
+              ),
+              if (_combine)
+                SizedBox(
+                  width: 64,
+                  child: TextField(
+                    controller: _maxItemsController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      helperText: 'max items',
+                      helperStyle: TextStyle(fontSize: 9),
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (_combine)
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: _separateBuyers,
+                    onChanged: (v) =>
+                        setState(() => _separateBuyers = v ?? true),
+                  ),
+                  const Expanded(
+                    child: Text(
+                        'Keep different customers on separate bills',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
       actions: [
@@ -3242,12 +3304,17 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
         ),
         FilledButton.icon(
           onPressed: () {
+            final maxItems =
+                int.tryParse(_maxItemsController.text.trim()) ?? 15;
             Navigator.pop(
               context,
               _BillBookConfig(
                 month: _month,
                 showGst: _showGst,
                 gstRate: double.tryParse(_rateController.text.trim()) ?? 18,
+                combine: _combine,
+                maxItemsPerBill: maxItems < 1 ? 15 : maxItems,
+                separateBuyers: _separateBuyers,
               ),
             );
           },

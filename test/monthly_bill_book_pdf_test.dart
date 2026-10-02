@@ -64,4 +64,35 @@ void main() {
     );
     expect((await noGst.save()).lengthInBytes, greaterThan(1000));
   });
+
+  test('builds a combined bill book', () async {
+    final sales = [
+      for (var i = 1; i <= 20; i++)
+        sale(i, DateTime(2026, 8, i), [item('Item$i'), item('Elbow', qty: i)],
+            buyer: i.isEven ? 'Ramesh Kumar' : null),
+    ];
+    final doc = await buildMonthlyBillBookPdf(
+      sales: sales,
+      month: DateTime(2026, 8, 1),
+      combine: true,
+    );
+    expect((await doc.save()).lengthInBytes, greaterThan(1000));
+  });
+
+  test('GST breakup is in whole rupees with a round-off to the total', () {
+    final g = roundedGstBreakup([item('Elbow', qty: 3, price: 100)], 300, 18);
+    expect(g.lines.single.rate, 85);
+    expect(g.lines.single.amount, 255);
+    expect(g.taxable, 255);
+    expect(g.halfGst, 23);
+    expect(g.roundOff, -1);
+  });
+
+  test('cheap bulk lines keep a paise rate instead of a big round-off', () {
+    final g = roundedGstBreakup([item('Screw', qty: 100, price: 2)], 200, 18);
+    expect(g.lines.single.rate, 1.69);
+    expect(g.lines.single.amount, 169);
+    expect(g.taxable + 2 * g.halfGst + g.roundOff, closeTo(200, 0.001));
+    expect(g.roundOff.abs(), lessThanOrEqualTo(1.5));
+  });
 }
