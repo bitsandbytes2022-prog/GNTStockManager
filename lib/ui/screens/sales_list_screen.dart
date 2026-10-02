@@ -11,6 +11,7 @@ import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
+import '../../utils/gst_rounding.dart';
 import '../../utils/monthly_bill_book_pdf.dart';
 import '../../utils/pdf_fonts.dart';
 import '../../utils/pdf_logo.dart';
@@ -70,9 +71,22 @@ class _SalesListScreenState extends State<SalesListScreen> {
   // new-sale bill preview), so use the same 18% default there is.
   static const double _gstRate = 18;
 
-  double _taxableValue(double total) => total / (1 + _gstRate / 100);
-  double _cgstAmount(double total) => (total - _taxableValue(total)) / 2;
-  double _sgstAmount(double total) => _cgstAmount(total);
+  /// The sale's GST breakup in whole rupees (see [roundedGstBreakup]),
+  /// plus each item's rounded line keyed by the item itself — a merged
+  /// sale prints its items regrouped by date, so they can't go by index.
+  ({GstBreakup gst, Map<SaleItem, GstLine> lines}) _gstFor(Sale sale) {
+    final gst = roundedGstBreakup(
+      prices: [for (final i in sale.items) i.salePrice],
+      quantities: [for (final i in sale.items) i.quantity],
+      total: sale.totalAmount,
+      gstRate: _gstRate,
+    );
+    final lines = Map<SaleItem, GstLine>.identity();
+    for (var i = 0; i < sale.items.length; i++) {
+      lines[sale.items[i]] = gst.lines[i];
+    }
+    return (gst: gst, lines: lines);
+  }
   String get _halfRateLabel {
     const half = _gstRate / 2;
     return half == half.roundToDouble()
@@ -550,6 +564,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final logoImage = await loadShopLogo();
     final due = sale.amountDue;
     final merged = _isMergedSale(sale);
+    final gst = _gstFor(sale);
     final docTitle = isEstimate ? 'Estimate' : 'Tax Invoice';
 
     pdf.addPage(
@@ -702,10 +717,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
                         style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                       ),
                     ),
-                    _itemsTable(group.value),
+                    _itemsTable(group.value, gst.lines),
                   ])
             else
-              _itemsTable(sale.items),
+              _itemsTable(sale.items, gst.lines),
 
             // Totals
             pw.Container(
@@ -715,11 +730,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
-                  _plainTotalRow('Taxable Value', _taxableValue(sale.totalAmount)),
-                  _plainTotalRow(
-                      'CGST @ $_halfRateLabel%', _cgstAmount(sale.totalAmount)),
-                  _plainTotalRow(
-                      'SGST @ $_halfRateLabel%', _sgstAmount(sale.totalAmount)),
+                  _plainTotalRow('Taxable Value', gst.gst.taxable),
+                  _plainTotalRow('CGST @ $_halfRateLabel%', gst.gst.halfGst),
+                  _plainTotalRow('SGST @ $_halfRateLabel%', gst.gst.halfGst),
+                  if (gst.gst.hasRoundOff)
+                    _plainTotalRow('Round off', gst.gst.roundOff, signed: true),
                   pw.SizedBox(height: 4),
                   pw.Container(
                     width: 260,
@@ -864,6 +879,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final logoImage = await loadShopLogo();
     final due = sale.amountDue;
     final merged = _isMergedSale(sale);
+    final gst = _gstFor(sale);
 
     pw.Widget dashedDivider() => pw.Text(
           '--------------------------------',
@@ -974,8 +990,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       pw.SizedBox(height: 2),
                     ],
                     ...group.value.map((item) {
-                      final displayPrice = _taxableValue(item.salePrice);
-                      final amount = item.quantity * displayPrice;
+                      final line = gst.lines[item]!;
                       final qtyLabel =
                           item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
                       return pw.Padding(
@@ -991,9 +1006,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
                             pw.Row(
                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                               children: [
-                                pw.Text('$qtyLabel x ${displayPrice.toStringAsFixed(2)}',
+                                pw.Text('$qtyLabel x ${formatRate(line.rate)}',
                                     style: const pw.TextStyle(fontSize: 8)),
-                                pw.Text('INR ${amount.toStringAsFixed(2)}',
+                                pw.Text('INR ${line.amount.toStringAsFixed(2)}',
                                     style: const pw.TextStyle(fontSize: 8)),
                               ],
                             ),
@@ -1010,7 +1025,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('Taxable Value', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Text('INR ${_taxableValue(sale.totalAmount).toStringAsFixed(2)}',
+                  pw.Text('INR ${gst.gst.taxable.toStringAsFixed(2)}',
                       style: const pw.TextStyle(fontSize: 8)),
                 ],
               ),
@@ -1018,7 +1033,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('CGST @ $_halfRateLabel%', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Text('INR ${_cgstAmount(sale.totalAmount).toStringAsFixed(2)}',
+                  pw.Text('INR ${gst.gst.halfGst.toStringAsFixed(2)}',
                       style: const pw.TextStyle(fontSize: 8)),
                 ],
               ),
@@ -1026,10 +1041,19 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('SGST @ $_halfRateLabel%', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Text('INR ${_sgstAmount(sale.totalAmount).toStringAsFixed(2)}',
+                  pw.Text('INR ${gst.gst.halfGst.toStringAsFixed(2)}',
                       style: const pw.TextStyle(fontSize: 8)),
                 ],
               ),
+              if (gst.gst.hasRoundOff)
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Round off', style: const pw.TextStyle(fontSize: 8)),
+                    pw.Text('INR ${formatRoundOff(gst.gst.roundOff)}',
+                        style: const pw.TextStyle(fontSize: 8)),
+                  ],
+                ),
               pw.SizedBox(height: 4),
 
               pw.Row(
@@ -1105,7 +1129,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     );
   }
 
-  pw.Widget _plainTotalRow(String label, double amount) {
+  pw.Widget _plainTotalRow(String label, double amount, {bool signed = false}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 2),
       child: pw.Row(
@@ -1119,7 +1143,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
           pw.SizedBox(width: 12),
           pw.SizedBox(
             width: 90,
-            child: pw.Text('INR ${amount.toStringAsFixed(2)}',
+            child: pw.Text(
+                'INR ${signed ? formatRoundOff(amount) : amount.toStringAsFixed(2)}',
                 textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 10)),
           ),
         ],
@@ -1130,7 +1155,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
   /// The standard Description/Qty/Rate/Amount items table used on the A4
   /// invoice, built once per date batch for a merged sale or once for the
   /// whole sale otherwise.
-  pw.Widget _itemsTable(List<SaleItem> items) {
+  pw.Widget _itemsTable(List<SaleItem> items, Map<SaleItem, GstLine> gstLines) {
     return pw.Table(
       border: pw.TableBorder(
         top: const pw.BorderSide(color: PdfColors.black, width: 0.8),
@@ -1159,15 +1184,14 @@ class _SalesListScreenState extends State<SalesListScreen> {
         ...items.map((item) {
           // Item rows show the tax-exclusive rate/amount, so the Amount
           // column sums to the Taxable Value shown below.
-          final displayPrice = _taxableValue(item.salePrice);
-          final amount = item.quantity * displayPrice;
+          final line = gstLines[item]!;
           return pw.TableRow(
             children: [
               _buildPdfTableCell('${item.productName} (${item.productSize})'),
               _buildPdfTableCell(
                   item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
-              _buildPdfTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
-              _buildPdfTableCell('INR ${amount.toStringAsFixed(2)}'),
+              _buildPdfTableCell('INR ${formatRate(line.rate)}'),
+              _buildPdfTableCell('INR ${line.amount.toStringAsFixed(2)}'),
             ],
           );
         }),

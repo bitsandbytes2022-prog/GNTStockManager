@@ -14,6 +14,7 @@ import '../../services/invoice_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
+import '../../utils/gst_rounding.dart';
 import '../../utils/pdf_fonts.dart';
 import '../../utils/thermal_print.dart';
 import '../widgets/thermal_offset_dialog.dart';
@@ -140,20 +141,31 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   // (same assumption used elsewhere in the app — see GstCalculatorScreen and
   // add_product_screen's bill-price math), so the customer's total never
   // changes: this just reverse-calculates the taxable value + CGST/SGST
-  // split baked into that total.
+  // split baked into that total, in whole rupees with a round-off line.
   bool _gstEnabled = true;
   final TextEditingController _gstRateController =
       TextEditingController(text: '18');
 
   double get _gstRate => double.tryParse(_gstRateController.text) ?? 0;
 
-  double _taxableValue(double total) =>
-      _gstEnabled && _gstRate > 0 ? total / (1 + _gstRate / 100) : total;
+  /// The rounded GST breakup of this bill, or null when GST isn't shown.
+  /// Its lines line up index-for-index with [BillPreviewScreen.lineItems].
+  GstBreakup? get _gst => _gstEnabled && _gstRate > 0
+      ? roundedGstBreakup(
+          prices: [for (final l in widget.lineItems) l.price],
+          quantities: [for (final l in widget.lineItems) l.quantity],
+          total: _calculateSubtotal(),
+          gstRate: _gstRate,
+        )
+      : null;
 
-  double _cgstAmount(double total) =>
-      _gstEnabled && _gstRate > 0 ? (total - _taxableValue(total)) / 2 : 0;
-
-  double _sgstAmount(double total) => _cgstAmount(total);
+  /// GST-exclusive rate and amount for line [index] (plain price × qty
+  /// when GST is off).
+  (double, double) _lineRateAmount(GstBreakup? gst, int index) {
+    final line = widget.lineItems[index];
+    final g = gst?.lines[index];
+    return g != null ? (g.rate, g.amount) : (line.price, line.price * line.quantity);
+  }
 
   /// The document heading, shown on-screen and on every printed format.
   /// An estimate is always titled "Estimate" regardless of the GST toggle —
@@ -440,10 +452,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         maxPages: 50,
         build: (context) {
           final subtotal = _calculateSubtotal();
-          final showGst = _gstEnabled && _gstRate > 0;
-          final taxable = _taxableValue(subtotal);
-          final cgst = _cgstAmount(subtotal);
-          final sgst = _sgstAmount(subtotal);
+          final gst = _gst;
+          final showGst = gst != null;
           final due = subtotal - widget.initialPayment;
 
           return [
@@ -607,21 +617,20 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     _buildTableCell('Amount', bold: true),
                   ],
                 ),
-                ...widget.lineItems.map((line) {
+                ...widget.lineItems.asMap().entries.map((e) {
+                  final line = e.value;
                   final product = line.product;
                   final qty = line.quantity;
-                  final price = line.price;
                   // Item rows show the tax-exclusive rate/amount, so the
                   // Amount column sums to the Taxable Value shown below.
-                  final displayPrice = showGst ? _taxableValue(price) : price;
-                  final amount = qty * displayPrice;
+                  final (displayPrice, amount) = _lineRateAmount(gst, e.key);
                   final isPerFoot = line.isPerFoot;
 
                   return pw.TableRow(
                     children: [
                       _buildTableCell('${line.effectiveName} (${product.size})'),
                       _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
-                      _buildTableCell('INR ${displayPrice.toStringAsFixed(2)}'),
+                      _buildTableCell('INR ${formatRate(displayPrice)}'),
                       _buildTableCell('INR ${amount.toStringAsFixed(2)}'),
                     ],
                   );
@@ -637,10 +646,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
-                  if (showGst) ...[
-                    _plainTotalRow('Taxable Value', taxable),
-                    _plainTotalRow('CGST @ $_halfRateLabel%', cgst),
-                    _plainTotalRow('SGST @ $_halfRateLabel%', sgst),
+                  if (gst != null) ...[
+                    _plainTotalRow('Taxable Value', gst.taxable),
+                    _plainTotalRow('CGST @ $_halfRateLabel%', gst.halfGst),
+                    _plainTotalRow('SGST @ $_halfRateLabel%', gst.halfGst),
+                    if (gst.hasRoundOff)
+                      _plainTotalRow('Round off', gst.roundOff, signed: true),
                     pw.SizedBox(height: 4),
                   ],
                   pw.Container(
@@ -780,7 +791,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   /// pages — see the pageFormat selection in _generatePdf.
   List<pw.Widget> _buildThermalContentChildren(pw.ImageProvider? logoImage) {
     final subtotal = _calculateSubtotal();
-    final showGst = _gstEnabled && _gstRate > 0;
+    final gst = _gst;
     pw.Widget dashedDivider() => pw.Text(
           '--------------------------------',
           style: const pw.TextStyle(fontSize: 8),
@@ -871,15 +882,14 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         ],
 
         // Items
-        ...widget.lineItems.map((line) {
+        ...widget.lineItems.asMap().entries.map((e) {
+          final line = e.value;
           final product = line.product;
           final qty = line.quantity;
-          final price = line.price;
           // Item rows show the tax-exclusive rate/amount, so the sum
           // matches the Taxable Value shown below; GST is added once at
           // the end rather than embedded in each line.
-          final displayPrice = showGst ? _taxableValue(price) : price;
-          final amount = qty * displayPrice;
+          final (displayPrice, amount) = _lineRateAmount(gst, e.key);
           final isPerFoot = line.isPerFoot;
           final qtyLabel = isPerFoot ? '$qty ft' : qty.toString();
 
@@ -896,7 +906,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      '$qtyLabel x ${displayPrice.toStringAsFixed(2)}',
+                      '$qtyLabel x ${formatRate(displayPrice)}',
                       style: const pw.TextStyle(fontSize: 8),
                     ),
                     pw.Text(
@@ -913,12 +923,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         dashedDivider(),
         pw.SizedBox(height: 4),
 
-        if (_gstEnabled && _gstRate > 0) ...[
+        if (gst != null) ...[
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text('Taxable Value', style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('INR ${_taxableValue(subtotal).toStringAsFixed(2)}',
+              pw.Text('INR ${gst.taxable.toStringAsFixed(2)}',
                   style: const pw.TextStyle(fontSize: 8)),
             ],
           ),
@@ -927,7 +937,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             children: [
               pw.Text('CGST @ $_halfRateLabel%',
                   style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('INR ${_cgstAmount(subtotal).toStringAsFixed(2)}',
+              pw.Text('INR ${gst.halfGst.toStringAsFixed(2)}',
                   style: const pw.TextStyle(fontSize: 8)),
             ],
           ),
@@ -936,10 +946,19 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             children: [
               pw.Text('SGST @ $_halfRateLabel%',
                   style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('INR ${_sgstAmount(subtotal).toStringAsFixed(2)}',
+              pw.Text('INR ${gst.halfGst.toStringAsFixed(2)}',
                   style: const pw.TextStyle(fontSize: 8)),
             ],
           ),
+          if (gst.hasRoundOff)
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Round off', style: const pw.TextStyle(fontSize: 8)),
+                pw.Text('INR ${formatRoundOff(gst.roundOff)}',
+                    style: const pw.TextStyle(fontSize: 8)),
+              ],
+            ),
           pw.SizedBox(height: 4),
         ],
 
@@ -1024,7 +1043,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
   }
 
-  pw.Widget _plainTotalRow(String label, double amount) {
+  pw.Widget _plainTotalRow(String label, double amount, {bool signed = false}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 2),
       child: pw.Row(
@@ -1039,7 +1058,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           pw.SizedBox(width: 12),
           pw.SizedBox(
             width: 90,
-            child: pw.Text('INR ${amount.toStringAsFixed(2)}',
+            child: pw.Text(
+                'INR ${signed ? formatRoundOff(amount) : amount.toStringAsFixed(2)}',
                 textAlign: pw.TextAlign.right,
                 style: const pw.TextStyle(fontSize: 10)),
           ),
@@ -1092,6 +1112,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   }
 
   Widget _buildBillContent(double subtotal, double profit) {
+    final gst = _gst;
     return Container(
       constraints: const BoxConstraints(maxWidth: 600),
       decoration: BoxDecoration(
@@ -1128,7 +1149,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                ...widget.lineItems.map(_buildItemRow),
+                for (var i = 0; i < widget.lineItems.length; i++)
+                  _buildItemRow(i, gst),
               ],
             ),
           ),
@@ -1138,7 +1160,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           _buildGstControl(),
 
           // Totals
-          _buildTotals(subtotal, profit),
+          _buildTotals(subtotal, profit, gst),
 
           // Payment method — not applicable to an estimate, since no
           // payment has actually been taken yet.
@@ -1332,13 +1354,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
   }
 
-  Widget _buildItemRow(BillLineItem line) {
+  Widget _buildItemRow(int index, GstBreakup? gst) {
+    final line = widget.lineItems[index];
     final product = line.product;
     final qty = line.quantity;
-    final price = line.price;
-    final showGst = _gstEnabled && _gstRate > 0;
-    final displayPrice = showGst ? _taxableValue(price) : price;
-    final amount = qty * displayPrice;
+    final (displayPrice, amount) = _lineRateAmount(gst, index);
     final isPerFoot = line.isPerFoot;
 
     return Container(
@@ -1383,7 +1403,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           Expanded(
             flex: 2,
             child: Text(
-              'INR ${displayPrice.toStringAsFixed(2)}',
+              'INR ${formatRate(displayPrice)}',
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 13),
             ),
@@ -1450,11 +1470,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
     );
   }
 
-  Widget _buildTotals(double subtotal, double profit) {
-    final showGst = _gstEnabled && _gstRate > 0;
-    final taxable = _taxableValue(subtotal);
-    final cgst = _cgstAmount(subtotal);
-    final sgst = _sgstAmount(subtotal);
+  Widget _buildTotals(double subtotal, double profit, GstBreakup? gst) {
+    final showGst = gst != null;
+    final taxable = gst?.taxable ?? subtotal;
+    final cgst = gst?.halfGst ?? 0;
+    final sgst = cgst;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1493,6 +1513,18 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     style: TextStyle(fontSize: 13, color: Colors.grey[700])),
               ],
             ),
+            if (gst.hasRoundOff) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Round off:',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                  Text('INR ${formatRoundOff(gst.roundOff)}',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                ],
+              ),
+            ],
           ],
           const Divider(height: 20),
           Row(

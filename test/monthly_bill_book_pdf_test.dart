@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:inventory_manager/models/sale_model.dart';
+import 'package:inventory_manager/utils/gst_rounding.dart';
 import 'package:inventory_manager/utils/monthly_bill_book_pdf.dart';
 
 void main() {
@@ -80,7 +81,8 @@ void main() {
   });
 
   test('GST breakup is in whole rupees with a round-off to the total', () {
-    final g = roundedGstBreakup([item('Elbow', qty: 3, price: 100)], 300, 18);
+    final g = roundedGstBreakup(
+        prices: [100], quantities: [3], total: 300, gstRate: 18);
     expect(g.lines.single.rate, 85);
     expect(g.lines.single.amount, 255);
     expect(g.taxable, 255);
@@ -89,7 +91,8 @@ void main() {
   });
 
   test('cheap bulk lines keep a paise rate instead of a big round-off', () {
-    final g = roundedGstBreakup([item('Screw', qty: 100, price: 2)], 200, 18);
+    final g = roundedGstBreakup(
+        prices: [2], quantities: [100], total: 200, gstRate: 18);
     expect(g.lines.single.rate, 1.69);
     expect(g.lines.single.amount, 169);
     expect(g.taxable + 2 * g.halfGst + g.roundOff, closeTo(200, 0.001));
