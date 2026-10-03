@@ -643,22 +643,25 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               ),
               columnWidths: _hasDiscount
                   ? const {
-                      0: pw.FlexColumnWidth(3),
-                      1: pw.FlexColumnWidth(1),
-                      2: pw.FlexColumnWidth(1.3),
+                      0: pw.FlexColumnWidth(0.6),
+                      1: pw.FlexColumnWidth(3),
+                      2: pw.FlexColumnWidth(1),
                       3: pw.FlexColumnWidth(1.3),
-                      4: pw.FlexColumnWidth(1.5),
+                      4: pw.FlexColumnWidth(1.3),
+                      5: pw.FlexColumnWidth(1.5),
                     }
                   : const {
-                      0: pw.FlexColumnWidth(3),
-                      1: pw.FlexColumnWidth(1),
-                      2: pw.FlexColumnWidth(1.5),
+                      0: pw.FlexColumnWidth(0.6),
+                      1: pw.FlexColumnWidth(3),
+                      2: pw.FlexColumnWidth(1),
                       3: pw.FlexColumnWidth(1.5),
+                      4: pw.FlexColumnWidth(1.5),
                     },
               children: [
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                   children: [
+                    _buildTableCell('S.No', bold: true),
                     _buildTableCell('Description of Goods', bold: true),
                     _buildTableCell('Qty', bold: true),
                     _buildTableCell(showGst ? 'Rate (Excl. GST)' : 'Rate', bold: true),
@@ -678,6 +681,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
                   return pw.TableRow(
                     children: [
+                      _buildTableCell('${e.key + 1}'),
                       _buildTableCell('${line.effectiveName} (${product.size})'),
                       _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
                       _buildTableCell(
@@ -962,7 +966,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  '${line.effectiveName} (${product.size})',
+                  '${e.key + 1}. ${line.effectiveName} (${product.size})',
                   style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.Row(
@@ -1448,7 +1452,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  line.effectiveName,
+                  '${index + 1}. ${line.effectiveName}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 14,

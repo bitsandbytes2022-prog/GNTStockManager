@@ -88,6 +88,17 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return (gst: gst, lines: lines);
   }
 
+  /// Each item's printed serial number (1-based), in printed order — a
+  /// merged sale prints its items grouped by date, so numbering follows
+  /// that order and carries on across the groups.
+  Map<SaleItem, int> _serialsFor(Sale sale) {
+    final serials = Map<SaleItem, int>.identity();
+    for (final item in _groupItemsByDate(sale).expand((g) => g.value)) {
+      serials[item] = serials.length + 1;
+    }
+    return serials;
+  }
+
   /// A discounted item's original rate, GST-exclusive and rounded like the
   /// rate charged; null when the item wasn't discounted.
   double? _originalRateOf(SaleItem item) => item.isDiscounted
@@ -580,6 +591,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final merged = _isMergedSale(sale);
     final gst = _gstFor(sale);
     final discount = _discountOf(sale);
+    final serials = _serialsFor(sale);
     final docTitle = isEstimate ? 'Estimate' : 'Tax Invoice';
 
     pdf.addPage(
@@ -732,10 +744,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
                         style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                       ),
                     ),
-                    _itemsTable(group.value, gst.lines, withDiscount: discount > 0),
+                    _itemsTable(group.value, gst.lines, serials, withDiscount: discount > 0),
                   ])
             else
-              _itemsTable(sale.items, gst.lines, withDiscount: discount > 0),
+              _itemsTable(sale.items, gst.lines, serials, withDiscount: discount > 0),
 
             // Totals
             pw.Container(
@@ -904,6 +916,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final merged = _isMergedSale(sale);
     final gst = _gstFor(sale);
     final discount = _discountOf(sale);
+    final serials = _serialsFor(sale);
 
     pw.Widget dashedDivider() => pw.Text(
           '--------------------------------',
@@ -1026,7 +1039,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
                             pw.Text(
-                              '${item.productName} (${item.productSize})',
+                              '${serials[item]}. ${item.productName} (${item.productSize})',
                               style:
                                   pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
                             ),
@@ -1191,6 +1204,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
   /// invoice, built once per date batch for a merged sale or once for the
   /// whole sale otherwise.
   pw.Widget _itemsTable(List<SaleItem> items, Map<SaleItem, GstLine> gstLines,
+      Map<SaleItem, int> serials,
       {bool withDiscount = false}) {
     return pw.Table(
       border: pw.TableBorder(
@@ -1203,22 +1217,25 @@ class _SalesListScreenState extends State<SalesListScreen> {
       ),
       columnWidths: withDiscount
           ? const {
-              0: pw.FlexColumnWidth(3),
-              1: pw.FlexColumnWidth(1),
-              2: pw.FlexColumnWidth(1.3),
+              0: pw.FlexColumnWidth(0.6),
+              1: pw.FlexColumnWidth(3),
+              2: pw.FlexColumnWidth(1),
               3: pw.FlexColumnWidth(1.3),
-              4: pw.FlexColumnWidth(1.5),
+              4: pw.FlexColumnWidth(1.3),
+              5: pw.FlexColumnWidth(1.5),
             }
           : const {
-              0: pw.FlexColumnWidth(3),
-              1: pw.FlexColumnWidth(1),
-              2: pw.FlexColumnWidth(1.5),
+              0: pw.FlexColumnWidth(0.6),
+              1: pw.FlexColumnWidth(3),
+              2: pw.FlexColumnWidth(1),
               3: pw.FlexColumnWidth(1.5),
+              4: pw.FlexColumnWidth(1.5),
             },
       children: [
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey300),
           children: [
+            _buildPdfTableCell('S.No', bold: true),
             _buildPdfTableCell('Description of Goods', bold: true),
             _buildPdfTableCell('Qty', bold: true),
             _buildPdfTableCell('Rate (Excl. GST)', bold: true),
@@ -1232,6 +1249,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
           final line = gstLines[item]!;
           return pw.TableRow(
             children: [
+              _buildPdfTableCell('${serials[item]}'),
               _buildPdfTableCell('${item.productName} (${item.productSize})'),
               _buildPdfTableCell(
                   item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
