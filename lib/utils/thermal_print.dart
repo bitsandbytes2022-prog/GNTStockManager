@@ -64,6 +64,14 @@ const double thermalOffsetLimitMm = 10;
 
 const double _verticalMarginMm = 5;
 
+// Bottom margin of each chunk. The browser / printer driver can crop the
+// last few mm of a page (a paper size slightly shorter than the chunk, or
+// the printer's unprintable edge), which silently cut off the last line on
+// a page — e.g. an item's qty x rate line under its name. Every chunk is
+// a fixed height anyway, so keeping well clear of the edge only moves a
+// little more content onto the next chunk.
+const double _bottomSafetyMarginMm = 20;
+
 // A long thermal receipt is built as several fixed-height chunks rather than
 // one arbitrarily tall auto-sized page — a single extremely tall page gets
 // silently clipped by the browser's print pipeline, while a continuous-roll
@@ -87,6 +95,6 @@ PdfPageFormat thermalPageFormat(ThermalRollSize size, {double offsetMm = 0}) {
     marginLeft: (side + offset) * PdfPageFormat.mm,
     marginRight: (side - offset) * PdfPageFormat.mm,
     marginTop: _verticalMarginMm * PdfPageFormat.mm,
-    marginBottom: _verticalMarginMm * PdfPageFormat.mm,
+    marginBottom: _bottomSafetyMarginMm * PdfPageFormat.mm,
   );
 }
