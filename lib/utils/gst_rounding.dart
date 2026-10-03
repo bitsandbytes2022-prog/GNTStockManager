@@ -35,23 +35,26 @@ GstBreakup roundedGstBreakup({
   required double gstRate,
 }) {
   assert(prices.length == quantities.length);
-  final factor = 1 + gstRate / 100;
-  final lines = <GstLine>[];
-  for (var i = 0; i < prices.length; i++) {
-    final qty = quantities[i];
-    final exact = prices[i] / factor;
-    final whole = exact.roundToDouble();
-    if ((whole - exact).abs() * qty <= 1) {
-      lines.add(GstLine(whole, whole * qty));
-    } else {
-      final paise = (exact * 100).roundToDouble() / 100;
-      lines.add(GstLine(paise, (paise * qty).roundToDouble()));
-    }
-  }
+  final lines = [
+    for (var i = 0; i < prices.length; i++)
+      roundedGstLine(prices[i], quantities[i], gstRate),
+  ];
   final taxable = lines.fold<double>(0, (s, l) => s + l.amount);
   final half = (taxable * gstRate / 200).roundToDouble();
   final roundOff = ((total - taxable - 2 * half) * 100).roundToDouble() / 100;
   return GstBreakup(lines, taxable, half, roundOff);
+}
+
+/// One line of [roundedGstBreakup]: the GST-exclusive rate for a
+/// GST-inclusive [price], and its amount over [qty], rounded as described
+/// there. Also used on its own to print a discounted line's original rate
+/// the same way as the rate charged.
+GstLine roundedGstLine(double price, int qty, double gstRate) {
+  final exact = price / (1 + gstRate / 100);
+  final whole = exact.roundToDouble();
+  if ((whole - exact).abs() * qty <= 1) return GstLine(whole, whole * qty);
+  final paise = (exact * 100).roundToDouble() / 100;
+  return GstLine(paise, (paise * qty).roundToDouble());
 }
 
 /// Whole rupees without decimals, anything else to the paisa.

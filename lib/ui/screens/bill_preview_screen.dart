@@ -44,10 +44,15 @@ class BillLineItem {
   /// Bill/Invoice, so the product's catalog name stays untouched.
   final String? displayName;
 
+  /// The rate before the sale's discount was spread over this line; null
+  /// when it wasn't discounted. [price] is the rate actually charged.
+  final double? originalPrice;
+
   const BillLineItem({
     required this.product,
     required this.quantity,
     required this.price,
+    this.originalPrice,
     this.isPerFoot = false,
     required this.unitCost,
     required this.stockUnits,
@@ -55,6 +60,9 @@ class BillLineItem {
   });
 
   String get effectiveName => displayName ?? product.name;
+
+  bool get isDiscounted =>
+      originalPrice != null && originalPrice! - price >= 0.005;
 }
 
 class BillPreviewScreen extends StatefulWidget {
@@ -100,6 +108,10 @@ class BillPreviewScreen extends StatefulWidget {
   /// touch real records.
   final bool isEstimate;
 
+  /// The flat discount (₹) entered on the cart, recorded on the sale
+  /// (see [Sale.discountAmount]); it's already in the line prices.
+  final double? discountAmount;
+
   const BillPreviewScreen({
     super.key,
     required this.lineItems,
@@ -115,6 +127,7 @@ class BillPreviewScreen extends StatefulWidget {
     this.readOnly = false,
     this.existingInvoiceNumber,
     this.isEstimate = false,
+    this.discountAmount,
   });
 
   @override
@@ -158,6 +171,27 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           gstRate: _gstRate,
         )
       : null;
+
+  /// The original (pre-discount) rate of line [index], shown the same way
+  /// as its charged rate — GST-exclusive and rounded when GST is on — or
+  /// null when that line wasn't discounted.
+  double? _originalRate(GstBreakup? gst, int index) {
+    final line = widget.lineItems[index];
+    if (!line.isDiscounted) return null;
+    return gst != null
+        ? roundedGstLine(line.originalPrice!, line.quantity, _gstRate).rate
+        : line.originalPrice;
+  }
+
+  bool get _hasDiscount => widget.lineItems.any((l) => l.isDiscounted);
+
+  /// Total discount given on the bill (GST-inclusive, as the customer sees
+  /// it): original minus charged rate, over every discounted line.
+  double get _totalDiscount => widget.lineItems.fold(
+      0.0,
+      (s, l) => l.isDiscounted
+          ? s + (l.originalPrice! - l.price) * l.quantity
+          : s);
 
   /// GST-exclusive rate and amount for line [index] (plain price × qty
   /// when GST is off).
@@ -255,6 +289,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           productSize: line.product.size,
           quantity: line.quantity,
           salePrice: line.price,
+          originalPrice: line.isDiscounted ? line.originalPrice : null,
           purchasePrice: line.unitCost,
           isPerFoot: line.isPerFoot,
           stockUnits: line.stockUnits,
@@ -279,6 +314,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         amountPaid: paymentMethodEnum == PaymentMethod.credit
             ? widget.initialPayment
             : null,
+        discountAmount: widget.discountAmount,
       );
 
       // Save to Firebase
@@ -601,12 +637,20 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                 verticalInside:
                     const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
               ),
-              columnWidths: const {
-                0: pw.FlexColumnWidth(3),
-                1: pw.FlexColumnWidth(1),
-                2: pw.FlexColumnWidth(1.5),
-                3: pw.FlexColumnWidth(1.5),
-              },
+              columnWidths: _hasDiscount
+                  ? const {
+                      0: pw.FlexColumnWidth(3),
+                      1: pw.FlexColumnWidth(1),
+                      2: pw.FlexColumnWidth(1.3),
+                      3: pw.FlexColumnWidth(1.3),
+                      4: pw.FlexColumnWidth(1.5),
+                    }
+                  : const {
+                      0: pw.FlexColumnWidth(3),
+                      1: pw.FlexColumnWidth(1),
+                      2: pw.FlexColumnWidth(1.5),
+                      3: pw.FlexColumnWidth(1.5),
+                    },
               children: [
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey300),
@@ -614,6 +658,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     _buildTableCell('Description of Goods', bold: true),
                     _buildTableCell('Qty', bold: true),
                     _buildTableCell(showGst ? 'Rate (Excl. GST)' : 'Rate', bold: true),
+                    if (_hasDiscount)
+                      _buildTableCell('Disc. Rate', bold: true),
                     _buildTableCell('Amount', bold: true),
                   ],
                 ),
@@ -630,7 +676,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     children: [
                       _buildTableCell('${line.effectiveName} (${product.size})'),
                       _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
-                      _buildTableCell('INR ${formatRate(displayPrice)}'),
+                      _buildTableCell(
+                          'INR ${formatRate(_originalRate(gst, e.key) ?? displayPrice)}'),
+                      if (_hasDiscount)
+                        _buildTableCell('INR ${formatRate(displayPrice)}'),
                       _buildTableCell('INR ${amount.toStringAsFixed(2)}'),
                     ],
                   );
@@ -674,6 +723,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                       ],
                     ),
                   ),
+                  if (_hasDiscount) ...[
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      'Discount given: INR ${_totalDiscount.toStringAsFixed(2)} (already in the rates above)',
+                      style: const pw.TextStyle(fontSize: 9, color: PdfColors.green800),
+                    ),
+                  ],
                   if (!widget.isEstimate && widget.paymentMethod == 'Credit' && due > 0) ...[
                     pw.SizedBox(height: 4),
                     pw.Text(
@@ -893,7 +949,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           final isPerFoot = line.isPerFoot;
           final qtyLabel = isPerFoot ? '$qty ft' : qty.toString();
 
-          return pw.Padding(
+          // Inseparable: a receipt spans several pages, and a bare Column is
+          // allowed to split across a page break — leaving an item's name on
+          // one page and its qty × rate line on the next, under the wrong name.
+          return pw.Inseparable(child: pw.Padding(
             padding: const pw.EdgeInsets.only(bottom: 4),
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -906,7 +965,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      '$qtyLabel x ${formatRate(displayPrice)}',
+                      _originalRate(gst, e.key) != null
+                          ? '$qtyLabel x ${formatRate(displayPrice)} '
+                              '(Rate ${formatRate(_originalRate(gst, e.key)!)})'
+                          : '$qtyLabel x ${formatRate(displayPrice)}',
                       style: const pw.TextStyle(fontSize: 8),
                     ),
                     pw.Text(
@@ -917,7 +979,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                 ),
               ],
             ),
-          );
+          ));
         }),
 
         dashedDivider(),
@@ -976,6 +1038,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             ),
           ],
         ),
+        if (_hasDiscount)
+          pw.Text(
+            'Discount given: INR ${_totalDiscount.toStringAsFixed(2)}',
+            style: const pw.TextStyle(fontSize: 8),
+          ),
         if (!widget.isEstimate) ...[
           pw.SizedBox(height: 4),
           dashedDivider(),
@@ -1402,10 +1469,29 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           ),
           Expanded(
             flex: 2,
-            child: Text(
-              'INR ${formatRate(displayPrice)}',
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (_originalRate(gst, index) != null)
+                  Text(
+                    'INR ${formatRate(_originalRate(gst, index)!)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[500],
+                      decoration: TextDecoration.lineThrough,
+                    ),
+                  ),
+                Text(
+                  'INR ${formatRate(displayPrice)}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _originalRate(gst, index) != null
+                        ? Colors.green.shade800
+                        : null,
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -1547,6 +1633,18 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               ),
             ],
           ),
+          if (_hasDiscount) ...[
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Discount given:',
+                    style: TextStyle(fontSize: 13, color: Colors.green.shade800)),
+                Text('INR ${_totalDiscount.toStringAsFixed(2)}',
+                    style: TextStyle(fontSize: 13, color: Colors.green.shade800)),
+              ],
+            ),
+          ],
           // const SizedBox(height: 8),
           // Row(
           //   mainAxisAlignment: MainAxisAlignment.spaceBetween,

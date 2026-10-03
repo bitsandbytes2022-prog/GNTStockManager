@@ -87,6 +87,17 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
     return (gst: gst, lines: lines);
   }
+
+  /// A discounted item's original rate, GST-exclusive and rounded like the
+  /// rate charged; null when the item wasn't discounted.
+  double? _originalRateOf(SaleItem item) => item.isDiscounted
+      ? roundedGstLine(item.originalPrice!, item.quantity, _gstRate).rate
+      : null;
+
+  /// Total discount on [sale] as the customer sees it (GST-inclusive).
+  double _discountOf(Sale sale) => sale.items.fold(
+      0.0,
+      (s, i) => i.isDiscounted ? s + (i.originalPrice! - i.salePrice) * i.quantity : s);
   String get _halfRateLabel {
     const half = _gstRate / 2;
     return half == half.roundToDouble()
@@ -565,6 +576,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final due = sale.amountDue;
     final merged = _isMergedSale(sale);
     final gst = _gstFor(sale);
+    final discount = _discountOf(sale);
     final docTitle = isEstimate ? 'Estimate' : 'Tax Invoice';
 
     pdf.addPage(
@@ -717,10 +729,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
                         style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                       ),
                     ),
-                    _itemsTable(group.value, gst.lines),
+                    _itemsTable(group.value, gst.lines, withDiscount: discount > 0),
                   ])
             else
-              _itemsTable(sale.items, gst.lines),
+              _itemsTable(sale.items, gst.lines, withDiscount: discount > 0),
 
             // Totals
             pw.Container(
@@ -756,6 +768,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       ],
                     ),
                   ),
+                  if (discount > 0) ...[
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      'Discount given: INR ${discount.toStringAsFixed(2)} (already in the rates above)',
+                      style: const pw.TextStyle(fontSize: 9, color: PdfColors.green800),
+                    ),
+                  ],
                   if (!isEstimate && sale.isCredit && due > 0) ...[
                     pw.SizedBox(height: 4),
                     pw.Text(
@@ -880,6 +899,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final due = sale.amountDue;
     final merged = _isMergedSale(sale);
     final gst = _gstFor(sale);
+    final discount = _discountOf(sale);
 
     pw.Widget dashedDivider() => pw.Text(
           '--------------------------------',
@@ -993,7 +1013,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       final line = gst.lines[item]!;
                       final qtyLabel =
                           item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
-                      return pw.Padding(
+                      // Inseparable: a receipt spans several pages, and a bare Column is
+                      // allowed to split across a page break — leaving an item's name on
+                      // one page and its qty × rate line on the next, under the wrong name.
+                      return pw.Inseparable(child: pw.Padding(
                         padding: const pw.EdgeInsets.only(bottom: 4),
                         child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -1006,7 +1029,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
                             pw.Row(
                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                               children: [
-                                pw.Text('$qtyLabel x ${formatRate(line.rate)}',
+                                pw.Text(
+                                    _originalRateOf(item) != null
+                                        ? '$qtyLabel x ${formatRate(line.rate)} '
+                                            '(Rate ${formatRate(_originalRateOf(item)!)})'
+                                        : '$qtyLabel x ${formatRate(line.rate)}',
                                     style: const pw.TextStyle(fontSize: 8)),
                                 pw.Text('INR ${line.amount.toStringAsFixed(2)}',
                                     style: const pw.TextStyle(fontSize: 8)),
@@ -1014,7 +1041,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                             ),
                           ],
                         ),
-                      );
+                      ));
                     }),
                   ]),
 
@@ -1065,6 +1092,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
                 ],
               ),
+              if (discount > 0)
+                pw.Text('Discount given: INR ${discount.toStringAsFixed(2)}',
+                    style: const pw.TextStyle(fontSize: 8)),
               pw.SizedBox(height: 4),
               dashedDivider(),
               pw.SizedBox(height: 4),
@@ -1155,7 +1185,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
   /// The standard Description/Qty/Rate/Amount items table used on the A4
   /// invoice, built once per date batch for a merged sale or once for the
   /// whole sale otherwise.
-  pw.Widget _itemsTable(List<SaleItem> items, Map<SaleItem, GstLine> gstLines) {
+  pw.Widget _itemsTable(List<SaleItem> items, Map<SaleItem, GstLine> gstLines,
+      {bool withDiscount = false}) {
     return pw.Table(
       border: pw.TableBorder(
         top: const pw.BorderSide(color: PdfColors.black, width: 0.8),
@@ -1165,12 +1196,20 @@ class _SalesListScreenState extends State<SalesListScreen> {
         horizontalInside: const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
         verticalInside: const pw.BorderSide(color: PdfColors.grey400, width: 0.5),
       ),
-      columnWidths: const {
-        0: pw.FlexColumnWidth(3),
-        1: pw.FlexColumnWidth(1),
-        2: pw.FlexColumnWidth(1.5),
-        3: pw.FlexColumnWidth(1.5),
-      },
+      columnWidths: withDiscount
+          ? const {
+              0: pw.FlexColumnWidth(3),
+              1: pw.FlexColumnWidth(1),
+              2: pw.FlexColumnWidth(1.3),
+              3: pw.FlexColumnWidth(1.3),
+              4: pw.FlexColumnWidth(1.5),
+            }
+          : const {
+              0: pw.FlexColumnWidth(3),
+              1: pw.FlexColumnWidth(1),
+              2: pw.FlexColumnWidth(1.5),
+              3: pw.FlexColumnWidth(1.5),
+            },
       children: [
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey300),
@@ -1178,6 +1217,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
             _buildPdfTableCell('Description of Goods', bold: true),
             _buildPdfTableCell('Qty', bold: true),
             _buildPdfTableCell('Rate (Excl. GST)', bold: true),
+            if (withDiscount) _buildPdfTableCell('Disc. Rate', bold: true),
             _buildPdfTableCell('Amount', bold: true),
           ],
         ),
@@ -1190,7 +1230,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
               _buildPdfTableCell('${item.productName} (${item.productSize})'),
               _buildPdfTableCell(
                   item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
-              _buildPdfTableCell('INR ${formatRate(line.rate)}'),
+              _buildPdfTableCell(
+                  'INR ${formatRate(_originalRateOf(item) ?? line.rate)}'),
+              if (withDiscount) _buildPdfTableCell('INR ${formatRate(line.rate)}'),
               _buildPdfTableCell('INR ${line.amount.toStringAsFixed(2)}'),
             ],
           );

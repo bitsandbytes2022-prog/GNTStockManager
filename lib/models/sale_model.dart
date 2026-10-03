@@ -74,6 +74,13 @@ class SaleItem {
   /// which items were bought when.
   final DateTime? addedOn;
 
+  /// The per-unit rate before a cart discount was spread over this line
+  /// (see RecordSaleScreen's discount field). [salePrice] is always the
+  /// rate actually charged — and so the rate returns are refunded at —
+  /// while this is kept only so bills can print both. Null when the line
+  /// wasn't discounted.
+  final double? originalPrice;
+
   SaleItem({
     required this.productId,
     required this.productName,
@@ -85,7 +92,12 @@ class SaleItem {
     this.isPerFoot = false,
     this.stockUnits,
     this.addedOn,
+    this.originalPrice,
   }) : total = salePrice * quantity;
+
+  /// Whether this line was sold below its [originalPrice].
+  bool get isDiscounted =>
+      originalPrice != null && originalPrice! - salePrice >= 0.005;
 
   /// Stock units to apply for this line. Falls back to [quantity] for
   /// ordinary lines and 0 for per-foot lines saved before [stockUnits]
@@ -105,6 +117,7 @@ class SaleItem {
     'isPerFoot': isPerFoot,
     'stockUnits': stockUnits,
     'addedOn': addedOn != null ? Timestamp.fromDate(addedOn!) : null,
+    if (originalPrice != null) 'originalPrice': originalPrice,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -119,6 +132,7 @@ class SaleItem {
       isPerFoot: map['isPerFoot'] == true,
       stockUnits: map['stockUnits'] as int?,
       addedOn: (map['addedOn'] as Timestamp?)?.toDate(),
+      originalPrice: (map['originalPrice'] as num?)?.toDouble(),
     );
   }
 
@@ -138,6 +152,7 @@ class SaleItem {
     bool? isPerFoot,
     int? stockUnits,
     DateTime? addedOn,
+    double? originalPrice,
   }) {
     return SaleItem(
       productId: productId ?? this.productId,
@@ -150,6 +165,7 @@ class SaleItem {
       isPerFoot: isPerFoot ?? this.isPerFoot,
       stockUnits: stockUnits ?? this.stockUnits,
       addedOn: addedOn ?? this.addedOn,
+      originalPrice: originalPrice ?? this.originalPrice,
     );
   }
 }
@@ -221,6 +237,11 @@ class Sale {
   /// settled across multiple visits).
   final List<Payment> payments;
 
+  /// The flat discount (₹) entered for this sale, already spread over its
+  /// items as lower rates (see [SaleItem.originalPrice]) — kept so editing
+  /// the sale can re-spread exactly the same amount. Null when none.
+  final double? discountAmount;
+
   Sale({
     required this.id,
     required this.invoiceNumber,
@@ -237,6 +258,7 @@ class Sale {
     this.buyerAddress,
     double? amountPaid,
     List<Payment>? payments,
+    this.discountAmount,
   })  : createdAt = createdAt ?? DateTime.now(),
         amountPaid =
             amountPaid ?? (paymentMethod == PaymentMethod.credit ? 0 : totalAmount),
@@ -261,6 +283,7 @@ class Sale {
     'buyerAddress': buyerAddress,
     'amountPaid': amountPaid,
     'payments': payments.map((p) => p.toMap()).toList(),
+    if (discountAmount != null) 'discountAmount': discountAmount,
   };
 
   factory Sale.fromFirestore(DocumentSnapshot doc) {
@@ -293,6 +316,7 @@ class Sale {
           ?.map((p) => Payment.fromMap(p as Map<String, dynamic>))
           .toList() ??
           const [],
+      discountAmount: (data['discountAmount'] as num?)?.toDouble(),
     );
   }
 
@@ -313,6 +337,7 @@ class Sale {
     String? buyerAddress,
     double? amountPaid,
     List<Payment>? payments,
+    double? discountAmount,
   }) {
     return Sale(
       id: id ?? this.id,
@@ -330,6 +355,7 @@ class Sale {
       buyerAddress: buyerAddress ?? this.buyerAddress,
       amountPaid: amountPaid ?? this.amountPaid,
       payments: payments ?? this.payments,
+      discountAmount: discountAmount ?? this.discountAmount,
     );
   }
 }

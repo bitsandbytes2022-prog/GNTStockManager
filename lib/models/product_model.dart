@@ -214,6 +214,17 @@ class Product {
     'pvc': 20,
   };
 
+  /// A PPR pipe (not a PPR fitting) — these are never discounted. PPR is
+  /// either the category itself or a subcategory under Sanitary, and pipes
+  /// are told apart from fittings by "pipe" in the name or subcategory.
+  bool get isPprPipe {
+    final cat = category.toLowerCase().trim();
+    final sub = (subcategory ?? '').toLowerCase();
+    final isPpr = cat == 'ppr' || sub.contains('ppr');
+    return isPpr &&
+        (name.toLowerCase().contains('pipe') || sub.contains('pipe'));
+  }
+
   int? get feetPerPipe =>
       pipeFeetPerUnit[category.toLowerCase()] ??
       (subcategory != null ? pipeFeetPerUnit[subcategory!.toLowerCase()] : null);

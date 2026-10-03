@@ -16,6 +16,7 @@ import '../../services/invoice_service.dart';
 import '../../services/ledger_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
+import '../../utils/cart_discount.dart';
 import '../screens/add_product_screen.dart';
 import '../screens/add_product_web_screen.dart';
 import '../screens/bill_preview_screen.dart';
@@ -61,12 +62,21 @@ class _CartLine {
   final String lineKey;
   final Product product;
   final int quantity;
+  /// The rate actually charged — after the cart discount, if one applies.
   final double price;
   final bool isPerFoot;
 
   /// Customer-facing name override for this line only (estimates only —
   /// see [_lineNameOverride]); null means show the product's real name.
   final String? nameOverride;
+
+  /// The rate before the cart discount ([_discountAmount]) was spread over
+  /// this line; null when the line isn't discounted.
+  final double? originalPrice;
+
+  /// The line's own rate before any cart discount — what its price field
+  /// edits.
+  double get basePrice => originalPrice ?? price;
 
   const _CartLine({
     required this.lineKey,
@@ -75,6 +85,7 @@ class _CartLine {
     required this.price,
     required this.isPerFoot,
     this.nameOverride,
+    this.originalPrice,
   });
 }
 
@@ -207,6 +218,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // some sales are intentionally done at a thin margin (or a loss) and
   // that's the shop owner's call, not a hardcoded rule.
   double _discountPercent = 0;
+
+  // Flat discount (₹) given on the whole sale, entered at checkout. Unlike
+  // the slider above it is printed on the bill: it's spread over the cart
+  // lines as a lower per-item rate (see _cartLines), each line keeping its
+  // original rate alongside, so a later return refunds the discounted rate.
+  // PPR pipes are never discounted (see _isDiscountExempt).
+  double _discountAmount = 0;
+  final TextEditingController _discountController = TextEditingController();
 
   bool get _isDesktop => MediaQuery.of(context).size.width >= 1200;
   bool get _isTablet => MediaQuery.of(context).size.width >= 768;
@@ -2108,7 +2127,130 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         nameOverride: _lineNameOverride[key],
       ));
     }
-    return lines;
+    if (_discountAmount <= 0) return lines;
+
+    final discounted = spreadCartDiscount(
+      prices: [for (final l in lines) l.price],
+      quantities: [for (final l in lines) l.quantity],
+      eligible: [for (final l in lines) !_isDiscountExempt(l)],
+      discount: _discountAmount,
+    );
+    return [
+      for (var i = 0; i < lines.length; i++)
+        discounted[i] == lines[i].price
+            ? lines[i]
+            : _CartLine(
+                lineKey: lines[i].lineKey,
+                product: lines[i].product,
+                quantity: lines[i].quantity,
+                price: discounted[i],
+                isPerFoot: lines[i].isPerFoot,
+                nameOverride: lines[i].nameOverride,
+                originalPrice: lines[i].price,
+              ),
+    ];
+  }
+
+  /// PPR pipes are never discounted — a PPR line sold by the foot is a pipe
+  /// too, whatever its name.
+  bool _isDiscountExempt(_CartLine line) {
+    final p = line.product;
+    if (p.isPprPipe) return true;
+    final isPpr = p.category.toLowerCase().trim() == 'ppr' ||
+        (p.subcategory ?? '').toLowerCase().contains('ppr');
+    return isPpr && line.isPerFoot;
+  }
+
+  /// Rupees actually taken off by [_discountAmount] after rounding each
+  /// rate to the paisa (and capping at the discountable lines' value).
+  double get _appliedDiscount => _cartLines.fold(
+      0.0,
+      (s, l) => l.originalPrice == null
+          ? s
+          : s + (l.originalPrice! - l.price) * l.quantity);
+
+  void _setDiscountAmount(double amount) {
+    setState(() => _discountAmount = amount < 0 ? 0 : amount);
+  }
+
+  void _clearDiscount() {
+    _discountAmount = 0;
+    _discountController.clear();
+  }
+
+  /// Discount entry shown under the cart total: the ₹ amount, what it
+  /// actually came to, and which lines it skipped.
+  Widget _buildDiscountField({VoidCallback? afterChange}) {
+    if (_selectedQuantities.isEmpty) return const SizedBox.shrink();
+    final lines = _cartLines;
+    final exempt = lines.where(_isDiscountExempt).length;
+    final applied = _appliedDiscount;
+    final capped = _discountAmount > 0 && applied + 0.5 < _discountAmount;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.local_offer_outlined, size: 18, color: Colors.green),
+              const SizedBox(width: 6),
+              const Text('Discount', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _discountController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                  ],
+                  textAlign: TextAlign.right,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixText: '₹ ',
+                    hintText: '0',
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    suffixIcon: _discountAmount > 0
+                        ? IconButton(
+                            icon: const Icon(Icons.close, size: 16),
+                            tooltip: 'Remove discount',
+                            constraints: const BoxConstraints(),
+                            padding: EdgeInsets.zero,
+                            onPressed: () {
+                              setState(_clearDiscount);
+                              afterChange?.call();
+                            },
+                          )
+                        : null,
+                  ),
+                  onChanged: (v) {
+                    _setDiscountAmount(double.tryParse(v) ?? 0);
+                    afterChange?.call();
+                  },
+                ),
+              ),
+            ],
+          ),
+          if (_discountAmount > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Item rates reduced by ₹${applied.toStringAsFixed(2)} — '
+              'bill shows original and discounted rate.'
+              '${capped ? ' Capped at the value of discountable items.' : ''}',
+              style: TextStyle(fontSize: 11, color: Colors.green.shade800),
+            ),
+            if (exempt > 0)
+              Text(
+                'No discount on PPR pipe ($exempt ${exempt == 1 ? 'line' : 'lines'}).',
+                style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
+              ),
+          ],
+        ],
+      ),
+    );
   }
 
   List<_CartLine> get _filteredCartLines {
@@ -2189,6 +2331,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           productSize: line.product.size,
           quantity: line.quantity,
           salePrice: line.price,
+          originalPrice: line.originalPrice,
           purchasePrice: _effectiveUnitCost(line.product, line.isPerFoot),
           imageBase64: line.product.imageBase64,
           isPerFoot: line.isPerFoot,
@@ -2256,6 +2399,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         amountPaid: paymentMethodEnum == PaymentMethod.credit
             ? (double.tryParse(_creditPaidController.text) ?? 0)
             : null,
+        discountAmount: _appliedDiscount > 0 ? _discountAmount : null,
       );
 
       await _salesService.createSale(sale);
@@ -2268,6 +2412,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         setState(() {
           _selectedQuantities.clear();
           _customPrices.clear();
+          _clearDiscount();
           _perFootItems.clear();
           _cartItemOrder.clear();
           _lineProductId.clear();
@@ -3114,6 +3259,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     setState(() {
                       _selectedQuantities.clear();
                       _customPrices.clear();
+                      _clearDiscount();
                       _perFootItems.clear();
                       _cartItemOrder.clear();
                       _lineProductId.clear();
@@ -3230,7 +3376,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         _CartItem(
                           product: _filteredCartLines[i].product,
                           quantity: _filteredCartLines[i].quantity,
-                          price: _filteredCartLines[i].price,
+                          price: _filteredCartLines[i].basePrice,
+                          discountedPrice: _filteredCartLines[i].originalPrice != null
+                              ? _filteredCartLines[i].price
+                              : null,
+                          discountExempt: _discountAmount > 0 &&
+                              _isDiscountExempt(_filteredCartLines[i]),
                           onQuantityChanged: (qty) =>
                               _updateQuantity(_filteredCartLines[i].lineKey, qty),
                           onPriceChanged: (price) =>
@@ -3299,6 +3450,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     ),
                   ],
                 ),
+                _buildDiscountField(),
                 _buildMarginSectionToggle(),
                 const SizedBox(height: 16),
                 Row(
@@ -3472,7 +3624,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                                   _CartItem(
                                     product: _filteredCartLines[i].product,
                                     quantity: _filteredCartLines[i].quantity,
-                                    price: _filteredCartLines[i].price,
+                                    price: _filteredCartLines[i].basePrice,
+                                    discountedPrice:
+                                        _filteredCartLines[i].originalPrice != null
+                                            ? _filteredCartLines[i].price
+                                            : null,
+                                    discountExempt: _discountAmount > 0 &&
+                                        _isDiscountExempt(_filteredCartLines[i]),
                                     onQuantityChanged: (qty) {
                                       setState(() =>
                                           _updateQuantity(_filteredCartLines[i].lineKey, qty));
@@ -3565,6 +3723,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               ),
                             ),
                           ],
+                        ),
+                        _buildDiscountField(
+                          afterChange: () => setModalState(() {}),
                         ),
                         _buildMarginSectionToggle(
                           afterChange: () => setModalState(() {}),
@@ -3879,6 +4040,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               product: line.product,
               quantity: line.quantity,
               price: line.price,
+              originalPrice: line.originalPrice,
               isPerFoot: line.isPerFoot,
               unitCost: _effectiveUnitCost(line.product, line.isPerFoot),
               stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
@@ -3913,6 +4075,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           initialPayment: _paymentMethod == 'Credit'
               ? (double.tryParse(_creditPaidController.text) ?? 0)
               : 0,
+          discountAmount: _appliedDiscount > 0 ? _discountAmount : null,
           isEstimate: isEstimate,
         ),
       ),
@@ -3924,6 +4087,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       setState(() {
         _selectedQuantities.clear();
         _customPrices.clear();
+        _clearDiscount();
         _perFootItems.clear();
         _cartItemOrder.clear();
         _lineProductId.clear();
@@ -3961,6 +4125,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _discountController.dispose();
     _notesController.dispose();
     _cartSearchController.dispose();
     _buyerNameController.dispose();
@@ -4609,6 +4774,13 @@ class _CartItem extends StatefulWidget {
   final bool isPerFoot;
   final int itemNumber;
 
+  /// The rate after the cart discount, when this line is discounted —
+  /// [price] stays the editable pre-discount rate.
+  final double? discountedPrice;
+
+  /// A cart discount is on but skips this line (PPR pipe).
+  final bool discountExempt;
+
   /// Custom name set for this line — see [_lineNameOverride]. Only shown
   /// here as a hint that this line will print differently on an Estimate;
   /// the real product name below it is unaffected.
@@ -4626,6 +4798,8 @@ class _CartItem extends StatefulWidget {
     this.isPerFoot = false,
     required this.itemNumber,
     this.nameOverride,
+    this.discountedPrice,
+    this.discountExempt = false,
   });
 
   @override
@@ -4654,6 +4828,7 @@ class _CartItemState extends State<_CartItem> {
   @override
   Widget build(BuildContext context) {
     final subtotal = widget.price * widget.quantity;
+    final discounted = widget.discountedPrice;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -4884,16 +5059,45 @@ class _CartItemState extends State<_CartItem> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
+                  const Spacer(),
+                  if (discounted != null) ...[
+                    Text(
+                      '₹${subtotal.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[500],
+                        decoration: TextDecoration.lineThrough,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   Text(
-                    '₹${subtotal.toStringAsFixed(2)}',
-                    style: const TextStyle(
+                    '₹${(discounted != null ? discounted * widget.quantity : subtotal).toStringAsFixed(2)}',
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
+                      color: discounted != null ? Colors.green.shade800 : null,
                     ),
                   ),
                 ],
               ),
             ),
+            if (discounted != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Discounted rate ₹${discounted.toStringAsFixed(2)}',
+                  style: TextStyle(fontSize: 11, color: Colors.green.shade800),
+                ),
+              )
+            else if (widget.discountExempt)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'PPR pipe — no discount',
+                  style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
+                ),
+              ),
           ],
         ),
       ),
