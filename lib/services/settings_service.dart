@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/thermal_print.dart';
+
 /// Service for managing app settings and preferences
 class SettingsService {
   // Singleton pattern
@@ -12,6 +14,7 @@ class SettingsService {
   static const String _recentSearchesKey = 'recent_product_searches';
   static const int _maxRecentSearches = 8;
   static const String _thermalOffsetKey = 'thermal_print_offset_mm';
+  static const String _thermalPageLengthKey = 'thermal_print_page_length_mm';
 
   // Cache the SharedPreferences instance for better performance
   static SharedPreferences? _prefsInstance;
@@ -149,6 +152,28 @@ class SettingsService {
       await prefs?.setDouble(_thermalOffsetKey, value);
     } catch (e) {
       debugPrint('❌ Error saving thermal offset: $e');
+    }
+  }
+
+  /// Length (mm) of each page of a thermal receipt — must not exceed the
+  /// paper length the printer is set to, or the browser crops each page.
+  Future<double> getThermalPageLengthMm() async {
+    try {
+      final prefs = await _getPrefs();
+      return prefs?.getDouble(_thermalPageLengthKey) ??
+          thermalPageLengthDefaultMm;
+    } catch (e) {
+      debugPrint('❌ Error getting thermal page length: $e');
+      return thermalPageLengthDefaultMm;
+    }
+  }
+
+  Future<void> setThermalPageLengthMm(double value) async {
+    try {
+      final prefs = await _getPrefs();
+      await prefs?.setDouble(_thermalPageLengthKey, value);
+    } catch (e) {
+      debugPrint('❌ Error saving thermal page length: $e');
     }
   }
 }

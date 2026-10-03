@@ -377,13 +377,12 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: Text(size.label),
                   subtitle: Text(size.subtitle),
-                  trailing: size.adjustable
-                      ? IconButton(
-                          icon: const Icon(Icons.tune),
-                          tooltip: 'Adjust position',
-                          onPressed: () => showThermalOffsetDialog(context),
-                        )
-                      : null,
+                  trailing: IconButton(
+                    icon: const Icon(Icons.tune),
+                    tooltip: 'Receipt settings',
+                    onPressed: () => showThermalOffsetDialog(context,
+                        showOffset: size.adjustable),
+                  ),
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _printBill(thermalSize: size);
@@ -400,8 +399,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   Future<void> _printBill({required ThermalRollSize? thermalSize}) async {
     try {
       final offsetMm = await SettingsService().getThermalOffsetMm();
+      final pageLengthMm = await SettingsService().getThermalPageLengthMm();
       final initialFormat = thermalSize != null
-          ? thermalPageFormat(thermalSize, offsetMm: offsetMm)
+          ? thermalPageFormat(thermalSize,
+              offsetMm: offsetMm, pageLengthMm: pageLengthMm)
           : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
@@ -416,6 +417,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           final pdf = await _generatePdf(
             thermalSize: thermalSize,
             thermalOffsetMm: offsetMm,
+            thermalPageLengthMm: pageLengthMm,
           );
           return pdf.save();
         },
@@ -432,6 +434,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   Future<pw.Document> _generatePdf({
     ThermalRollSize? thermalSize,
     double thermalOffsetMm = 0,
+    double thermalPageLengthMm = thermalPageLengthDefaultMm,
   }) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
@@ -473,7 +476,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       // it takes.
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: thermalPageFormat(thermalSize, offsetMm: thermalOffsetMm),
+          pageFormat: thermalPageFormat(thermalSize,
+              offsetMm: thermalOffsetMm, pageLengthMm: thermalPageLengthMm),
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           maxPages: 200,
           build: (context) => _buildThermalContentChildren(logoImage),

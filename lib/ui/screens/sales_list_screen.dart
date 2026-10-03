@@ -477,13 +477,12 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: Text(size.label),
                   subtitle: Text(size.subtitle),
-                  trailing: size.adjustable
-                      ? IconButton(
-                          icon: const Icon(Icons.tune),
-                          tooltip: 'Adjust position',
-                          onPressed: () => showThermalOffsetDialog(context),
-                        )
-                      : null,
+                  trailing: IconButton(
+                    icon: const Icon(Icons.tune),
+                    tooltip: 'Receipt settings',
+                    onPressed: () => showThermalOffsetDialog(context,
+                        showOffset: size.adjustable),
+                  ),
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _printInvoice(sale, thermalSize: size, isEstimate: isEstimate);
@@ -504,8 +503,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
   }) async {
     try {
       final offsetMm = await SettingsService().getThermalOffsetMm();
+      final pageLengthMm = await SettingsService().getThermalPageLengthMm();
       final initialFormat = thermalSize != null
-          ? thermalPageFormat(thermalSize, offsetMm: offsetMm)
+          ? thermalPageFormat(thermalSize,
+              offsetMm: offsetMm, pageLengthMm: pageLengthMm)
           : PdfPageFormat.a4;
       await Printing.layoutPdf(
         format: initialFormat,
@@ -519,7 +520,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
         onLayout: (PdfPageFormat format) async {
           final pdf = thermalSize != null
               ? await _generateThermalInvoicePdf(sale, thermalSize,
-                  isEstimate: isEstimate, offsetMm: offsetMm)
+                  isEstimate: isEstimate,
+                  offsetMm: offsetMm,
+                  pageLengthMm: pageLengthMm)
               : await _generateInvoicePdf(sale, isEstimate: isEstimate);
           return pdf.save();
         },
@@ -891,6 +894,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     ThermalRollSize thermalSize, {
     bool isEstimate = false,
     double offsetMm = 0,
+    double pageLengthMm = thermalPageLengthDefaultMm,
   }) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
@@ -1130,7 +1134,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: thermalPageFormat(thermalSize, offsetMm: offsetMm),
+        pageFormat: thermalPageFormat(thermalSize,
+            offsetMm: offsetMm, pageLengthMm: pageLengthMm),
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         maxPages: 200,
         build: (context) => children,

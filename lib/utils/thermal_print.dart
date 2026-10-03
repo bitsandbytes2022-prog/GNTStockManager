@@ -64,25 +64,33 @@ const double thermalOffsetLimitMm = 10;
 
 const double _verticalMarginMm = 5;
 
-// Bottom margin of each chunk. The browser / printer driver can crop the
-// last few mm of a page (a paper size slightly shorter than the chunk, or
-// the printer's unprintable edge), which silently cut off the last line on
-// a page — e.g. an item's qty x rate line under its name. Every chunk is
-// a fixed height anyway, so keeping well clear of the edge only moves a
-// little more content onto the next chunk.
-const double _bottomSafetyMarginMm = 20;
+// Bottom margin of each chunk — a little clearance from the printer's
+// unprintable edge.
+const double _bottomMarginMm = 8;
 
-// A long thermal receipt is built as several fixed-height chunks rather than
-// one arbitrarily tall auto-sized page — a single extremely tall page gets
-// silently clipped by the browser's print pipeline, while a continuous-roll
-// printer prints sequential same-width pages back-to-back with no real gap.
-// A4's height is a safe, universally supported page length to chunk at.
-const double _chunkHeight = 297 * PdfPageFormat.mm;
+// A long thermal receipt is built as several fixed-length pages ("chunks")
+// rather than one arbitrarily tall page. The browser prints each PDF page
+// onto one sheet of the paper size chosen in the print dialog and simply
+// crops whatever is longer than that sheet — so a chunk longer than the
+// thermal printer's configured paper length loses everything past it (one
+// giant page lost every item past some point; 297mm chunks lost items at
+// the bottom of each page). A continuous roll prints the chunks
+// back-to-back, so a chunk only has to be no longer than that paper length;
+// it's a setting (see SettingsService.getThermalPageLengthMm) because
+// drivers differ.
+const double thermalPageLengthDefaultMm = 150;
+const double thermalPageLengthMinMm = 80;
+const double thermalPageLengthMaxMm = 300;
 
 /// Page format for one chunk of a thermal receipt. [offsetMm] shifts the
 /// content right (positive) or left (negative) and only applies to
-/// [ThermalRollSize.adjustable] layouts.
-PdfPageFormat thermalPageFormat(ThermalRollSize size, {double offsetMm = 0}) {
+/// [ThermalRollSize.adjustable] layouts. [pageLengthMm] is the chunk length
+/// (see [thermalPageLengthDefaultMm]).
+PdfPageFormat thermalPageFormat(
+  ThermalRollSize size, {
+  double offsetMm = 0,
+  double pageLengthMm = thermalPageLengthDefaultMm,
+}) {
   final side = (size.pageWidthMm - size.contentWidthMm) / 2;
   final userOffset = size.adjustable
       ? offsetMm.clamp(-thermalOffsetLimitMm, thermalOffsetLimitMm).toDouble()
@@ -91,10 +99,11 @@ PdfPageFormat thermalPageFormat(ThermalRollSize size, {double offsetMm = 0}) {
   final offset = (size.baseShiftMm + userOffset).clamp(-side, side).toDouble();
   return PdfPageFormat(
     size.pageWidthMm * PdfPageFormat.mm,
-    _chunkHeight,
+    pageLengthMm.clamp(thermalPageLengthMinMm, thermalPageLengthMaxMm) *
+        PdfPageFormat.mm,
     marginLeft: (side + offset) * PdfPageFormat.mm,
     marginRight: (side - offset) * PdfPageFormat.mm,
     marginTop: _verticalMarginMm * PdfPageFormat.mm,
-    marginBottom: _bottomSafetyMarginMm * PdfPageFormat.mm,
+    marginBottom: _bottomMarginMm * PdfPageFormat.mm,
   );
 }
