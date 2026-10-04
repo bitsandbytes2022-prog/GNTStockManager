@@ -51,10 +51,13 @@ Future<pw.Document> buildLedgerStatementPdf({
   if (closing.abs() < 0.01) {
     closingLabel = 'Settled';
   } else if (isCustomer) {
-    closingLabel =
-        closing > 0 ? 'Balance due from you' : 'Balance payable to you';
+    closingLabel = closing > 0
+        ? 'Balance due from ${party.name}'
+        : 'Balance payable to ${party.name}';
   } else {
-    closingLabel = closing > 0 ? 'Balance payable by us' : 'Advance paid by us';
+    closingLabel = closing > 0
+        ? 'Balance payable to ${party.name}'
+        : 'Advance paid to ${party.name}';
   }
   // A customer we've also bought from / paid gets wider column names.
   final twoWay = isCustomer &&
@@ -62,7 +65,7 @@ Future<pw.Document> buildLedgerStatementPdf({
           r.entry?.kind == LedgerEntryKind.boughtFrom ||
           r.entry?.kind == LedgerEntryKind.paidTo);
   final debitHeader =
-      isCustomer ? (twoWay ? 'Sale / Paid to you' : 'Sale / Bill') : 'Purchase';
+      isCustomer ? (twoWay ? 'Sale / Paid' : 'Sale / Bill') : 'Purchase';
   final creditHeader = isCustomer
       ? (twoWay ? 'Received / Bought' : 'Received')
       : 'Paid';
@@ -113,12 +116,19 @@ Future<pw.Document> buildLedgerStatementPdf({
     } else if (row.subtitle?.isNotEmpty ?? false) {
       lines.add(row.subtitle!);
     }
+    // The statement goes to the party itself, so name them rather than
+    // saying "them".
+    final title = switch (row.entry?.kind) {
+      LedgerEntryKind.boughtFrom => 'Bought from ${party.name}',
+      LedgerEntryKind.paidTo => 'Paid to ${party.name}',
+      _ => row.title,
+    };
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text(row.title,
+          pw.Text(title,
               style:
                   pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
           for (final line in lines)
@@ -291,7 +301,8 @@ Future<pw.Document> buildLedgerStatementPdf({
           ),
         pw.SizedBox(height: 4),
         pw.Text(
-          'Please check and inform us of any difference. Thank you for your business.',
+          '${party.name}: please check and inform $_shopName of any '
+          'difference. Thank you for the business.',
           style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
         ),
       ],
