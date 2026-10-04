@@ -51,12 +51,21 @@ Future<pw.Document> buildLedgerStatementPdf({
   if (closing.abs() < 0.01) {
     closingLabel = 'Settled';
   } else if (isCustomer) {
-    closingLabel = closing > 0 ? 'Balance due from you' : 'Advance with us';
+    closingLabel =
+        closing > 0 ? 'Balance due from you' : 'Balance payable to you';
   } else {
     closingLabel = closing > 0 ? 'Balance payable by us' : 'Advance paid by us';
   }
-  final debitHeader = isCustomer ? 'Sale / Bill' : 'Purchase';
-  final creditHeader = isCustomer ? 'Received' : 'Paid';
+  // A customer we've also bought from / paid gets wider column names.
+  final twoWay = isCustomer &&
+      rows.any((r) =>
+          r.entry?.kind == LedgerEntryKind.boughtFrom ||
+          r.entry?.kind == LedgerEntryKind.paidTo);
+  final debitHeader =
+      isCustomer ? (twoWay ? 'Sale / Paid to you' : 'Sale / Bill') : 'Purchase';
+  final creditHeader = isCustomer
+      ? (twoWay ? 'Received / Bought' : 'Received')
+      : 'Paid';
   final period = from == null
       ? 'All entries'
       : '${_date.format(from)} to ${_date.format(DateTime.now())}';

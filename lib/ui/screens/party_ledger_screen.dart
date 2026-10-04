@@ -139,6 +139,23 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                       icon: const Icon(Icons.payments_outlined),
                       label: const Text('Receive Payment'),
                     ),
+                    // Dealing the other way round: buying from this
+                    // shopkeeper and paying them.
+                    FilledButton.tonalIcon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => PurchaseEntryScreen(party: party)),
+                      ),
+                      icon: const Icon(Icons.shopping_basket_outlined),
+                      label: const Text('Buy from them'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: () =>
+                          _showEntryDialog(party, LedgerEntryKind.paidTo),
+                      icon: const Icon(Icons.outbox_outlined),
+                      label: const Text('Pay them'),
+                    ),
                     OutlinedButton.icon(
                       onPressed: () =>
                           _showEntryDialog(party, LedgerEntryKind.bill),
@@ -332,10 +349,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
   }
 
   void _showEntry(Party party, LedgerEntry entry) {
-    final isBill = entry.kind == LedgerEntryKind.bill;
-    final title = isBill
-        ? (party.isCustomer ? 'Bill' : 'Purchase')
-        : (party.isCustomer ? 'Payment received' : 'Payment made');
+    final title = ledgerEntryTitle(party, entry.kind);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -469,7 +483,11 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
     final isPayment = kind == LedgerEntryKind.payment;
     final String title;
     final String? hint;
-    if (party.isCustomer) {
+    if (kind == LedgerEntryKind.paidTo) {
+      title = 'Pay ${party.name}';
+      hint = 'Money you paid them, e.g. for goods bought from them. '
+          'Their sale bills are not changed.';
+    } else if (party.isCustomer) {
       title = isPayment ? 'Receive Payment' : 'Add Bill';
       hint = isPayment
           ? 'Settles their oldest unpaid bills first.'
@@ -484,21 +502,38 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
     );
     if (result == null) return;
     final service = LedgerService();
+    final Future<void> Function() save;
+    final String what;
+    switch (kind) {
+      case LedgerEntryKind.paidTo:
+        what = 'Payment';
+        save = () => service.addPaymentToCustomer(
+              party: party,
+              amount: result.amount!,
+              date: result.date,
+              note: result.note,
+            );
+      case LedgerEntryKind.payment:
+        what = 'Payment';
+        save = () => service.addPayment(
+              party: party,
+              amount: result.amount!,
+              date: result.date,
+              note: result.note,
+            );
+      case LedgerEntryKind.bill:
+      case LedgerEntryKind.boughtFrom:
+        what = 'Bill';
+        save = () => service.addBill(
+              party: party,
+              amount: result.amount!,
+              date: result.date,
+              note: result.note,
+            );
+    }
     await _run(
-      () => isPayment
-          ? service.addPayment(
-              party: party,
-              amount: result.amount!,
-              date: result.date,
-              note: result.note,
-            )
-          : service.addBill(
-              party: party,
-              amount: result.amount!,
-              date: result.date,
-              note: result.note,
-            ),
-      done: '${isPayment ? 'Payment' : 'Bill'} of ${formatLedgerAmount(result.amount!)} saved',
+      save,
+      done: '$what of ${formatLedgerAmount(result.amount!)} saved',
     );
   }
 

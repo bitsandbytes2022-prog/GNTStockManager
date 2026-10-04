@@ -82,7 +82,6 @@ List<LedgerRow> buildLedgerRows(
   List<LedgerEntry> entries,
 ) {
   final rows = <LedgerRow>[];
-  final isCustomer = party.isCustomer;
 
   if (party.openingBalance != 0) {
     rows.add(LedgerRow(
@@ -134,13 +133,8 @@ List<LedgerRow> buildLedgerRows(
   }
 
   for (final entry in entries) {
-    final isBill = entry.kind == LedgerEntryKind.bill;
-    final String title;
-    if (isBill) {
-      title = isCustomer ? 'Bill' : 'Purchase';
-    } else {
-      title = isCustomer ? 'Payment received' : 'Payment made';
-    }
+    final raises = entry.kind.raisesBalance;
+    final title = ledgerEntryTitle(party, entry.kind);
     final details = [
       if (entry.note?.isNotEmpty ?? false) entry.note!,
       if (entry.items.isNotEmpty) _itemsSummary(entry.items.map((i) => i.name)),
@@ -150,8 +144,8 @@ List<LedgerRow> buildLedgerRows(
       title: title,
       subtitle: details.isEmpty ? null : details.join(' · '),
       source: LedgerRowSource.entry,
-      debit: isBill ? entry.amount : 0,
-      credit: isBill ? 0 : entry.amount,
+      debit: raises ? entry.amount : 0,
+      credit: raises ? 0 : entry.amount,
       entry: entry,
     ));
   }
@@ -172,6 +166,20 @@ List<LedgerRow> buildLedgerRows(
     row.balance = running;
   }
   return rows;
+}
+
+/// How a manual entry of [kind] is named in [party]'s ledger.
+String ledgerEntryTitle(Party party, LedgerEntryKind kind) {
+  switch (kind) {
+    case LedgerEntryKind.bill:
+      return party.isCustomer ? 'Bill' : 'Purchase';
+    case LedgerEntryKind.payment:
+      return party.isCustomer ? 'Payment received' : 'Payment made';
+    case LedgerEntryKind.boughtFrom:
+      return 'Bought from them';
+    case LedgerEntryKind.paidTo:
+      return 'Paid to them';
+  }
 }
 
 String _itemsSummary(Iterable<String> names) {
@@ -301,15 +309,54 @@ class LedgerService {
   // ==========================================
   // ENTRIES
   // ==========================================
-  /// A supplier purchase or a manual customer bill. Each item's quantity is
-  /// added to that product's stock.
+  /// A manual customer bill (an amount owed, no items).
   Future<void> addBill({
     required Party party,
     required double amount,
     required DateTime date,
     String? note,
+  }) =>
+      _addStockEntry(LedgerEntryKind.bill, party, amount, date, note, const []);
+
+  /// Goods bought from [party] — a supplier purchase, or, for a customer
+  /// shopkeeper, goods bought from them (which lowers what they owe). Each
+  /// item's quantity is added to that product's stock.
+  Future<void> addPurchase({
+    required Party party,
+    required double amount,
+    required DateTime date,
+    String? note,
     List<PurchaseItem> items = const [],
-  }) async {
+  }) =>
+      _addStockEntry(
+        party.isCustomer ? LedgerEntryKind.boughtFrom : LedgerEntryKind.bill,
+        party,
+        amount,
+        date,
+        note,
+        items,
+      );
+
+  /// Money the shop paid to a customer shopkeeper (raises what they owe —
+  /// e.g. paying for goods bought from them). Their sale bills are not
+  /// touched.
+  Future<void> addPaymentToCustomer({
+    required Party party,
+    required double amount,
+    required DateTime date,
+    String? note,
+  }) =>
+      _addStockEntry(
+          LedgerEntryKind.paidTo, party, amount, date, note, const []);
+
+  Future<void> _addStockEntry(
+    LedgerEntryKind kind,
+    Party party,
+    double amount,
+    DateTime date,
+    String? note,
+    List<PurchaseItem> items,
+  ) async {
     final batch = _firestore.batch();
     final ref = _entries.doc();
     batch.set(
@@ -317,7 +364,7 @@ class LedgerService {
       LedgerEntry(
         id: ref.id,
         partyId: party.id,
-        kind: LedgerEntryKind.bill,
+        kind: kind,
         amount: amount,
         date: date,
         note: note,

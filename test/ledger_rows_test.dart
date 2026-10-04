@@ -100,4 +100,43 @@ void main() {
     ]);
     expect(rows.map((r) => r.balance), [5000, 3000]);
   });
+
+  test('customer we also buy from: purchases lower, payments to them raise',
+      () {
+    final shop = Party(
+      id: 'p3',
+      name: 'Two-way',
+      type: PartyType.customer,
+      createdAt: DateTime(2026, 1, 1),
+    );
+    final sale = _sale(id: 'sx', total: 1000, at: DateTime(2026, 3, 1))
+        .copyWith(partyId: 'p3');
+    LedgerEntry e(String id, LedgerEntryKind kind, double amount, int day) =>
+        LedgerEntry(
+          id: id,
+          partyId: 'p3',
+          kind: kind,
+          amount: amount,
+          date: DateTime(2026, 3, day),
+        );
+    final rows = buildLedgerRows(shop, [sale], [
+      e('b1', LedgerEntryKind.boughtFrom, 1500, 2),
+      e('p1', LedgerEntryKind.paidTo, 300, 3),
+    ]);
+    // They owe 1000, the shop buys 1500 from them (shop now owes 500),
+    // then pays them 300 (shop owes 200).
+    expect(rows.map((r) => r.balance), [1000, -500, -200]);
+    expect(rows[1].title, 'Bought from them');
+    expect(rows[1].credit, 1500);
+    expect(rows[2].title, 'Paid to them');
+    expect(rows[2].debit, 300);
+  });
+
+  test('entry kinds round-trip by name, unknown falls back to bill', () {
+    for (final k in LedgerEntryKind.values) {
+      expect(LedgerEntryKind.fromName(k.name), k);
+    }
+    expect(LedgerEntryKind.fromName(null), LedgerEntryKind.bill);
+    expect(LedgerEntryKind.fromName('something'), LedgerEntryKind.bill);
+  });
 }

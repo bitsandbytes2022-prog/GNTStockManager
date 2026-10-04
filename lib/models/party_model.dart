@@ -74,12 +74,35 @@ class Party {
   }
 }
 
+/// What a manual ledger entry is.
+///
 /// [bill] raises the balance (a purchase from a supplier, or a manual bill /
-/// old due for a customer); [payment] lowers it.
-enum LedgerEntryKind { bill, payment }
+/// old due for a customer); [payment] lowers it (money received from a
+/// customer, or paid to a supplier).
+///
+/// A customer shopkeeper can also be dealt with the other way round:
+/// [boughtFrom] is goods the shop bought from them (lowers what they owe;
+/// its items go into stock) and [paidTo] is money the shop paid them
+/// (raises it). Neither touches their sale bills' amounts due — only the
+/// ledger's running balance nets everything.
+enum LedgerEntryKind {
+  bill,
+  payment,
+  boughtFrom,
+  paidTo;
 
-/// One item on a supplier purchase bill. Its quantity was added to the
-/// product's stock when the purchase was saved.
+  /// Whether this entry raises the party's balance (a debit) rather than
+  /// lowering it.
+  bool get raisesBalance =>
+      this == LedgerEntryKind.bill || this == LedgerEntryKind.paidTo;
+
+  static LedgerEntryKind fromName(String? name) => LedgerEntryKind.values
+      .firstWhere((k) => k.name == name, orElse: () => LedgerEntryKind.bill);
+}
+
+/// One item on a purchase bill (from a supplier, or bought from a customer
+/// shopkeeper). Its quantity was added to the product's stock when the
+/// purchase was saved.
 class PurchaseItem {
   final String productId;
   final String name;
@@ -182,9 +205,7 @@ class LedgerEntry {
     return LedgerEntry(
       id: doc.id,
       partyId: data['partyId'] ?? '',
-      kind: data['kind'] == LedgerEntryKind.payment.name
-          ? LedgerEntryKind.payment
-          : LedgerEntryKind.bill,
+      kind: LedgerEntryKind.fromName(data['kind'] as String?),
       amount: (data['amount'] ?? 0).toDouble(),
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       note: data['note'],

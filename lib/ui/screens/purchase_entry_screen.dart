@@ -40,9 +40,10 @@ class _Line {
   double get total => quantity * rate;
 }
 
-/// Records a purchase from a supplier. Only the amount is required; items
-/// are optional, and any listed are added to stock (new ones are created in
-/// the products list).
+/// Records a purchase from a supplier, or goods bought from a customer
+/// shopkeeper (which lowers what they owe). Only the amount is required;
+/// items are optional, and any listed are added to stock (new ones are
+/// created in the products list).
 class PurchaseEntryScreen extends StatefulWidget {
   final Party party;
 
@@ -177,7 +178,7 @@ class _PurchaseEntryScreenState extends State<PurchaseEntryScreen> {
         ));
       }
 
-      await LedgerService().addBill(
+      await LedgerService().addPurchase(
         party: widget.party,
         amount: double.parse(_amountController.text),
         date: _date,
@@ -206,7 +207,11 @@ class _PurchaseEntryScreenState extends State<PurchaseEntryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Purchase from ${widget.party.name}')),
+      appBar: AppBar(
+        title: Text(widget.party.isCustomer
+            ? 'Buy from ${widget.party.name}'
+            : 'Purchase from ${widget.party.name}'),
+      ),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -223,7 +228,9 @@ class _PurchaseEntryScreenState extends State<PurchaseEntryScreen> {
                 prefixText: '₹ ',
                 prefixIcon: const Icon(Icons.receipt_long),
                 helperText: _lines.isEmpty
-                    ? 'Total of the supplier\'s bill'
+                    ? (widget.party.isCustomer
+                        ? 'Total of what you bought from them'
+                        : 'Total of the supplier\'s bill')
                     : 'Items total: ${formatLedgerAmount(_itemsTotal)}'
                         '${_amountEdited ? ' · edited by you' : ''}',
               ),

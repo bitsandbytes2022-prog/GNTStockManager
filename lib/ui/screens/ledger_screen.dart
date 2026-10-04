@@ -242,9 +242,11 @@ class BalanceLabel {
 BalanceLabel balanceLabel(Party party, double balance) {
   if (balance.abs() < 0.01) return BalanceLabel('Settled', Colors.grey.shade600);
   if (party.isCustomer) {
+    // Negative: they paid ahead, or the shop bought more from them than
+    // they owe — either way the shop owes them.
     return balance > 0
         ? BalanceLabel('To receive', Colors.green.shade700)
-        : BalanceLabel('Advance received', Colors.orange.shade800);
+        : BalanceLabel('To pay them', Colors.orange.shade800);
   }
   return balance > 0
       ? BalanceLabel('To pay', Colors.red.shade700)
