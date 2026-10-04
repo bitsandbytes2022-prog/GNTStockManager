@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:inventory_manager/ui/screens/dashboard_screen.dart';
+import 'package:inventory_manager/ui/theme/app_theme.dart';
 
 import 'firebase_options.dart';
 
@@ -51,19 +52,7 @@ class InventoryApp extends StatelessWidget {
     return MaterialApp(
       title: 'GNT Stock Manager',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          filled: true,
-        ),
-      ),
+      theme: buildAppTheme(),
       home: DashboardScreen(),
     );
   }

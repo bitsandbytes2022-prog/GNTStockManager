@@ -50,7 +50,6 @@ dependencies:
   excel: ^4.0.6
   package_info_plus: ^8.1.2
   file_picker: ^8.1.2
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -77,6 +76,18 @@ flutter:
   assets:
      - assets/icons/
      - assets/fonts/
+
+  # Inter — the app's UI font (OFL), bundled so it works offline.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-400.ttf
+        - asset: assets/fonts/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-700.ttf
+          weight: 700
 
 
   # An image asset can refer to one or more resolution-specific "variants", see
