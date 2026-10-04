@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../models/product_model.dart';
+import '../theme/app_theme.dart';
 
-class ProductCard extends StatelessWidget {
+class ProductCard extends StatefulWidget {
   final Product product;
   final VoidCallback onDelete;
   final VoidCallback onTap;
@@ -19,6 +19,15 @@ class ProductCard extends StatelessWidget {
     this.showSalesInfo = false,
   });
 
+  @override
+  State<ProductCard> createState() => _ProductCardState();
+}
+
+class _ProductCardState extends State<ProductCard> {
+  bool _hover = false;
+
+  Product get product => widget.product;
+
   // Calculate profit margin percentage
   double get profitMargin {
     if (product.purchasePrice == 0) return 0;
@@ -28,46 +37,6 @@ class ProductCard extends StatelessWidget {
   // Calculate profit amount
   double get profitAmount {
     return product.salePrice - product.purchasePrice;
-  }
-
-  /// Get category color based on category name
-  Color getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'ppr':
-        return Colors.green.shade700;
-      case 'cpvc':
-        return const Color(0xFFF5DEB3); // Wheat/Cream color
-      case 'pvc':
-        return Colors.lightBlue.shade400;
-      case 'gi':
-      case 'galvanized':
-        return Colors.grey.shade500;
-      case 'paints':
-        return Colors.purple.shade400;
-      case 'hardware':
-        return Colors.orange.shade700;
-      case 'adhesives':
-        return Colors.amber.shade700;
-      case 'fittings':
-        return Colors.teal.shade600;
-      case 'electrical':
-        return Colors.yellow.shade700;
-      case 'plumbing':
-        return Colors.blue.shade800;
-      default:
-        return Colors.blueGrey.shade600; // Default color
-    }
-  }
-
-  /// Get text color for category chip (ensures readability)
-  Color getCategoryTextColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'cpvc':
-      case 'electrical':
-        return Colors.black87; // Dark text for light backgrounds
-      default:
-        return Colors.white; // White text for most backgrounds
-    }
   }
 
   /// Show image in fullscreen with zoom capabilities
@@ -85,169 +54,187 @@ class ProductCard extends StatelessWidget {
     );
   }
 
+  static const _radius = BorderRadius.all(Radius.circular(AppRadii.card));
+  static const _topRadius = BorderRadius.only(
+    topLeft: Radius.circular(AppRadii.card),
+    topRight: Radius.circular(AppRadii.card),
+  );
+
   @override
   Widget build(BuildContext context) {
     final bool isLowStock = product.stock < 5;
     final bool isOutOfStock = product.stock == 0;
+    final Color borderColor = isOutOfStock
+        ? AppColors.stockOut.withValues(alpha: 0.35)
+        : isLowStock
+            ? AppColors.stockLow.withValues(alpha: 0.35)
+            : _hover
+                ? AppColors.blue.withValues(alpha: 0.35)
+                : AppColors.border;
 
-    return Card(
-      elevation: kIsWeb ? 1 : 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isOutOfStock
-              ? Colors.red.shade100
-              : isLowStock
-              ? Colors.orange.shade100
-              : Colors.grey.shade100,
-          width: isOutOfStock || isLowStock ? 2 : 1,
+    // Lifts a little with a deeper shadow on hover (web/desktop).
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: AppMotion.fast,
+        curve: AppMotion.curve,
+        transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: _radius,
+          border: Border.all(
+            color: borderColor,
+            width: isOutOfStock || isLowStock ? 1.5 : 1,
+          ),
+          boxShadow: _hover ? AppShadows.raised : AppShadows.card,
         ),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Image section
-            Expanded(
-              flex: 3,
-              child: Stack(
-                children: [
-                  _buildImage(context),
-                  _buildStockBadge(),
-                  _buildCategoryChip(),
-                  _buildDiscountChip(),
-                  if (showSalesInfo && product.totalSold > 0)
-                    _buildSalesBadge(),
-                ],
-              ),
-            ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: _radius,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Image section
+                Expanded(
+                  flex: 3,
+                  child: Stack(
+                    children: [
+                      _buildImage(context),
+                      _buildStockBadge(),
+                      _buildCategoryChip(),
+                      _buildDiscountChip(),
+                      if (widget.showSalesInfo && product.totalSold > 0)
+                        _buildSalesBadge(),
+                    ],
+                  ),
+                ),
 
-            // Info section
-            Expanded(
-              flex: 2,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // Name and size
-                    Column(
+                // Info section
+                Expanded(
+                  flex: 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          product.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 10,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          product.size,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (product.subcategory != null &&
-                            product.subcategory!.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.account_tree_outlined,
-                                size: 11,
-                                color: Colors.blueGrey.shade400,
+                        // Name and size
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              product.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                                color: AppColors.navy,
+                                height: 1.25,
                               ),
-                              const SizedBox(width: 2),
-                              Flexible(
-                                child: Text(
-                                  product.subcategory!,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.blueGrey.shade500,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              product.size,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textMuted,
                               ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-
-                    // Prices and profit
-                    Column(
-                      children: [
-                        if (showPurchasePrice) ...[
-                          _buildPriceRow(
-                            'Cost',
-                            product.purchasePrice,
-                            Colors.grey.shade700,
-                            Icons.shopping_cart_outlined,
-                          ),
-                          const SizedBox(height: 4),
-                        ],
-                        _buildPriceRow(
-                          'Sale',
-                          product.salePrice,
-                          Colors.green.shade700,
-                          Icons.currency_rupee,
-                        ),
-                        if (showPurchasePrice) ...[
-                          const SizedBox(height: 4),
-                          _buildPriceRow(
-                            'Wholesale',
-                            double.parse(product.effectiveWholesalePrice
-                                .toStringAsFixed(2)),
-                            Colors.purple.shade700,
-                            Icons.storefront,
-                          ),
-                          const SizedBox(height: 4),
-                          _buildProfitRow(),
-                        ],
-                        if (showSalesInfo && product.totalSold > 0) ...[
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (product.subcategory != null &&
+                                product.subcategory!.isNotEmpty) ...[
+                              const SizedBox(height: 2),
                               Row(
                                 children: [
-                                  Icon(
+                                  const Icon(
+                                    Icons.account_tree_outlined,
+                                    size: 11,
+                                    color: AppColors.textMuted,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Flexible(
+                                    child: Text(
+                                      product.subcategory!,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: AppColors.textMuted,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+
+                        // Prices and profit
+                        Column(
+                          children: [
+                            if (widget.showPurchasePrice) ...[
+                              _buildPriceRow(
+                                'Cost',
+                                product.purchasePrice,
+                                AppColors.textMuted,
+                                Icons.shopping_cart_outlined,
+                              ),
+                              const SizedBox(height: 4),
+                            ],
+                            _buildPriceRow(
+                              'Sale',
+                              product.salePrice,
+                              AppColors.blue,
+                              Icons.currency_rupee,
+                            ),
+                            if (widget.showPurchasePrice) ...[
+                              const SizedBox(height: 4),
+                              _buildPriceRow(
+                                'Wholesale',
+                                double.parse(product.effectiveWholesalePrice
+                                    .toStringAsFixed(2)),
+                                const Color(0xFF7C4DFF),
+                                Icons.storefront,
+                              ),
+                              const SizedBox(height: 4),
+                              _buildProfitRow(),
+                            ],
+                            if (widget.showSalesInfo && product.totalSold > 0) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(
                                     Icons.trending_up,
                                     size: 14,
-                                    color: Colors.blue.shade700,
+                                    color: AppColors.blue,
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
                                     '${product.totalSold} sold',
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       fontSize: 11,
-                                      color: Colors.blue.shade700,
+                                      color: AppColors.blue,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ],
                               ),
                             ],
-                          ),
-                        ],
+                          ],
+                        ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -258,49 +245,54 @@ class ProductCard extends StatelessWidget {
       onTap: () => _showImageZoom(context),
       child: Container(
         width: double.infinity,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade100,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-          ),
+        decoration: const BoxDecoration(
+          color: AppColors.page,
+          borderRadius: _topRadius,
         ),
         child: ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-          ),
+          borderRadius: _topRadius,
           child: product.imageBase64 != null
               ? Stack(
-            children: [
-              Image.memory(
-                base64Decode(product.imageBase64!),
-                fit: BoxFit.cover,
-                width: double.infinity,
-                errorBuilder: (context, error, stackTrace) {
-                  return _buildPlaceholder();
-                },
-              ),
-              // Zoom indicator overlay
-              if (product.imageBase64 != null)
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
-                      borderRadius: BorderRadius.circular(8),
+                  children: [
+                    // Image zooms in a touch on hover.
+                    AnimatedScale(
+                      scale: _hover ? 1.05 : 1,
+                      duration: AppMotion.normal,
+                      curve: AppMotion.curve,
+                      child: Image.memory(
+                        base64Decode(product.imageBase64!),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _buildPlaceholder();
+                        },
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.zoom_in,
-                      size: 16,
-                      color: Colors.white,
+                    // Zoom indicator overlay
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: AnimatedOpacity(
+                        opacity: _hover ? 1 : 0.75,
+                        duration: AppMotion.fast,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: AppColors.navy.withValues(alpha: 0.65),
+                            borderRadius:
+                                BorderRadius.circular(AppRadii.control),
+                          ),
+                          child: const Icon(
+                            Icons.zoom_in,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-            ],
-          )
+                  ],
+                )
               : _buildPlaceholder(),
         ),
       ),
@@ -311,39 +303,52 @@ class ProductCard extends StatelessWidget {
     return Center(
       child: Icon(
         Icons.inventory_2_outlined,
-        size: 48,
-        color: Colors.grey.shade400,
+        size: 44,
+        color: AppColors.textMuted.withValues(alpha: 0.4),
       ),
     );
   }
 
+  /// A small rounded pill, shared by every badge on the image.
+  Widget _pill({
+    required Color color,
+    required Widget child,
+    EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  }) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.35),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
   Widget _buildStockBadge() {
+    final color = product.stock == 0
+        ? AppColors.stockOut
+        : product.stock < 5
+            ? AppColors.stockLow
+            : AppColors.stockOk;
     return Positioned(
       top: 8,
       right: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: product.stock == 0
-              ? Colors.red.shade500
-              : product.stock < 5
-              ? Colors.orange.shade500
-              : Colors.green.shade500,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
+      child: _pill(
+        color: color,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               product.stock == 0 ? Icons.warning_rounded : Icons.inventory_2,
-              size: 14,
+              size: 13,
               color: Colors.white,
             ),
             const SizedBox(width: 4),
@@ -351,7 +356,7 @@ class ProductCard extends StatelessWidget {
               '${product.stock}',
               style: const TextStyle(
                 color: Colors.white,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w700,
                 fontSize: 12,
               ),
             ),
@@ -363,127 +368,51 @@ class ProductCard extends StatelessWidget {
 
   /// Category chip displayed on the image
   Widget _buildCategoryChip() {
-    final categoryColor = getCategoryColor(product.category);
-    final textColor = getCategoryTextColor(product.category);
-
     return Positioned(
       top: 8,
       left: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: categoryColor,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.category,
-              size: 12,
-              color: textColor,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              product.category.toUpperCase(),
-              style: TextStyle(
-                color: textColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+      child: _pill(
+        color: AppColors.category(product.category),
+        child: Text(
+          product.category.toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 10,
+            letterSpacing: 0.6,
+          ),
         ),
       ),
     );
   }
-  Widget _buildDiscountChip() {
 
+  Widget _buildDiscountChip() {
+    Widget chip(String text, Color color) => _pill(
+          color: color,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 10,
+              letterSpacing: 0.4,
+            ),
+          ),
+        );
 
     return Positioned(
-      top: 32,
-      left:16,
-      child: product.discountReceived!=null && product.sellingDiscount!=null?Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.green,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
+      top: 34,
+      left: 8,
+      child: product.discountReceived != null && product.sellingDiscount != null
+          ? Row(
+              children: [
+                chip(product.discountReceived.toString(), AppColors.green),
+                const SizedBox(width: 4),
+                chip(product.sellingDiscount.toString(), AppColors.coral),
               ],
-            ),
-            child: Text(
-              product.discountReceived?.toString()??'',
-              style: TextStyle(
-                color:Colors.white ,
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-          SizedBox(width: 4,),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.red,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Text(
-              product.sellingDiscount?.toString()??'',
-              style: TextStyle(
-                color:Colors.white ,
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-        ],
-      ):Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: Colors.purple,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Text(
-          product.margin?.toString()??'',
-          style: TextStyle(
-            color:Colors.white ,
-            fontWeight: FontWeight.bold,
-            fontSize: 10,
-            letterSpacing: 0.5,
-          ),
-        ),
-      ),
+            )
+          : chip(product.margin?.toString() ?? '', const Color(0xFF7C4DFF)),
     );
   }
 
@@ -491,19 +420,8 @@ class ProductCard extends StatelessWidget {
     return Positioned(
       bottom: 8,
       left: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.blue.shade700,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
+      child: _pill(
+        color: AppColors.coral,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -517,7 +435,7 @@ class ProductCard extends StatelessWidget {
               '${product.totalSold}',
               style: const TextStyle(
                 color: Colors.white,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w700,
                 fontSize: 11,
               ),
             ),
@@ -554,7 +472,7 @@ class ProductCard extends StatelessWidget {
           '₹${price.toString()}',
           style: TextStyle(
             fontSize: 13,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w700,
             color: color,
           ),
         ),
@@ -564,7 +482,7 @@ class ProductCard extends StatelessWidget {
 
   Widget _buildProfitRow() {
     final isProfit = profitAmount >= 0;
-    final color = isProfit ? Colors.teal.shade700 : Colors.red.shade700;
+    final color = isProfit ? AppColors.green : AppColors.stockOut;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -593,7 +511,7 @@ class ProductCard extends StatelessWidget {
               '₹${profitAmount.abs().toStringAsFixed(0)}',
               style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w700,
                 color: color,
               ),
             ),
@@ -601,14 +519,14 @@ class ProductCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 '${profitMargin.toStringAsFixed(1)}%',
                 style: TextStyle(
                   fontSize: 9,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                   color: color,
                 ),
               ),

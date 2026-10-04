@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
 import '../widgets/product_card.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'downloads_screen.dart';
@@ -301,33 +303,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
   }
 
-  Color _getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'ppr':
-        return Colors.green;
-      case 'cpvc':
-        return Colors.orange;
-      case 'pvc':
-        return Colors.lightBlue;
-      case 'gi':
-      case 'galvanized':
-        return Colors.grey;
-      case 'paints':
-        return Colors.purple;
-      case 'hardware':
-        return Colors.deepOrange;
-      case 'adhesives':
-        return Colors.amber;
-      case 'fittings':
-        return Colors.teal;
-      case 'electrical':
-        return Colors.yellow;
-      case 'plumbing':
-        return Colors.blue;
-      default:
-        return Colors.blueGrey;
-    }
-  }
+  Color _getCategoryColor(String category) => AppColors.category(category);
+
 
   void _showCategoryFilterSheet() {
     showModalBottomSheet(
@@ -358,25 +335,29 @@ class _ProductListScreenState extends State<ProductListScreen> {
         MediaQuery.of(context).size.width < 1200;
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: AppColors.page,
       body: Column(
         children: [
-          // Modern header with search and filters
+          // Header with search and filters
           Container(
             padding: EdgeInsets.all(isDesktop ? 24 : 16),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (isDesktop || isTablet) ...[
+                  Text(
+                    'Products',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: AppColors.navy,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 // Search and Filter Row
                 Row(
                   children: [
@@ -397,12 +378,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
                               onPressed: () => _searchController.clear(),
                             )
                                 : null,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
                             filled: true,
-                            fillColor: Colors.grey[100],
+                            fillColor: AppColors.page,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 14,
@@ -422,15 +399,21 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           decoration: BoxDecoration(
                             color: _selectedCategory != null
                                 ? _getCategoryColor(_selectedCategory!)
-                                .withOpacity(0.2)
-                                : Colors.grey[100],
-                            borderRadius: BorderRadius.circular(12),
+                                    .withValues(alpha: 0.12)
+                                : AppColors.page,
+                            borderRadius:
+                                BorderRadius.circular(AppRadii.control),
+                            border: Border.all(
+                              color: _selectedCategory != null
+                                  ? _getCategoryColor(_selectedCategory!)
+                                  : AppColors.border,
+                            ),
                           ),
                           child: Icon(
                             Icons.filter_list,
                             color: _selectedCategory != null
                                 ? _getCategoryColor(_selectedCategory!)
-                                : Colors.black87,
+                                : AppColors.navy,
                           ),
                         ),
                       ),
@@ -440,10 +423,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       icon: Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(12),
+                          color: AppColors.page,
+                          borderRadius:
+                              BorderRadius.circular(AppRadii.control),
+                          border: Border.all(color: AppColors.border),
                         ),
-                        child: const Icon(Icons.more_vert),
+                        child: const Icon(Icons.more_vert,
+                            color: AppColors.navy),
                       ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -759,7 +745,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
         onPressed: _navigateToAddProduct,
         icon: const Icon(Icons.add),
         label: const Text('Add Product'),
-        backgroundColor: Colors.blue,
       ),
     );
   }
@@ -771,6 +756,60 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return subs != null && subs.isNotEmpty;
   }
 
+  /// One filter chip in the shared style: white with a hairline border,
+  /// tinted in [color] with a matching border when selected.
+  Widget _filterChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    Color color = AppColors.blue,
+    IconData? icon,
+  }) {
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      curve: AppMotion.curve,
+      decoration: BoxDecoration(
+        color: selected ? color.withValues(alpha: 0.12) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: selected ? color : AppColors.border,
+          width: selected ? 1.4 : 1,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 15, color: selected ? color : AppColors.textMuted),
+                const SizedBox(width: 6),
+              ] else ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: selected ? color : AppColors.text,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSubcategoryChipsRow() {
     final subs = _subcategories[_selectedCategory] ?? const [];
 
@@ -778,112 +817,62 @@ class _ProductListScreenState extends State<ProductListScreen> {
       spacing: 8,
       runSpacing: 8,
       children: [
-        FilterChip(
+        _filterChip(
+          label: 'All',
+          icon: Icons.grid_view,
           selected: _selectedSubcategory == null,
-          label: const Text('All'),
-          onSelected: (_) {
-            setState(() => _selectedSubcategory = null);
-          },
-          backgroundColor: Colors.grey[200],
-          selectedColor: Colors.blue.withOpacity(0.2),
-          checkmarkColor: Colors.blue,
-          labelStyle: TextStyle(
-            color: _selectedSubcategory == null ? Colors.blue : Colors.black87,
-            fontWeight: _selectedSubcategory == null
-                ? FontWeight.bold
-                : FontWeight.normal,
-          ),
+          onTap: () => setState(() => _selectedSubcategory = null),
         ),
-        ...subs.map((sub) {
-          final isSelected = _selectedSubcategory == sub;
-          return FilterChip(
-            selected: isSelected,
-            label: Text(sub),
-            avatar: Icon(
-              Icons.account_tree_outlined,
-              size: 16,
-              color: isSelected ? Colors.blue : Colors.blue.withOpacity(0.7),
-            ),
-            onSelected: (_) {
-              setState(() {
-                _selectedSubcategory = isSelected ? null : sub;
-              });
-            },
-            backgroundColor: Colors.blue.withOpacity(0.08),
-            selectedColor: Colors.blue.withOpacity(0.2),
-            checkmarkColor: Colors.blue,
-            labelStyle: TextStyle(
-              color: isSelected ? Colors.blue : Colors.black87,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-          );
-        }),
+        for (final sub in subs)
+          _filterChip(
+            label: sub,
+            icon: Icons.account_tree_outlined,
+            selected: _selectedSubcategory == sub,
+            onTap: () => setState(() {
+              _selectedSubcategory = _selectedSubcategory == sub ? null : sub;
+            }),
+          ),
       ],
     );
   }
 
   Widget _buildCategoryChipsRow() {
     if (_isLoadingCategories) {
-      return const Center(child: CircularProgressIndicator());
+      return Wrap(
+        spacing: 8,
+        children: [
+          for (var i = 0; i < 6; i++)
+            const ShimmerBox(width: 84, height: 32, radius: 20),
+        ],
+      );
     }
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        // All Categories chip
-        FilterChip(
+        _filterChip(
+          label: 'All',
+          icon: Icons.grid_view,
           selected: _selectedCategory == null,
-          label: const Text('All'),
-          avatar: _selectedCategory == null
-              ? null
-              : const Icon(Icons.grid_view, size: 16),
-          onSelected: (_) {
-            setState(() {
-              _selectedCategory = null;
-              _selectedSubcategory = null;
-            });
-          },
-          backgroundColor: Colors.grey[200],
-          selectedColor: Colors.blue.withOpacity(0.2),
-          checkmarkColor: Colors.blue,
-          labelStyle: TextStyle(
-            color: _selectedCategory == null ? Colors.blue : Colors.black87,
-            fontWeight: _selectedCategory == null
-                ? FontWeight.bold
-                : FontWeight.normal,
-          ),
+          onTap: () => setState(() {
+            _selectedCategory = null;
+            _selectedSubcategory = null;
+          }),
         ),
-
-        // Category chips
-        ..._categories.map((category) {
-          final isSelected = _selectedCategory?.toLowerCase() ==
-              category.toLowerCase();
-          final color = _getCategoryColor(category);
-
-          return FilterChip(
-            selected: isSelected,
-            label: Text(category.toUpperCase()),
-            avatar: Icon(
-              Icons.category,
-              size: 16,
-              color: isSelected ? color : color.withOpacity(0.7),
-            ),
-            onSelected: (_) {
-              setState(() {
-                _selectedCategory = isSelected ? null : category;
-                _selectedSubcategory = null;
-              });
-            },
-            backgroundColor: color.withOpacity(0.1),
-            selectedColor: color.withOpacity(0.25),
-            checkmarkColor: color,
-            labelStyle: TextStyle(
-              color: isSelected ? color : Colors.black87,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-          );
-        }),
+        for (final category in _categories)
+          _filterChip(
+            label: category.toUpperCase(),
+            color: _getCategoryColor(category),
+            selected:
+                _selectedCategory?.toLowerCase() == category.toLowerCase(),
+            onTap: () => setState(() {
+              final isSelected =
+                  _selectedCategory?.toLowerCase() == category.toLowerCase();
+              _selectedCategory = isSelected ? null : category;
+              _selectedSubcategory = null;
+            }),
+          ),
       ],
     );
   }
@@ -998,7 +987,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return _buildLoadingGrid();
         }
 
         final products = snapshot.data ?? [];
@@ -1021,7 +1010,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return _buildLoadingGrid();
         }
 
         final products = snapshot.data ?? [];
@@ -1054,17 +1043,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
             child: Row(
               children: [
                 for (final type in const ['Fitting', 'Nipple']) ...[
-                  ChoiceChip(
-                    label: Text(type),
+                  _filterChip(
+                    label: type,
+                    color: color,
                     selected: _quickGiType == type,
-                    onSelected: (_) => _setQuickGiType(type),
-                    selectedColor: color.withOpacity(0.2),
-                    labelStyle: TextStyle(
-                      color: _quickGiType == type ? color : Colors.grey.shade800,
-                      fontWeight: _quickGiType == type
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
+                    onTap: () => _setQuickGiType(type),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -1078,17 +1061,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
             runSpacing: 8,
             children: [
               for (final size in sizes)
-                ChoiceChip(
-                  label: Text(size),
+                _filterChip(
+                  label: size,
+                  color: color,
+                  icon: Icons.straighten,
                   selected: _quickSize == size,
-                  onSelected: (_) =>
+                  onTap: () =>
                       _setQuickSize(_quickSize == size ? null : size),
-                  selectedColor: color.withOpacity(0.2),
-                  labelStyle: TextStyle(
-                    color: _quickSize == size ? color : Colors.grey.shade800,
-                    fontWeight:
-                        _quickSize == size ? FontWeight.bold : FontWeight.normal,
-                  ),
                 ),
             ],
           ),
@@ -1098,7 +1077,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
               ? Center(
                   child: Text(
                     'Pick a size or search to see $label items',
-                    style: TextStyle(color: Colors.grey.shade500),
+                    style: const TextStyle(color: AppColors.textMuted),
                   ),
                 )
               : quickProducts.isEmpty
@@ -1107,7 +1086,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                         _searchQuery.isNotEmpty
                             ? 'No $label items match "${_searchController.text}"'
                             : 'No $label items in $_quickSize',
-                        style: TextStyle(color: Colors.grey.shade500),
+                        style: const TextStyle(color: AppColors.textMuted),
                       ),
                     )
                   : _buildProductGrid(_sortProducts(quickProducts)),
@@ -1119,16 +1098,16 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Widget _buildQuickCategoryRail() {
     return Container(
       width: 88,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        border: Border(right: BorderSide(color: Colors.grey.shade200)),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(right: BorderSide(color: AppColors.border)),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
       child: Column(
         children: [
           for (final category in _quickCategories) ...[
             _buildQuickCategoryButton(category),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
           ],
         ],
       ),
@@ -1139,10 +1118,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
   // there isn't room for a permanent side rail.
   Widget _buildQuickCategoryBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      decoration: BoxDecoration(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
@@ -1158,34 +1137,81 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Widget _buildQuickCategoryButton(String category) {
     final color = _getCategoryColor(category);
     final selected = _quickCategory == category;
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => _setQuickCategory(category),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-        decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? color : Colors.grey.shade300,
-            width: selected ? 2 : 1,
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      curve: AppMotion.curve,
+      decoration: BoxDecoration(
+        color: selected ? color : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: selected ? color : AppColors.border),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : AppShadows.card,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        onTap: () => _setQuickCategory(category),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.plumbing,
+                  color: selected ? Colors.white : color, size: 20),
+              const SizedBox(height: 4),
+              Text(
+                category,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  color: selected ? Colors.white : AppColors.text,
+                ),
+              ),
+            ],
           ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      ),
+    );
+  }
+
+  /// Shimmering placeholder cards shown while products load.
+  Widget _buildLoadingGrid() {
+    final crossAxisCount = _getCrossAxisCount(context);
+    final spacing = _getGridSpacing(context);
+    return GridView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.all(spacing),
+      itemCount: crossAxisCount * 2,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: spacing,
+        childAspectRatio: _calculatePreciseAspectRatio(context),
+      ),
+      itemBuilder: (context, _) => Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: AppColors.border),
+        ),
+        padding: const EdgeInsets.all(10),
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.plumbing,
-                color: selected ? color : Colors.grey.shade500, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              category,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? color : Colors.grey.shade700,
-              ),
-            ),
+            Expanded(child: ShimmerBox(height: double.infinity)),
+            SizedBox(height: 12),
+            ShimmerBox(height: 12),
+            SizedBox(height: 8),
+            ShimmerBox(width: 70, height: 10),
+            SizedBox(height: 14),
+            ShimmerBox(height: 14),
           ],
         ),
       ),
@@ -1198,7 +1224,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: const BoxDecoration(
+                color: AppColors.blueTint,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.inventory_2_outlined,
+                  size: 56, color: AppColors.blue),
+            ),
             const SizedBox(height: 16),
             Text(
               _selectedCategory != null
@@ -1206,7 +1240,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   : _searchQuery.isEmpty
                   ? 'No products yet'
                   : 'No products found',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+              style: const TextStyle(
+                fontSize: 18,
+                color: AppColors.navy,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             if (_selectedCategory != null || _searchQuery.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -1263,8 +1301,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(
-              color: Colors.red,
-              borderRadius: BorderRadius.circular(16),
+              color: AppColors.stockOut,
+              borderRadius: BorderRadius.circular(AppRadii.card),
             ),
             child: const Icon(Icons.delete, color: Colors.white),
           ),
@@ -1295,7 +1333,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
           onDismissed: (direction) {
             _deleteProduct(product);
           },
-          child: ProductCard(
+          child: FadeSlideIn(
+            key: ValueKey('in_${product.id}'),
+            delay: FadeSlideIn.stagger(index),
+            child: ProductCard(
             product: product,
             onDelete: () => _deleteProduct(product),
             showPurchasePrice: showPurchasePrices,
@@ -1316,6 +1357,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       ),
               ),
             ),
+          ),
           ),
         );
       },

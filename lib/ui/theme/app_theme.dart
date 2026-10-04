@@ -26,6 +26,42 @@ class AppColors {
 
   /// Zoho's four-colour brand strip.
   static const List<Color> stripe = [blue, green, amber, red];
+
+  /// Stock level colours.
+  static const Color stockOk = green;
+  static const Color stockLow = Color(0xFFF59E0B);
+  static const Color stockOut = Color(0xFFE5484D);
+
+  /// One colour per product category, used for chips, badges and the quick
+  /// category buttons everywhere — tuned to sit together with the brand
+  /// palette.
+  static Color category(String category) {
+    switch (category.toLowerCase().trim()) {
+      case 'ppr':
+        return const Color(0xFF16A34A);
+      case 'cpvc':
+        return const Color(0xFFE08A00);
+      case 'pvc':
+        return const Color(0xFF0EA5E9);
+      case 'gi':
+      case 'galvanized':
+        return const Color(0xFF64748B);
+      case 'paints':
+        return const Color(0xFF7C4DFF);
+      case 'hardware':
+        return const Color(0xFFF0483E);
+      case 'adhesives':
+        return const Color(0xFFD97706);
+      case 'fittings':
+        return const Color(0xFF0D9488);
+      case 'electrical':
+        return const Color(0xFFCA8A04);
+      case 'plumbing':
+        return blue;
+      default:
+        return const Color(0xFF475569);
+    }
+  }
 }
 
 class AppRadii {

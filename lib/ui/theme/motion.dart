@@ -18,9 +18,11 @@ class FadeSlideIn extends StatefulWidget {
     this.offsetY = 12,
   });
 
-  /// Stagger delay for the [index]th item of a list, capped at the 8th.
+  /// Stagger delay for the [index]th item of a list: the first screenful
+  /// ripples in one after another; items built later (scrolled into view)
+  /// just fade in straight away.
   static Duration stagger(int index) =>
-      Duration(milliseconds: 40 * (index < 8 ? index : 8));
+      Duration(milliseconds: index < 12 ? 35 * index : 0);
 
   @override
   State<FadeSlideIn> createState() => _FadeSlideInState();
