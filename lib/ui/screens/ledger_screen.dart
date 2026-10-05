@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../../models/party_model.dart';
 import '../../services/ledger_service.dart';
 import 'party_ledger_screen.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 
 final NumberFormat _rupees =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -67,7 +69,20 @@ class _LedgerScreenState extends State<LedgerScreen>
             return Center(child: Text('Error loading ledger: ${snapshot.error}'));
           }
           if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
+            return ListView(
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              children: [
+                const ShimmerBox(height: 110, radius: 14),
+                const SizedBox(height: 16),
+                const ShimmerBox(height: 44),
+                const SizedBox(height: 12),
+                for (var i = 0; i < 5; i++) ...[
+                  const ShimmerBox(height: 64, radius: AppRadii.card),
+                  const SizedBox(height: 8),
+                ],
+              ],
+            );
           }
           return _buildTab(snapshot.data!);
         },
@@ -93,20 +108,32 @@ class _LedgerScreenState extends State<LedgerScreen>
     // Biggest balance first — who to collect from / pay first.
     parties.sort((a, b) => balances[b.id]!.compareTo(balances[a.id]!));
 
-    final color = isCustomer ? Colors.green : Colors.red;
+    // Green for money coming in, coral-red for money going out.
+    final gradient = isCustomer
+        ? const [AppColors.green, Color(0xFF06702D)]
+        : const [AppColors.coral, Color(0xFFC61B37)];
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
       children: [
-        Container(
+        FadeSlideIn(
+          key: ValueKey(_type),
+          child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [color.shade600, color.shade800],
+              colors: gradient,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: gradient.first.withValues(alpha: 0.3),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,12 +143,13 @@ class _LedgerScreenState extends State<LedgerScreen>
                 style: const TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 4),
-              Text(
-                formatLedgerAmount(total),
+              CountUpText(
+                value: total,
+                format: formatLedgerAmount,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 28,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 4),
@@ -134,15 +162,13 @@ class _LedgerScreenState extends State<LedgerScreen>
             ],
           ),
         ),
+        ),
         const SizedBox(height: 16),
         TextField(
           decoration: InputDecoration(
             hintText: 'Search by name or phone',
             prefixIcon: const Icon(Icons.search),
             isDense: true,
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onChanged: (v) => setState(() => _query = v),
         ),
@@ -152,21 +178,34 @@ class _LedgerScreenState extends State<LedgerScreen>
             padding: const EdgeInsets.symmetric(vertical: 48),
             child: Column(
               children: [
-                Icon(Icons.menu_book_outlined, size: 64, color: Colors.grey[400]),
+                Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: const BoxDecoration(
+                    color: AppColors.blueTint,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.menu_book_outlined,
+                      size: 48, color: AppColors.blue),
+                ),
                 const SizedBox(height: 12),
                 Text(
                   isCustomer
                       ? 'No shopkeepers yet.\nAdd one to track their purchases and payments.'
                       : 'No suppliers yet.\nAdd one to track your purchases and payments.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
+                  style: TextStyle(color: AppColors.textMuted),
                 ),
               ],
             ),
           )
         else
-          for (final party in parties)
-            _PartyTile(party: party, balance: balances[party.id]!),
+          for (var i = 0; i < parties.length; i++)
+            FadeSlideIn(
+              key: ValueKey('in_${parties[i].id}'),
+              delay: FadeSlideIn.stagger(i),
+              child: _PartyTile(
+                  party: parties[i], balance: balances[parties[i].id]!),
+            ),
       ],
     );
   }
@@ -181,51 +220,82 @@ class _PartyTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = balanceLabel(party, balance);
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: party.isCustomer
-              ? Colors.green.shade50
-              : Colors.red.shade50,
-          child: Text(
-            party.name.isEmpty ? '?' : party.name[0].toUpperCase(),
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: party.isCustomer
-                  ? Colors.green.shade800
-                  : Colors.red.shade800,
-            ),
-          ),
-        ),
-        title: Text(party.name,
-            style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: party.phone?.isNotEmpty ?? false ? Text(party.phone!) : null,
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              formatLedgerAmount(balance.abs()),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-                color: label.color,
-              ),
-            ),
-            Text(label.text,
-                style: TextStyle(fontSize: 11, color: label.color)),
-          ],
-        ),
+    final accent = party.isCustomer ? AppColors.green : AppColors.coral;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: HoverCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
               builder: (_) => PartyLedgerScreen(partyId: party.id)),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: accent.withValues(alpha: 0.12),
+              child: Text(
+                party.name.isEmpty ? '?' : party.name[0].toUpperCase(),
+                style: TextStyle(fontWeight: FontWeight.w700, color: accent),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    party.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.navy,
+                      fontSize: 15,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (party.phone?.isNotEmpty ?? false)
+                    Text(
+                      party.phone!,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textMuted),
+                    ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  formatLedgerAmount(balance.abs()),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: label.color,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: label.color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    label.text,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: label.color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right, color: AppColors.textMuted),
+          ],
         ),
       ),
     );
@@ -240,17 +310,17 @@ class BalanceLabel {
 
 /// Plain-words meaning of a balance: who owes whom.
 BalanceLabel balanceLabel(Party party, double balance) {
-  if (balance.abs() < 0.01) return BalanceLabel('Settled', Colors.grey.shade600);
+  if (balance.abs() < 0.01) return BalanceLabel('Settled', AppColors.textMuted);
   if (party.isCustomer) {
     // Negative: they paid ahead, or the shop bought more from them than
     // they owe — either way the shop owes them.
     return balance > 0
-        ? BalanceLabel('To receive', Colors.green.shade700)
-        : BalanceLabel('To pay them', Colors.orange.shade800);
+        ? BalanceLabel('To receive', AppColors.green)
+        : BalanceLabel('To pay them', const Color(0xFFD97706));
   }
   return balance > 0
-      ? BalanceLabel('To pay', Colors.red.shade700)
-      : BalanceLabel('Advance paid', Colors.orange.shade800);
+      ? BalanceLabel('To pay', AppColors.stockOut)
+      : BalanceLabel('Advance paid', const Color(0xFFD97706));
 }
 
 /// Add (when [party] is null) or edit a shopkeeper/supplier. Returns the

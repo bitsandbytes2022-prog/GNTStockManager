@@ -135,9 +135,13 @@ ThemeData buildAppTheme() {
       elevation: 0,
       scrolledUnderElevation: 1,
       shadowColor: const Color(0x14000000),
+      // Left-aligned bold page titles, like Zoho's (web would otherwise
+      // centre them on macOS/iOS).
+      centerTitle: false,
       titleTextStyle: text.titleLarge?.copyWith(
         color: AppColors.navy,
         fontWeight: FontWeight.w700,
+        fontSize: 20,
       ),
     ),
     cardTheme: CardThemeData(

@@ -10,6 +10,8 @@ import 'ledger_screen.dart';
 import 'purchase_entry_screen.dart';
 import 'record_sale_screen.dart';
 import '../widgets/ledger_share_sheet.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 
 /// One shopkeeper's / supplier's statement: every sale or purchase and
 /// every payment, with the running balance.
@@ -40,7 +42,18 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
         if (!snapshot.hasData) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(child: CircularProgressIndicator()),
+            body: ListView(
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              children: [
+                const ShimmerBox(height: 120, radius: 14),
+                const SizedBox(height: 16),
+                for (var i = 0; i < 6; i++) ...[
+                  const ShimmerBox(height: 58, radius: AppRadii.card),
+                  const SizedBox(height: 6),
+                ],
+              ],
+            ),
           );
         }
         final data = snapshot.data!;
@@ -77,7 +90,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                 showPartyFormDialog(context, type: party.type, party: party),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            icon: const Icon(Icons.delete_outline, color: AppColors.stockOut),
             tooltip: 'Delete',
             onPressed: () => _deleteParty(party),
           ),
@@ -86,37 +99,48 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            elevation: 0,
-            color: label.color.withOpacity(0.08),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: label.color.withOpacity(0.3)),
+          FadeSlideIn(
+            child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: label.color.withValues(alpha: 0.35)),
+              boxShadow: AppShadows.card,
             ),
-            child: Padding(
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              // A coloured edge on the left marks which way the balance is.
+              decoration: BoxDecoration(
+                border: Border(left: BorderSide(color: label.color, width: 5)),
+              ),
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label.text,
-                      style: TextStyle(color: label.color, fontSize: 14)),
-                  Text(
-                    formatLedgerAmount(balance.abs()),
-                    style: TextStyle(
-                      color: label.color,
+                      style: TextStyle(
+                          color: label.color,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  CountUpText(
+                    value: balance.abs(),
+                    format: formatLedgerAmount,
+                    style: const TextStyle(
+                      color: AppColors.navy,
                       fontSize: 30,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   if (party.phone?.isNotEmpty ?? false)
                     Text(party.phone!,
-                        style: TextStyle(color: Colors.grey.shade700)),
+                        style: TextStyle(color: AppColors.textMuted)),
                   if (party.address?.isNotEmpty ?? false)
                     Text(party.address!,
-                        style: TextStyle(color: Colors.grey.shade700)),
+                        style: TextStyle(color: AppColors.textMuted)),
                 ],
               ),
             ),
+          ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -197,7 +221,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
               padding: const EdgeInsets.symmetric(vertical: 32),
               child: Center(
                 child: Text('No entries yet',
-                    style: TextStyle(color: Colors.grey[600])),
+                    style: TextStyle(color: AppColors.textMuted)),
               ),
             )
           else ...[
@@ -206,15 +230,20 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                 Text('Statement',
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: Colors.grey.shade800)),
+                        color: AppColors.navy)),
                 const Spacer(),
                 Text('Newest first',
                     style:
-                        TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                        TextStyle(fontSize: 12, color: AppColors.textMuted)),
               ],
             ),
             const SizedBox(height: 8),
-            for (final row in rows.reversed) _buildRow(party, row),
+            for (final (i, row) in rows.reversed.indexed)
+              FadeSlideIn(
+                key: ValueKey('row_${row.date.microsecondsSinceEpoch}_$i'),
+                delay: FadeSlideIn.stagger(i),
+                child: _buildRow(party, row),
+              ),
           ],
         ],
       ),
@@ -224,45 +253,66 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
   Widget _buildRow(Party party, LedgerRow row) {
     final isDebit = row.debit > 0;
     final amount = isDebit ? row.debit : row.credit;
-    final color = isDebit ? Colors.red.shade700 : Colors.green.shade700;
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      child: ListTile(
-        dense: true,
-        leading: Icon(
-          isDebit ? Icons.arrow_upward : Icons.arrow_downward,
-          color: color,
-        ),
-        title: Text(row.title,
-            style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(
-          [
-            _dateFormat.format(row.date),
-            if (row.subtitle?.isNotEmpty ?? false) row.subtitle!,
-          ].join(' · '),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
+    final color = isDebit ? AppColors.stockOut : AppColors.green;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: HoverCard(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        onTap: () => _onRowTap(party, row),
+        child: Row(
           children: [
-            Text(
-              '${isDebit ? '+' : '−'} ${formatLedgerAmount(amount)}',
-              style: TextStyle(fontWeight: FontWeight.bold, color: color),
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isDebit ? Icons.arrow_upward : Icons.arrow_downward,
+                color: color,
+                size: 18,
+              ),
             ),
-            Text(
-              'Bal ${formatLedgerAmount(row.balance)}',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(row.title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.navy,
+                          fontSize: 14)),
+                  Text(
+                    [
+                      _dateFormat.format(row.date),
+                      if (row.subtitle?.isNotEmpty ?? false) row.subtitle!,
+                    ].join(' · '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${isDebit ? '+' : '−'} ${formatLedgerAmount(amount)}',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: color),
+                ),
+                Text(
+                  'Bal ${formatLedgerAmount(row.balance)}',
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textMuted),
+                ),
+              ],
             ),
           ],
         ),
-        onTap: () => _onRowTap(party, row),
       ),
     );
   }
@@ -298,7 +348,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold)),
               Text(_dateFormat.format(sale.createdAt),
-                  style: TextStyle(color: Colors.grey.shade600)),
+                  style: TextStyle(color: AppColors.textMuted)),
               const Divider(),
               for (final item in sale.items)
                 ListTile(
@@ -368,7 +418,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold)),
               Text(_dateFormat.format(entry.date),
-                  style: TextStyle(color: Colors.grey.shade600)),
+                  style: TextStyle(color: AppColors.textMuted)),
               if (entry.note?.isNotEmpty ?? false) ...[
                 const SizedBox(height: 8),
                 Text(entry.note!),
@@ -390,7 +440,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                 const Divider(),
                 Text(
                   'Applied to ${entry.allocations.length} unpaid bill${entry.allocations.length == 1 ? '' : 's'}',
-                  style: TextStyle(color: Colors.grey.shade700),
+                  style: TextStyle(color: AppColors.textMuted),
                 ),
               ],
               const SizedBox(height: 12),
@@ -414,7 +464,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                         _deleteEntry(entry);
                       },
                       style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red),
+                          foregroundColor: AppColors.stockOut),
                       icon: const Icon(Icons.delete_outline),
                       label: const Text('Delete'),
                     ),
@@ -424,7 +474,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
               const SizedBox(height: 4),
               Text(
                 'To change the amount, delete this entry and add it again.',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 11, color: AppColors.textMuted),
               ),
             ],
           ),
@@ -469,7 +519,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: AppColors.stockOut),
             child: const Text('Delete'),
           ),
         ],
@@ -551,7 +601,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: AppColors.stockOut),
             child: const Text('Delete'),
           ),
         ],
@@ -575,7 +625,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(e.toString().replaceFirst('Exception: ', '')),
-          backgroundColor: Colors.red,
+          backgroundColor: AppColors.stockOut,
         ));
       }
       return false;
@@ -653,7 +703,7 @@ class _EntryFormDialogState extends State<_EntryFormDialog> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(widget.hint!,
-                      style: TextStyle(color: Colors.grey.shade700)),
+                      style: TextStyle(color: AppColors.textMuted)),
                 ),
               if (widget.showAmount)
                 TextFormField(

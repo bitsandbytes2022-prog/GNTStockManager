@@ -6,6 +6,8 @@ import '../../models/product_model.dart';
 import '../../services/sales_service.dart';
 import '../../services/firebase_service.dart';
 import '../../services/analytics_service.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 
 class AnalyticsDashboardScreen extends StatefulWidget {
   const AnalyticsDashboardScreen({super.key});
@@ -85,14 +87,14 @@ class _TimingAnalyticsTab extends StatelessWidget {
       future: _salesService.getCachedRealSales(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _AnalyticsLoading();
         }
 
         return FutureBuilder<SalesTimingAnalytics>(
           future: _analyticsService.getSalesTimingAnalytics(snapshot.data!),
           builder: (context, timingSnapshot) {
             if (!timingSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              return const _AnalyticsLoading();
             }
 
             final timing = timingSnapshot.data!;
@@ -104,7 +106,7 @@ class _TimingAnalyticsTab extends StatelessWidget {
                 children: [
                   // Quick Insights Card
                   Card(
-                    color: Colors.blue.shade50,
+                    color: AppColors.blueTint,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -112,14 +114,14 @@ class _TimingAnalyticsTab extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.lightbulb, color: Colors.blue.shade700),
+                              Icon(Icons.lightbulb, color: AppColors.blue),
                               const SizedBox(width: 8),
                               Text(
                                 'Quick Insights',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.blue.shade900,
+                                  color: AppColors.navy,
                                 ),
                               ),
                             ],
@@ -129,25 +131,25 @@ class _TimingAnalyticsTab extends StatelessWidget {
                             icon: Icons.trending_up,
                             label: 'Peak Hour',
                             value: timing.peakHourLabel,
-                            color: Colors.green,
+                            color: AppColors.green,
                           ),
                           _InsightRow(
                             icon: Icons.event,
                             label: 'Busiest Day',
                             value: timing.peakDayName,
-                            color: Colors.green,
+                            color: AppColors.green,
                           ),
                           _InsightRow(
                             icon: Icons.trending_down,
                             label: 'Slowest Hour',
                             value: timing.slowestHourLabel,
-                            color: Colors.orange,
+                            color: AppColors.stockLow,
                           ),
                           _InsightRow(
                             icon: Icons.event_busy,
                             label: 'Quietest Day',
                             value: timing.slowestDayName,
-                            color: Colors.orange,
+                            color: AppColors.stockLow,
                           ),
                         ],
                       ),
@@ -174,7 +176,7 @@ class _TimingAnalyticsTab extends StatelessWidget {
                             Icons.info_outline,
                             'Best time for breaks',
                             'Consider taking breaks around ${timing.slowestHourLabel} when sales are typically slower.',
-                            Colors.blue,
+                            AppColors.blue,
                           ),
                         ],
                       ),
@@ -201,7 +203,7 @@ class _TimingAnalyticsTab extends StatelessWidget {
                             Icons.info_outline,
                             'Staff scheduling tip',
                             '${timing.peakDayName} is your busiest day. Consider having extra staff available.',
-                            Colors.green,
+                            AppColors.green,
                           ),
                         ],
                       ),
@@ -225,9 +227,9 @@ class _TimingAnalyticsTab extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -249,7 +251,7 @@ class _TimingAnalyticsTab extends StatelessWidget {
                 Text(
                   message,
                   style: TextStyle(
-                    color: color.withOpacity(0.8),
+                    color: color.withValues(alpha: 0.8),
                     fontSize: 12,
                   ),
                 ),
@@ -288,7 +290,7 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
       future: _salesService.getCachedRealSales(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _AnalyticsLoading();
         }
 
         final now = DateTime.now();
@@ -328,7 +330,7 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
           ),
           builder: (context, metricsSnapshot) {
             if (!metricsSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              return const _AnalyticsLoading();
             }
 
             final metrics = metricsSnapshot.data!;
@@ -379,10 +381,10 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
                   // Overall Status
                   Card(
                     color: metrics.isImproving
-                        ? Colors.green.shade50
+                        ? AppColors.green.withValues(alpha: 0.08)
                         : metrics.isDeclining
-                        ? Colors.red.shade50
-                        : Colors.blue.shade50,
+                        ? AppColors.stockOut.withValues(alpha: 0.08)
+                        : AppColors.blueTint,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
@@ -394,10 +396,10 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
                                 ? Icons.trending_down
                                 : Icons.remove,
                             color: metrics.isImproving
-                                ? Colors.green
+                                ? AppColors.green
                                 : metrics.isDeclining
-                                ? Colors.red
-                                : Colors.blue,
+                                ? AppColors.stockOut
+                                : AppColors.blue,
                             size: 48,
                           ),
                           const SizedBox(width: 16),
@@ -424,7 +426,7 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
                                       ? 'Consider marketing strategies'
                                       : 'Maintain current performance',
                                   style: TextStyle(
-                                    color: Colors.grey[700],
+                                    color: AppColors.textMuted,
                                     fontSize: 13,
                                   ),
                                 ),
@@ -497,14 +499,14 @@ class _LowStockTab extends StatelessWidget {
       future: _firebaseService.getCachedProducts(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _AnalyticsLoading();
         }
 
         return FutureBuilder<List<LowStockProduct>>(
           future: _analyticsService.getSmartLowStockProducts(snapshot.data!),
           builder: (context, lowStockSnapshot) {
             if (!lowStockSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              return const _AnalyticsLoading();
             }
 
             final lowStockProducts = lowStockSnapshot.data!;
@@ -514,11 +516,11 @@ class _LowStockTab extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.check_circle, size: 80, color: Colors.green[400]),
+                    Icon(Icons.check_circle, size: 80, color: AppColors.green),
                     const SizedBox(height: 16),
                     Text(
                       'All products well stocked! ✅',
-                      style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                      style: TextStyle(fontSize: 18, color: AppColors.textMuted),
                     ),
                   ],
                 ),
@@ -532,19 +534,19 @@ class _LowStockTab extends StatelessWidget {
                   margin: const EdgeInsets.all(16),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
+                    color: AppColors.blueTint,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.shade200),
+                    border: Border.all(color: AppColors.blue),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.blue.shade700),
+                      Icon(Icons.info_outline, color: AppColors.blue),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           'Showing items with 60%+ of stock sold',
                           style: TextStyle(
-                            color: Colors.blue.shade900,
+                            color: AppColors.navy,
                             fontSize: 13,
                           ),
                         ),
@@ -584,14 +586,14 @@ class _PaymentMethodTab extends StatelessWidget {
       future: _salesService.getCachedRealSales(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _AnalyticsLoading();
         }
 
         return FutureBuilder<PaymentMethodStats>(
           future: _analyticsService.getPaymentMethodStats(snapshot.data!),
           builder: (context, statsSnapshot) {
             if (!statsSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              return const _AnalyticsLoading();
             }
 
             final stats = statsSnapshot.data!;
@@ -602,13 +604,13 @@ class _PaymentMethodTab extends StatelessWidget {
                 children: [
                   // Total Revenue Card
                   Card(
-                    color: Colors.blue.shade50,
+                    color: AppColors.blueTint,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
                           Icon(Icons.account_balance_wallet,
-                              color: Colors.blue.shade700, size: 40),
+                              color: AppColors.blue, size: 40),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -617,14 +619,14 @@ class _PaymentMethodTab extends StatelessWidget {
                                 Text(
                                   'Total Revenue',
                                   style: TextStyle(
-                                    color: Colors.blue.shade700,
+                                    color: AppColors.blue,
                                     fontSize: 14,
                                   ),
                                 ),
                                 Text(
                                   '₹${stats.totalRevenue.toStringAsFixed(2)}',
                                   style: TextStyle(
-                                    color: Colors.blue.shade900,
+                                    color: AppColors.navy,
                                     fontSize: 24,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -646,7 +648,7 @@ class _PaymentMethodTab extends StatelessWidget {
                     count: stats.cashCount,
                     percentage: stats.cashPercentage,
                     icon: Icons.money,
-                    color: Colors.green,
+                    color: AppColors.green,
                   ),
                   const SizedBox(height: 12),
                   _PaymentMethodCard(
@@ -664,7 +666,7 @@ class _PaymentMethodTab extends StatelessWidget {
                     count: stats.cardCount,
                     percentage: stats.cardPercentage,
                     icon: Icons.credit_card,
-                    color: Colors.blue,
+                    color: AppColors.blue,
                   ),
                   if (stats.otherAmount > 0) ...[
                     const SizedBox(height: 12),
@@ -674,7 +676,7 @@ class _PaymentMethodTab extends StatelessWidget {
                       count: stats.otherCount,
                       percentage: stats.otherPercentage,
                       icon: Icons.more_horiz,
-                      color: Colors.orange,
+                      color: AppColors.stockLow,
                     ),
                   ],
 
@@ -742,7 +744,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: Colors.blue.shade700),
+        Icon(icon, color: AppColors.blue),
         const SizedBox(width: 8),
         Expanded(
           child: Column(
@@ -759,7 +761,7 @@ class _SectionHeader extends StatelessWidget {
                 subtitle,
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[600],
+                  color: AppColors.textMuted,
                 ),
               ),
             ],
@@ -796,7 +798,7 @@ class _InsightRow extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[700],
+                color: AppColors.textMuted,
               ),
             ),
           ),
@@ -847,16 +849,21 @@ class _HourlyChart extends StatelessWidget {
                     Container(
                       height: 24,
                       decoration: BoxDecoration(
-                        color: Colors.grey[200],
+                        color: AppColors.page,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
-                    FractionallySizedBox(
-                      widthFactor: percentage.toDouble(),
+                    // Bars grow from the left when the chart appears.
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: percentage.toDouble()),
+                      duration: AppMotion.slow * 2,
+                      curve: AppMotion.curve,
+                      builder: (context, w, child) =>
+                          FractionallySizedBox(widthFactor: w, child: child),
                       child: Container(
                         height: 24,
                         decoration: BoxDecoration(
-                          color: Colors.blue,
+                          color: AppColors.blue,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
@@ -916,16 +923,21 @@ class _DailyChart extends StatelessWidget {
                     Container(
                       height: 28,
                       decoration: BoxDecoration(
-                        color: Colors.grey[200],
+                        color: AppColors.border,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
-                    FractionallySizedBox(
-                      widthFactor: percentage.toDouble(),
+                    // Bars grow from the left when the chart appears.
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: percentage.toDouble()),
+                      duration: AppMotion.slow * 2,
+                      curve: AppMotion.curve,
+                      builder: (context, w, child) =>
+                          FractionallySizedBox(widthFactor: w, child: child),
                       child: Container(
                         height: 28,
                         decoration: BoxDecoration(
-                          color: Colors.green,
+                          color: AppColors.green,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
@@ -971,14 +983,14 @@ class _ComparisonButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blue : Colors.transparent,
+          color: isSelected ? AppColors.blue : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
           label,
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.grey[700],
+            color: isSelected ? Colors.white : AppColors.textMuted,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
@@ -1005,7 +1017,7 @@ class _ComparisonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isPositive = change >= 0;
-    final changeColor = isPositive ? Colors.green : Colors.red;
+    final changeColor = isPositive ? AppColors.green : AppColors.stockOut;
 
     return Card(
       child: Padding(
@@ -1015,7 +1027,7 @@ class _ComparisonCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, color: Colors.blue.shade700),
+                Icon(icon, color: AppColors.blue),
                 const SizedBox(width: 8),
                 Text(
                   title,
@@ -1035,7 +1047,7 @@ class _ComparisonCard extends StatelessWidget {
                   children: [
                     Text(
                       'Current',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                     Text(
                       currentValue,
@@ -1056,13 +1068,13 @@ class _ComparisonCard extends StatelessWidget {
                   children: [
                     Text(
                       'Previous',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                     Text(
                       previousValue,
                       style: TextStyle(
                         fontSize: 16,
-                        color: Colors.grey[600],
+                        color: AppColors.textMuted,
                       ),
                     ),
                   ],
@@ -1073,7 +1085,7 @@ class _ComparisonCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: changeColor.withOpacity(0.1),
+                color: changeColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -1101,13 +1113,13 @@ class _LowStockCard extends StatelessWidget {
   Widget build(BuildContext context) {
     Color urgencyColor;
     if (item.percentageSold >= 90) {
-      urgencyColor = Colors.red;
+      urgencyColor = AppColors.stockOut;
     } else if (item.percentageSold >= 80) {
-      urgencyColor = Colors.orange;
+      urgencyColor = AppColors.stockLow;
     } else if (item.percentageSold >= 70) {
       urgencyColor = Colors.amber;
     } else {
-      urgencyColor = Colors.blue;
+      urgencyColor = AppColors.blue;
     }
 
     return Card(
@@ -1135,7 +1147,7 @@ class _LowStockCard extends StatelessWidget {
                         '${item.percentageSold.toStringAsFixed(1)}% sold from total inventory',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Colors.grey[600],
+                          color: AppColors.textMuted,
                         ),
                       ),
                     ],
@@ -1145,7 +1157,7 @@ class _LowStockCard extends StatelessWidget {
                   padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: urgencyColor.withOpacity(0.1),
+                    color: urgencyColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: urgencyColor),
                   ),
@@ -1163,7 +1175,7 @@ class _LowStockCard extends StatelessWidget {
             const SizedBox(height: 12),
             LinearProgressIndicator(
               value: item.percentageSold / 100,
-              backgroundColor: Colors.grey[200],
+              backgroundColor: AppColors.border,
               valueColor: AlwaysStoppedAnimation(urgencyColor),
               minHeight: 8,
             ),
@@ -1210,7 +1222,7 @@ class _StockInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Icon(icon, size: 20, color: Colors.grey[600]),
+        Icon(icon, size: 20, color: AppColors.textMuted),
         const SizedBox(height: 4),
         Text(
           value,
@@ -1223,7 +1235,7 @@ class _StockInfo extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 11,
-            color: Colors.grey[600],
+            color: AppColors.textMuted,
           ),
         ),
       ],
@@ -1260,7 +1272,7 @@ class _PaymentMethodCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
+                    color: color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(icon, color: color, size: 28),
@@ -1281,7 +1293,7 @@ class _PaymentMethodCard extends StatelessWidget {
                         '$count transactions',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey[600],
+                          color: AppColors.textMuted,
                         ),
                       ),
                     ],
@@ -1302,7 +1314,7 @@ class _PaymentMethodCard extends StatelessWidget {
                       '${percentage.toStringAsFixed(1)}%',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.grey[600],
+                        color: AppColors.textMuted,
                       ),
                     ),
                   ],
@@ -1312,13 +1324,33 @@ class _PaymentMethodCard extends StatelessWidget {
             const SizedBox(height: 12),
             LinearProgressIndicator(
               value: percentage / 100,
-              backgroundColor: Colors.grey[200],
+              backgroundColor: AppColors.border,
               valueColor: AlwaysStoppedAnimation(color),
               minHeight: 6,
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Shimmer placeholders shown while an analytics tab loads.
+class _AnalyticsLoading extends StatelessWidget {
+  const _AnalyticsLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      children: const [
+        ShimmerBox(height: 150, radius: AppRadii.card),
+        SizedBox(height: 16),
+        ShimmerBox(width: 180, height: 16),
+        SizedBox(height: 10),
+        ShimmerBox(height: 220, radius: AppRadii.card),
+      ],
     );
   }
 }

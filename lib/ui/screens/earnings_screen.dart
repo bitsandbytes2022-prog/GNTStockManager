@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 
 enum TimePeriod { today, week, month, custom }
 
@@ -159,7 +161,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: ColorScheme.light(
-              primary: Colors.blue,
+              primary: AppColors.blue,
               onPrimary: Colors.white,
               surface: Colors.white,
               onSurface: Colors.black,
@@ -183,7 +185,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: AppColors.page,
       appBar: AppBar(
         elevation: 0,
         title: const Text('Earnings'),
@@ -193,16 +195,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
         children: [
           // Time period selector
           Container(
+            width: double.infinity,
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -211,7 +208,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   _getPeriodLabel(),
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey[600],
+                    color: AppColors.textMuted,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -238,7 +235,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
           // Content
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? _buildLoading()
                 : _sales.isEmpty
                     ? _buildEmptyState()
                     : _buildEarningsContent(),
@@ -251,33 +248,70 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget _buildPeriodChip(String label, TimePeriod period, IconData icon,
       {VoidCallback? onTap}) {
     final isSelected = _selectedPeriod == period;
-    return FilterChip(
-      selected: isSelected,
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 6),
-          Text(label),
-        ],
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      curve: AppMotion.curve,
+      decoration: BoxDecoration(
+        color: isSelected ? AppColors.blueTint : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isSelected ? AppColors.blue : AppColors.border,
+          width: isSelected ? 1.4 : 1,
+        ),
       ),
-      onSelected: (_) {
-        if (period == TimePeriod.custom) {
-          onTap?.call();
-        } else {
-          setState(() {
-            _selectedPeriod = period;
-          });
-          _loadSales();
-        }
-      },
-      backgroundColor: Colors.grey[200],
-      selectedColor: Colors.blue.withOpacity(0.2),
-      checkmarkColor: Colors.blue,
-      labelStyle: TextStyle(
-        color: isSelected ? Colors.blue : Colors.black87,
-        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          if (period == TimePeriod.custom) {
+            onTap?.call();
+          } else {
+            setState(() => _selectedPeriod = period);
+            _loadSales();
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: isSelected ? AppColors.blue : AppColors.textMuted),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isSelected ? AppColors.blue : AppColors.text,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  /// Shimmer placeholders for the stat cards while the period loads.
+  Widget _buildLoading() {
+    Widget row() => const Row(
+          children: [
+            Expanded(child: ShimmerBox(height: 96, radius: AppRadii.card)),
+            SizedBox(width: 12),
+            Expanded(child: ShimmerBox(height: 96, radius: AppRadii.card)),
+          ],
+        );
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      children: [
+        row(),
+        const SizedBox(height: 12),
+        row(),
+        const SizedBox(height: 12),
+        const ShimmerBox(height: 84, radius: AppRadii.card),
+      ],
     );
   }
 
@@ -286,18 +320,30 @@ class _EarningsScreenState extends State<EarningsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.receipt_long_outlined, size: 80, color: Colors.grey[400]),
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: AppColors.blueTint,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.receipt_long_outlined,
+                size: 56, color: AppColors.blue),
+          ),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'No sales in this period',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 18,
+              color: AppColors.navy,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             _selectedPeriod == TimePeriod.custom
                 ? 'Try selecting a different date range'
                 : 'Try selecting a different time period',
-            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 14, color: AppColors.textMuted),
           ),
         ],
       ),
@@ -314,14 +360,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Summary Cards
-            _buildSummaryCards(),
+            FadeSlideIn(child: _buildSummaryCards()),
             const SizedBox(height: 24),
 
             // Payment Method Breakdown
             if (_paymentMethodBreakdown.isNotEmpty) ...[
               _buildSectionHeader('Payment Methods'),
               const SizedBox(height: 12),
-              _buildPaymentMethodBreakdown(),
+              FadeSlideIn(
+                delay: FadeSlideIn.stagger(3),
+                child: _buildPaymentMethodBreakdown(),
+              ),
               const SizedBox(height: 24),
             ],
 
@@ -344,18 +393,20 @@ class _EarningsScreenState extends State<EarningsScreen> {
             Expanded(
               child: _buildStatCard(
                 'Total Revenue',
-                '₹${_totalRevenue.toStringAsFixed(2)}',
+                _totalRevenue,
+                _rupees,
                 Icons.currency_rupee,
-                Colors.blue,
+                AppColors.blue,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _buildStatCard(
                 'Total Profit',
-                '₹${_totalProfit.toStringAsFixed(2)}',
+                _totalProfit,
+                _rupees,
                 Icons.trending_up,
-                Colors.green,
+                AppColors.green,
               ),
             ),
           ],
@@ -368,18 +419,20 @@ class _EarningsScreenState extends State<EarningsScreen> {
             Expanded(
               child: _buildStatCard(
                 'Transactions',
-                _totalTransactions.toString(),
+                _totalTransactions.toDouble(),
+                _count,
                 Icons.receipt,
-                Colors.orange,
+                AppColors.coral,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _buildStatCard(
                 'Items Sold',
-                _totalItemsSold.toString(),
+                _totalItemsSold.toDouble(),
+                _count,
                 Icons.shopping_cart,
-                Colors.purple,
+                const Color(0xFF7C4DFF),
               ),
             ),
           ],
@@ -392,15 +445,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  Widget _buildStatCard(
-      String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+  static String _rupees(double v) => '₹${v.toStringAsFixed(2)}';
+  static String _count(double v) => v.round().toString();
+
+  Widget _buildStatCard(String label, double value,
+      String Function(double) format, IconData icon, Color color) {
+    return HoverCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -409,8 +459,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  color: color.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 20),
               ),
@@ -418,9 +468,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: AppColors.textMuted,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -428,12 +478,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: CountUpText(
+              value: value,
+              format: format,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.navy,
+              ),
             ),
           ),
         ],
@@ -449,19 +504,26 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.teal.shade400, Colors.teal.shade600],
+        gradient: const LinearGradient(
+          colors: [AppColors.navy, AppColors.blue],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.blue.withValues(alpha: 0.25),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -486,11 +548,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Text(
-                      '${profitMargin.toStringAsFixed(1)}%',
+                    CountUpText(
+                      value: profitMargin,
+                      format: (v) => '${v.toStringAsFixed(1)}%',
                       style: const TextStyle(
                         fontSize: 28,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w700,
                         color: Colors.white,
                       ),
                     ),
@@ -499,7 +562,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       '(₹${_totalCost.toStringAsFixed(0)} cost)',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.white.withOpacity(0.8),
+                        color: Colors.white.withValues(alpha: 0.8),
                       ),
                     ),
                   ],
@@ -517,7 +580,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
       title,
       style: const TextStyle(
         fontSize: 18,
-        fontWeight: FontWeight.bold,
+        fontWeight: FontWeight.w700,
+        color: AppColors.navy,
       ),
     );
   }
@@ -528,7 +592,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         children: _paymentMethodBreakdown.entries.map((entry) {
@@ -577,7 +641,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
                           value: percentage / 100,
-                          backgroundColor: Colors.grey[200],
+                          backgroundColor: AppColors.border,
                           valueColor: AlwaysStoppedAnimation<Color>(color),
                           minHeight: 8,
                         ),
@@ -588,7 +652,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       '${percentage.toStringAsFixed(1)}%',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.grey[600],
+                        color: AppColors.textMuted,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -605,13 +669,16 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Color _getPaymentMethodColor(String method) {
     switch (method.toLowerCase()) {
       case 'cash':
-        return Colors.green;
+        return AppColors.green;
+      // Same colours as the Sales list's payment badges.
       case 'upi':
-        return Colors.purple;
+        return AppColors.blue;
       case 'card':
-        return Colors.blue;
+        return AppColors.navy;
+      case 'credit':
+        return const Color(0xFFD97706);
       default:
-        return Colors.orange;
+        return AppColors.textMuted;
     }
   }
 
@@ -650,7 +717,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey.shade200),
+            side: BorderSide(color: AppColors.border),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -665,12 +732,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.1),
+                            color: AppColors.blue.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
                             Icons.receipt,
-                            color: Colors.blue,
+                            color: AppColors.blue,
                             size: 20,
                           ),
                         ),
@@ -691,7 +758,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                   .format(sale.createdAt),
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: AppColors.textMuted,
                               ),
                             ),
                           ],
@@ -706,7 +773,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Colors.blue,
+                            color: AppColors.blue,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -714,7 +781,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           'Profit: ₹${profit.toStringAsFixed(0)}',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.green[700],
+                            color: AppColors.green,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -723,14 +790,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                Divider(height: 1, color: Colors.grey[200]),
+                Divider(height: 1, color: AppColors.border),
                 const SizedBox(height: 12),
                 Row(
                   children: [
                     _buildSaleDetailChip(
                       Icons.shopping_cart,
                       '$itemCount items',
-                      Colors.purple,
+                      const Color(0xFF7C4DFF),
                     ),
                     const SizedBox(width: 8),
                     _buildSaleDetailChip(
@@ -751,19 +818,19 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: AppColors.page,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.note, size: 14, color: Colors.grey[600]),
+                        Icon(Icons.note, size: 14, color: AppColors.textMuted),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             sale.notes!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[700],
+                              color: AppColors.textMuted,
                             ),
                           ),
                         ),
@@ -783,7 +850,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
