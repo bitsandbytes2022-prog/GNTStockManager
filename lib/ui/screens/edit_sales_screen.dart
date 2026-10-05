@@ -13,6 +13,8 @@ import '../../utils/cart_discount.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'bill_preview_screen.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
 
@@ -538,33 +540,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     }
   }
 
-  Color _getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'ppr':
-        return Colors.green;
-      case 'cpvc':
-        return Colors.orange;
-      case 'pvc':
-        return Colors.lightBlue;
-      case 'gi':
-      case 'galvanized':
-        return Colors.grey;
-      case 'paints':
-        return Colors.purple;
-      case 'hardware':
-        return Colors.deepOrange;
-      case 'adhesives':
-        return Colors.amber;
-      case 'fittings':
-        return Colors.teal;
-      case 'electrical':
-        return Colors.yellow;
-      case 'plumbing':
-        return Colors.blue;
-      default:
-        return Colors.blueGrey;
-    }
-  }
+  Color _getCategoryColor(String category) => AppColors.category(category);
+
 
   int? _feetPerPipeFor(Product product) => product.feetPerPipe;
 
@@ -857,7 +834,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     product.size,
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.grey[600],
+                      color: AppColors.textMuted,
                       fontWeight: FontWeight.normal,
                     ),
                   ),
@@ -871,12 +848,12 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: availableStock < 5 ? Colors.orange.shade50 : Colors.green.shade50,
+                        color: availableStock < 5 ? AppColors.stockLow.withValues(alpha: 0.1) : AppColors.green.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: availableStock < 5
-                              ? Colors.orange.shade200
-                              : Colors.green.shade200,
+                              ? AppColors.stockLow
+                              : AppColors.green,
                         ),
                       ),
                       child: Row(
@@ -884,7 +861,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           Icon(
                             Icons.inventory_2_outlined,
                             size: 16,
-                            color: availableStock < 5 ? Colors.orange : Colors.green,
+                            color: availableStock < 5 ? AppColors.stockLow : AppColors.green,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -895,15 +872,15 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                   'Available Stock: $availableStock',
                                   style: TextStyle(
                                     color: availableStock < 5
-                                        ? Colors.orange.shade700
-                                        : Colors.green.shade700,
+                                        ? const Color(0xFFD97706)
+                                        : AppColors.green,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
                                 if (alreadyElsewhere > 0)
                                   Text(
                                     'Already $alreadyElsewhere in cart from earlier',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                                   ),
                               ],
                             ),
@@ -916,10 +893,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: sellPerFoot ? Colors.indigo.shade50 : Colors.grey.shade50,
+                          color: sellPerFoot ? Colors.indigo.shade50 : AppColors.page,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: sellPerFoot ? Colors.indigo.shade200 : Colors.grey.shade300,
+                            color: sellPerFoot ? Colors.indigo.shade200 : AppColors.border,
                           ),
                         ),
                         child: SwitchListTile(
@@ -949,7 +926,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     const SizedBox(height: 16),
                     Text(
                       sellPerFoot ? 'Feet' : 'Quantity',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 4),
                     Row(
@@ -966,7 +943,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           },
                           icon: const Icon(Icons.remove_circle_outline),
                           iconSize: 32,
-                          color: Colors.blue,
+                          color: AppColors.blue,
                         ),
                         Expanded(
                           child: TextField(
@@ -999,7 +976,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           },
                           icon: const Icon(Icons.add_circle_outline),
                           iconSize: 32,
-                          color: Colors.blue,
+                          color: AppColors.blue,
                         ),
                       ],
                     ),
@@ -1034,7 +1011,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             ),
                             Text(
                               '${_isWholesale ? 'Wholesale' : 'Default'}: ₹${_listPriceOf(product).toStringAsFixed(2)}',
-                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                             ),
                           ],
                         ),
@@ -1054,11 +1031,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            Icon(Icons.info_outline, size: 14, color: Colors.grey[600]),
+                            Icon(Icons.info_outline, size: 14, color: AppColors.textMuted),
                             const SizedBox(width: 4),
                             Text(
                               'Cost: ₹${product.purchasePrice.toStringAsFixed(2)}',
-                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                             ),
                           ],
                         ),
@@ -1073,8 +1050,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     onPressed: () {
                       Navigator.of(context).pop({'remove': true});
                     },
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    label: const Text('Remove', style: TextStyle(color: Colors.red)),
+                    icon: const Icon(Icons.delete_outline, color: AppColors.stockOut),
+                    label: const Text('Remove', style: TextStyle(color: AppColors.stockOut)),
                   ),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(null),
@@ -1141,7 +1118,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               : 'Added: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})',
         ),
         duration: const Duration(seconds: 1),
-        backgroundColor: Colors.green,
+        backgroundColor: AppColors.green,
       ),
     );
   }
@@ -1271,7 +1248,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       SnackBar(
         content: Text('Added: $name (Qty: $quantity, Amount: ₹${amount.toStringAsFixed(2)})'),
         duration: const Duration(seconds: 1),
-        backgroundColor: Colors.green,
+        backgroundColor: AppColors.green,
       ),
     );
   }
@@ -1547,7 +1524,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: backgroundColor,
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1571,7 +1548,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   Flexible(
                     child: Text(
                       _saleDetailsSummary,
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.right,
                     ),
@@ -1579,7 +1556,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 Icon(
                   _showSaleDetails ? Icons.expand_less : Icons.expand_more,
                   size: 20,
-                  color: Colors.grey.shade700,
+                  color: AppColors.textMuted,
                 ),
               ],
             ),
@@ -1615,11 +1592,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
           decoration: BoxDecoration(
-            color: _isWholesale ? Colors.purple.shade50 : Colors.grey.shade50,
+            color: _isWholesale ? const Color(0xFFF1ECFF) : AppColors.page,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color:
-                  _isWholesale ? Colors.purple.shade200 : Colors.grey.shade200,
+                  _isWholesale ? const Color(0xFF7C4DFF) : AppColors.border,
             ),
           ),
           child: Row(
@@ -1627,7 +1604,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               Icon(
                 Icons.storefront,
                 size: 16,
-                color: _isWholesale ? Colors.purple.shade700 : Colors.grey,
+                color: _isWholesale ? const Color(0xFF7C4DFF) : AppColors.textMuted,
               ),
               const SizedBox(width: 6),
               const Expanded(
@@ -1661,10 +1638,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
           decoration: BoxDecoration(
-            color: _isMockSale ? Colors.orange.shade50 : Colors.grey.shade50,
+            color: _isMockSale ? AppColors.stockLow.withValues(alpha: 0.1) : AppColors.page,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _isMockSale ? Colors.orange.shade200 : Colors.grey.shade200,
+              color: _isMockSale ? AppColors.stockLow : AppColors.border,
             ),
           ),
           child: Row(
@@ -1672,7 +1649,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               Icon(
                 Icons.science_outlined,
                 size: 16,
-                color: _isMockSale ? Colors.orange.shade700 : Colors.grey,
+                color: _isMockSale ? const Color(0xFFD97706) : AppColors.textMuted,
               ),
               const SizedBox(width: 6),
               const Expanded(
@@ -1719,13 +1696,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Colors.blue.shade700,
+                    color: AppColors.blue,
                   ),
                 ),
                 Icon(
                   _showMarginSection ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                   size: 16,
-                  color: Colors.blue.shade700,
+                  color: AppColors.blue,
                 ),
               ],
             ),
@@ -1743,10 +1720,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     final maxDiscount = _maxDiscountPercent;
     final sliderValue = _discountPercent.clamp(0, maxDiscount).toDouble();
     final marginColor = marginPercent < 0
-        ? Colors.red.shade700
+        ? AppColors.stockOut
         : marginPercent >= 20
-            ? Colors.green.shade700
-            : Colors.orange.shade700;
+            ? AppColors.green
+            : const Color(0xFFD97706);
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -1761,7 +1738,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade700,
+                  color: AppColors.textMuted,
                 ),
               ),
               Text(
@@ -1777,7 +1754,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               children: [
                 Text(
                   'Special Discount',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                 ),
                 Row(
                   children: [
@@ -1786,7 +1763,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue.shade700,
+                        color: AppColors.blue,
                       ),
                     ),
                     if (_discountPercent > 0)
@@ -1824,7 +1801,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             ),
             Text(
               'Slider stops at cost price — type a price below cost manually if needed. Never shown on the bill.',
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+              style: TextStyle(fontSize: 10, color: AppColors.textMuted),
             ),
           ],
         ],
@@ -1916,7 +1893,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.local_offer_outlined, size: 18, color: Colors.green),
+              const Icon(Icons.local_offer_outlined, size: 18, color: AppColors.green),
               const SizedBox(width: 6),
               const Text('Discount', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               const Spacer(),
@@ -1962,12 +1939,12 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               'Item rates reduced by ₹${applied.toStringAsFixed(2)} — '
               'bill shows original and discounted rate.'
               '${capped ? ' Capped at the value of discountable items.' : ''}',
-              style: TextStyle(fontSize: 11, color: Colors.green.shade800),
+              style: TextStyle(fontSize: 11, color: AppColors.green),
             ),
             if (exempt > 0)
               Text(
                 'No discount on PPR pipe ($exempt ${exempt == 1 ? 'line' : 'lines'}).',
-                style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
+                style: TextStyle(fontSize: 11, color: const Color(0xFFD97706)),
               ),
           ],
         ],
@@ -2004,7 +1981,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             'Some cart items could not be found (they may have been deleted). '
             'Please remove them from the cart and try again.',
           ),
-          backgroundColor: Colors.red,
+          backgroundColor: AppColors.stockOut,
         ),
       );
       return;
@@ -2103,14 +2080,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Sale updated successfully!'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.green,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating sale: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error updating sale: $e'), backgroundColor: AppColors.stockOut),
         );
       }
     } finally {
@@ -2136,7 +2113,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   Widget _buildDesktopLayout() {
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      backgroundColor: AppColors.page,
       appBar: AppBar(
         elevation: 0,
         title: Column(
@@ -2173,8 +2150,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           Container(
             width: 400,
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              border: Border(left: BorderSide(color: Colors.grey.shade200)),
+              color: AppColors.page,
+              border: Border(left: BorderSide(color: AppColors.border)),
             ),
             child: _buildDesktopCart(),
           ),
@@ -2185,7 +2162,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   Widget _buildTabletLayout() {
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      backgroundColor: AppColors.page,
       appBar: AppBar(
         elevation: 0,
         title: Column(
@@ -2279,7 +2256,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2)),
         ],
       ),
       child: Column(
@@ -2311,7 +2288,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         borderSide: BorderSide.none,
                       ),
                       filled: true,
-                      fillColor: Colors.grey[100],
+                      fillColor: AppColors.page,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     ),
                   ),
@@ -2326,7 +2303,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _activeFilterCount > 0 ? Colors.blue.withOpacity(0.15) : Colors.grey[100],
+                      color: _activeFilterCount > 0 ? Colors.blue.withValues(alpha: 0.15) : AppColors.page,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: _isLoadingCategories
@@ -2337,7 +2314,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           )
                         : Icon(
                             Icons.filter_list,
-                            color: _activeFilterCount > 0 ? Colors.blue.shade700 : Colors.black87,
+                            color: _activeFilterCount > 0 ? AppColors.blue : Colors.black87,
                           ),
                   ),
                 ),
@@ -2346,7 +2323,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 icon: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
+                    color: AppColors.page,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(Icons.more_vert),
@@ -2374,7 +2351,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     enabled: false,
                     child: Text(
                       'SORT BY',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted),
                     ),
                   ),
                   _buildSortMenuItem('newest', ProductSortOption.newest),
@@ -2385,7 +2362,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     enabled: false,
                     child: Text(
                       'SETTINGS',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted),
                     ),
                   ),
                   PopupMenuItem(
@@ -2395,7 +2372,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         Icon(
                           showPurchasePrices ? Icons.visibility_off : Icons.visibility,
                           size: 20,
-                          color: Colors.grey[600],
+                          color: AppColors.textMuted,
                         ),
                         const SizedBox(width: 12),
                         Text(showPurchasePrices ? 'Hide Purchase Prices' : 'Show Purchase Prices'),
@@ -2426,7 +2403,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           onPressed: () => _applyRecentSearch(term),
           onDeleted: () => _removeRecentSearch(term),
           deleteIcon: const Icon(Icons.close, size: 16),
-          backgroundColor: Colors.grey[100],
+          backgroundColor: AppColors.page,
           side: BorderSide.none,
         );
       }).toList(),
@@ -2446,7 +2423,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 label: Text(_selectedCategory!.toUpperCase()),
                 onDeleted: () => _setCategory(null),
                 deleteIcon: const Icon(Icons.close, size: 16),
-                backgroundColor: _getCategoryColor(_selectedCategory!).withOpacity(0.15),
+                backgroundColor: _getCategoryColor(_selectedCategory!).withValues(alpha: 0.15),
                 side: BorderSide.none,
               ),
             ),
@@ -2463,18 +2440,18 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   });
                 },
                 deleteIcon: const Icon(Icons.close, size: 16),
-                backgroundColor: Colors.indigo.withOpacity(0.15),
+                backgroundColor: Colors.indigo.withValues(alpha: 0.15),
                 side: BorderSide.none,
               ),
             ),
           ..._selectedSizes.map((size) => Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Chip(
-                  avatar: const Icon(Icons.straighten, size: 16, color: Colors.blue),
+                  avatar: const Icon(Icons.straighten, size: 16, color: AppColors.blue),
                   label: Text(size),
                   onDeleted: () => _toggleSize(size),
                   deleteIcon: const Icon(Icons.close, size: 16),
-                  backgroundColor: Colors.blue.withOpacity(0.15),
+                  backgroundColor: Colors.blue.withValues(alpha: 0.15),
                   side: BorderSide.none,
                 ),
               )),
@@ -2482,7 +2459,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Chip(
-                avatar: const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.green),
+                avatar: const Icon(Icons.inventory_2_outlined, size: 16, color: AppColors.green),
                 label: const Text('In Stock Only'),
                 onDeleted: () {
                   setState(() {
@@ -2491,7 +2468,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   });
                 },
                 deleteIcon: const Icon(Icons.close, size: 16),
-                backgroundColor: Colors.green.withOpacity(0.15),
+                backgroundColor: Colors.green.withValues(alpha: 0.15),
                 side: BorderSide.none,
               ),
             ),
@@ -2499,7 +2476,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Chip(
-                avatar: const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange),
+                avatar: const Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.stockLow),
                 label: const Text('Low Stock'),
                 onDeleted: () {
                   setState(() {
@@ -2508,7 +2485,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   });
                 },
                 deleteIcon: const Icon(Icons.close, size: 16),
-                backgroundColor: Colors.orange.withOpacity(0.15),
+                backgroundColor: Colors.orange.withValues(alpha: 0.15),
                 side: BorderSide.none,
               ),
             ),
@@ -2523,11 +2500,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       value: 'sort_$value',
       child: Row(
         children: [
-          Icon(_getSortOptionIcon(option), size: 20, color: isSelected ? Colors.blue : Colors.grey[600]),
+          Icon(_getSortOptionIcon(option), size: 20, color: isSelected ? AppColors.blue : AppColors.textMuted),
           const SizedBox(width: 12),
           Text(
             _getSortOptionLabel(option),
-            style: TextStyle(color: isSelected ? Colors.blue : null, fontWeight: isSelected ? FontWeight.bold : null),
+            style: TextStyle(color: isSelected ? AppColors.blue : null, fontWeight: isSelected ? FontWeight.bold : null),
           ),
         ],
       ),
@@ -2537,11 +2514,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   Widget _buildQuickCategoryRail() {
     return Container(
       width: 88,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        border: Border(right: BorderSide(color: Colors.grey.shade200)),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(right: BorderSide(color: AppColors.border)),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
       child: Column(
         children: [
           for (final category in _quickCategories) ...[
@@ -2558,7 +2535,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
@@ -2574,31 +2551,47 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   Widget _buildQuickCategoryButton(String category) {
     final color = _getCategoryColor(category);
     final selected = _quickCategory == category;
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => _setQuickCategory(category),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-        decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: selected ? color : Colors.grey.shade300, width: selected ? 2 : 1),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.plumbing, color: selected ? color : Colors.grey.shade500, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              category,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? color : Colors.grey.shade700,
+    // Same tile as the Products page: white, filling with the category
+    // colour when picked.
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      curve: AppMotion.curve,
+      decoration: BoxDecoration(
+        color: selected ? color : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: selected ? color : AppColors.border),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : AppShadows.card,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        onTap: () => _setQuickCategory(category),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.plumbing,
+                  color: selected ? Colors.white : color, size: 20),
+              const SizedBox(height: 4),
+              Text(
+                category,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  color: selected ? Colors.white : AppColors.text,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2625,9 +2618,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     label: Text(type),
                     selected: _quickGiType == type,
                     onSelected: (_) => _setQuickGiType(type),
-                    selectedColor: color.withOpacity(0.2),
+                    selectedColor: color.withValues(alpha: 0.2),
                     labelStyle: TextStyle(
-                      color: _quickGiType == type ? color : Colors.grey.shade800,
+                      color: _quickGiType == type ? color : AppColors.navy,
                       fontWeight: _quickGiType == type ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
@@ -2647,9 +2640,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   label: Text(size),
                   selected: _quickSize == size,
                   onSelected: (_) => _setQuickSize(_quickSize == size ? null : size),
-                  selectedColor: color.withOpacity(0.2),
+                  selectedColor: color.withValues(alpha: 0.2),
                   labelStyle: TextStyle(
-                    color: _quickSize == size ? color : Colors.grey.shade800,
+                    color: _quickSize == size ? color : AppColors.navy,
                     fontWeight: _quickSize == size ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
@@ -2661,7 +2654,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               ? Center(
                   child: Text(
                     'Pick a size or search to see $label items',
-                    style: TextStyle(color: Colors.grey.shade500),
+                    style: TextStyle(color: AppColors.textMuted),
                   ),
                 )
               : products.isEmpty
@@ -2670,7 +2663,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         _searchQuery.isNotEmpty
                             ? 'No $label items match "${_searchController.text}"'
                             : 'No $label items in $_quickSize',
-                        style: TextStyle(color: Colors.grey.shade500),
+                        style: TextStyle(color: AppColors.textMuted),
                       ),
                     )
                   : GridView.builder(
@@ -2713,9 +2706,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
+            Icon(Icons.search_off, size: 64, color: AppColors.textMuted),
             const SizedBox(height: 16),
-            Text('No products found', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+            Text('No products found', style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
             if (_searchQuery.isNotEmpty) ...[
               const SizedBox(height: 8),
               TextButton(
@@ -2763,7 +2756,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
-            border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            border: Border(bottom: BorderSide(color: AppColors.border)),
           ),
           child: Row(
             children: [
@@ -2786,7 +2779,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                       _cartSearchController.clear();
                     });
                   },
-                  child: const Text('Clear All', style: TextStyle(color: Colors.red)),
+                  child: const Text('Clear All', style: TextStyle(color: AppColors.stockOut)),
                 ),
             ],
           ),
@@ -2795,7 +2788,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: Colors.white,
-            border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            border: Border(bottom: BorderSide(color: AppColors.border)),
           ),
           child: SizedBox(
             width: double.infinity,
@@ -2812,7 +2805,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+              border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
             child: TextField(
               controller: _cartSearchController,
@@ -2824,7 +2817,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     : null,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                 filled: true,
-                fillColor: Colors.grey[100],
+                fillColor: AppColors.page,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 isDense: true,
               ),
@@ -2836,11 +2829,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.grey.shade400),
+                      Icon(Icons.shopping_cart_outlined, size: 64, color: AppColors.textMuted),
                       const SizedBox(height: 16),
-                      Text('Cart is empty', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+                      Text('Cart is empty', style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
                       const SizedBox(height: 8),
-                      Text('Click on products or add custom items', style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
+                      Text('Click on products or add custom items', style: TextStyle(fontSize: 14, color: AppColors.textMuted)),
                     ],
                   ),
                 )
@@ -2887,7 +2880,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Colors.white,
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))],
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
             ),
             child: Column(
               children: [
@@ -2897,7 +2890,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     const Text('Total Amount', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     Text(
                       '₹${_totalAmount.toStringAsFixed(2)}',
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue),
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.blue),
                     ),
                   ],
                 ),
@@ -2927,7 +2920,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                               )
                             : const Icon(Icons.check),
                         label: Text(_isSaving ? 'Updating...' : 'Update Sale'),
-                        style: FilledButton.styleFrom(padding: const EdgeInsets.all(12), backgroundColor: Colors.green),
+                        style: FilledButton.styleFrom(padding: const EdgeInsets.all(12), backgroundColor: AppColors.green),
                       ),
                     ),
                   ],
@@ -2956,7 +2949,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     margin: const EdgeInsets.symmetric(vertical: 12),
                     width: 40,
                     height: 4,
-                    decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                    decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2997,7 +2990,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                               : null,
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                           filled: true,
-                          fillColor: Colors.grey[100],
+                          fillColor: AppColors.page,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                           isDense: true,
                         ),
@@ -3009,9 +3002,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.grey.shade400),
+                                Icon(Icons.shopping_cart_outlined, size: 64, color: AppColors.textMuted),
                                 const SizedBox(height: 16),
-                                Text('Cart is empty', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+                                Text('Cart is empty', style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
                               ],
                             ),
                           )
@@ -3074,7 +3067,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                     ),
                               ]),
                               _buildSaleDetailsCard(
-                                backgroundColor: Colors.grey.shade50,
+                                backgroundColor: AppColors.page,
                                 afterChange: () => setModalState(() {}),
                               ),
                             ],
@@ -3084,7 +3077,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))],
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
                     ),
                     child: Column(
                       children: [
@@ -3094,7 +3087,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             const Text('Total Amount', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                             Text(
                               '₹${_totalAmount.toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue),
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.blue),
                             ),
                           ],
                         ),
@@ -3132,7 +3125,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                       )
                                     : const Icon(Icons.check),
                                 label: Text(_isSaving ? 'Updating...' : 'Update Sale'),
-                                style: FilledButton.styleFrom(padding: const EdgeInsets.all(12), backgroundColor: Colors.green),
+                                style: FilledButton.styleFrom(padding: const EdgeInsets.all(12), backgroundColor: AppColors.green),
                               ),
                             ),
                           ],
@@ -3154,7 +3147,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
       ),
       child: SafeArea(
         child: Row(
@@ -3164,7 +3157,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('$_totalItemsInCart items', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('$_totalItemsInCart items', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
                   Text('₹${_totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 ],
               ),
@@ -3212,14 +3205,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                   children: [
                     Text(
                       "Update the real stock below, then continue — your cart won't be lost.",
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 16),
                     for (final product in insufficientProducts) ...[
                       Text('${product.name} (${product.size})', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                       Text(
                         'Currently ${product.stock} in stock · cart needs ${_cartQuantityForProduct(product.id)}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                       ),
                       const SizedBox(height: 6),
                       TextField(
@@ -3263,7 +3256,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             setDialogState(() => isSaving = false);
                             if (dialogContext.mounted) {
                               ScaffoldMessenger.of(dialogContext).showSnackBar(
-                                SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                                SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.stockOut),
                               );
                             }
                           }
@@ -3373,7 +3366,7 @@ class _QuickProductCell extends StatelessWidget {
       elevation: isInCart ? 3 : 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: isInCart ? Colors.blue : Colors.grey.shade200, width: isInCart ? 2 : 1),
+        side: BorderSide(color: isInCart ? AppColors.blue : AppColors.border, width: isInCart ? 2 : 1),
       ),
       child: InkWell(
         onTap: onTap,
@@ -3402,12 +3395,12 @@ class _QuickProductCell extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: isOutOfStock ? Colors.red : Colors.green.shade700,
+                            color: isOutOfStock ? AppColors.stockOut : AppColors.green,
                           ),
                         ),
                       ),
                       if (isInCart)
-                        Text('×$quantity', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue)),
+                        Text('×$quantity', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.blue)),
                     ],
                   ),
                 ],
@@ -3423,7 +3416,7 @@ class _QuickProductCell extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: AppColors.page,
         borderRadius: const BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10)),
       ),
       child: ClipRRect(
@@ -3434,9 +3427,9 @@ class _QuickProductCell extends StatelessWidget {
                 fit: BoxFit.cover,
                 width: double.infinity,
                 errorBuilder: (context, error, stackTrace) =>
-                    Center(child: Icon(Icons.inventory_2_outlined, size: 22, color: Colors.grey.shade400)),
+                    Center(child: Icon(Icons.inventory_2_outlined, size: 22, color: AppColors.textMuted)),
               )
-            : Center(child: Icon(Icons.inventory_2_outlined, size: 22, color: Colors.grey.shade400)),
+            : Center(child: Icon(Icons.inventory_2_outlined, size: 22, color: AppColors.textMuted)),
       ),
     );
   }
@@ -3470,67 +3463,34 @@ class _ProductCard extends StatelessWidget {
     this.showSalesInfo = false,
   });
 
-  Color getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'ppr':
-        return Colors.green.shade700;
-      case 'cpvc':
-        return const Color(0xFFF5DEB3);
-      case 'pvc':
-        return Colors.lightBlue.shade400;
-      case 'gi':
-      case 'galvanized':
-        return Colors.grey.shade500;
-      case 'paints':
-        return Colors.purple.shade400;
-      case 'hardware':
-        return Colors.orange.shade700;
-      case 'adhesives':
-        return Colors.amber.shade700;
-      case 'fittings':
-        return Colors.teal.shade600;
-      case 'electrical':
-        return Colors.yellow.shade700;
-      case 'plumbing':
-        return Colors.blue.shade800;
-      default:
-        return Colors.blueGrey.shade600;
-    }
-  }
+  Color getCategoryColor(String category) => AppColors.category(category);
 
-  Color getCategoryTextColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'cpvc':
-      case 'electrical':
-        return Colors.black87;
-      default:
-        return Colors.white;
-    }
-  }
+
+  Color getCategoryTextColor(String category) => Colors.white;
+
 
   @override
   Widget build(BuildContext context) {
     final isOutOfStock = effectiveStock == 0;
     final isLowStock = effectiveStock < 5 && effectiveStock > 0;
 
-    return Card(
-      elevation: isSelected ? 4 : 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isSelected
-              ? Colors.blue
-              : isOutOfStock
-                  ? Colors.red.shade100
-                  : isLowStock
-                      ? Colors.orange.shade100
-                      : Colors.grey.shade100,
-          width: isSelected ? 2 : 1,
-        ),
-      ),
+    return HoverCard(
+      padding: EdgeInsets.zero,
+      clip: true,
+      borderWidth: isSelected ? 2 : (isOutOfStock || isLowStock ? 1.5 : 1),
+      borderColor: isSelected
+          ? AppColors.blue
+          : isOutOfStock
+              ? AppColors.stockOut.withValues(alpha: 0.45)
+              : isLowStock
+                  ? AppColors.stockLow.withValues(alpha: 0.6)
+                  : null,
+      color: isSelected ? AppColors.blueTint : null,
+      child: Material(
+      type: MaterialType.transparency,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -3567,7 +3527,7 @@ class _ProductCard extends StatelessWidget {
                         const SizedBox(height: 1),
                         Text(
                           product.size,
-                          style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
+                          style: TextStyle(fontSize: 9, color: AppColors.textMuted),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -3576,17 +3536,17 @@ class _ProductCard extends StatelessWidget {
                     Column(
                       children: [
                         if (showPurchasePrice) ...[
-                          _buildPriceRowWithFormat('Cost', product.purchasePrice, Colors.grey.shade700, Icons.shopping_cart_outlined),
+                          _buildPriceRowWithFormat('Cost', product.purchasePrice, AppColors.textMuted, Icons.shopping_cart_outlined),
                           const SizedBox(height: 2),
                         ],
                         isWholesale
                             ? _buildPriceRow(
                                 'Wholesale',
                                 double.parse(product.effectiveWholesalePrice.toStringAsFixed(2)),
-                                Colors.purple.shade700,
+                                const Color(0xFF7C4DFF),
                                 Icons.storefront,
                               )
-                            : _buildPriceRow('Sale', product.salePrice, Colors.green.shade700, Icons.currency_rupee),
+                            : _buildPriceRow('Sale', product.salePrice, AppColors.green, Icons.currency_rupee),
                         if (showSalesInfo && product.totalSold > 0) ...[
                           const SizedBox(height: 2),
                           Row(
@@ -3594,11 +3554,11 @@ class _ProductCard extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
-                                  Icon(Icons.trending_up, size: 10, color: Colors.blue.shade700),
+                                  Icon(Icons.trending_up, size: 10, color: AppColors.blue),
                                   const SizedBox(width: 2),
                                   Text(
                                     '${product.totalSold} sold',
-                                    style: TextStyle(fontSize: 9, color: Colors.blue.shade700, fontWeight: FontWeight.w600),
+                                    style: TextStyle(fontSize: 9, color: AppColors.blue, fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),
@@ -3614,6 +3574,7 @@ class _ProductCard extends StatelessWidget {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -3621,11 +3582,11 @@ class _ProductCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+        color: AppColors.page,
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(AppRadii.card), topRight: Radius.circular(AppRadii.card)),
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(AppRadii.card), topRight: Radius.circular(AppRadii.card)),
         child: product.imageBase64 != null
             ? Image.memory(
                 base64Decode(product.imageBase64!),
@@ -3639,7 +3600,7 @@ class _ProductCard extends StatelessWidget {
   }
 
   Widget _buildPlaceholder() {
-    return Center(child: Icon(Icons.inventory_2_outlined, size: 28, color: Colors.grey.shade400));
+    return Center(child: Icon(Icons.inventory_2_outlined, size: 28, color: AppColors.textMuted));
   }
 
   Widget _buildStockBadge(bool isOutOfStock, bool isLowStock) {
@@ -3651,8 +3612,8 @@ class _ProductCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
         decoration: BoxDecoration(
-          color: isOutOfStock ? Colors.red.shade500 : Colors.orange.shade500,
-          borderRadius: BorderRadius.circular(6),
+          color: isOutOfStock ? AppColors.stockOut : AppColors.stockLow,
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
           isOutOfStock ? 'Out' : 'Low: $effectiveStock',
@@ -3685,7 +3646,7 @@ class _ProductCard extends StatelessWidget {
       right: 4,
       child: Container(
         padding: const EdgeInsets.all(5),
-        decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
+        decoration: const BoxDecoration(color: AppColors.blue, shape: BoxShape.circle),
         child: Column(
           children: [
             const Icon(Icons.check, color: Colors.white, size: 12),
@@ -3708,9 +3669,9 @@ class _ProductCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.green,
+                    color: AppColors.green,
                     borderRadius: BorderRadius.circular(8),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 2, offset: const Offset(0, 1))],
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 2, offset: const Offset(0, 1))],
                   ),
                   child: Text(
                     product.discountReceived?.toString() ?? '',
@@ -3721,9 +3682,9 @@ class _ProductCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.red,
+                    color: AppColors.stockOut,
                     borderRadius: BorderRadius.circular(8),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 2, offset: const Offset(0, 1))],
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 2, offset: const Offset(0, 1))],
                   ),
                   child: Text(
                     product.sellingDiscount?.toString() ?? '',
@@ -3735,9 +3696,9 @@ class _ProductCard extends StatelessWidget {
           : Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.purple,
+                color: const Color(0xFF7C4DFF),
                 borderRadius: BorderRadius.circular(8),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 2, offset: const Offset(0, 1))],
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 2, offset: const Offset(0, 1))],
               ),
               child: Text(
                 product.margin?.toString() ?? '',
@@ -3754,9 +3715,9 @@ class _ProductCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
         decoration: BoxDecoration(
-          color: Colors.blue.shade700,
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 2, offset: const Offset(0, 1))],
+          color: AppColors.blue,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 2, offset: const Offset(0, 1))],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -3865,7 +3826,7 @@ class _CartItemState extends State<_CartItem> {
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
       color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade200)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: AppColors.border)),
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
@@ -3876,11 +3837,11 @@ class _CartItemState extends State<_CartItem> {
                 Container(
                   width: 20,
                   height: 20,
-                  decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: AppColors.blueTint, shape: BoxShape.circle),
                   child: Center(
                     child: Text(
                       widget.itemNumber.toString(),
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade700),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.blue),
                     ),
                   ),
                 ),
@@ -3899,7 +3860,7 @@ class _CartItemState extends State<_CartItem> {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         spacing: 6,
                         children: [
-                          Text(widget.product.size, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                          Text(widget.product.size, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
                           if (widget.isPerFoot)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -3917,13 +3878,13 @@ class _CartItemState extends State<_CartItem> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                               decoration: BoxDecoration(
-                                color: Colors.red.shade50,
+                                color: AppColors.stockOut.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.red.shade200),
+                                border: Border.all(color: AppColors.stockOut),
                               ),
                               child: Text(
                                 'DELETED FROM INVENTORY',
-                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.red.shade700),
+                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.stockOut),
                               ),
                             ),
                           IconButton(
@@ -3932,7 +3893,7 @@ class _CartItemState extends State<_CartItem> {
                             visualDensity: VisualDensity.compact,
                             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                             padding: EdgeInsets.zero,
-                            style: IconButton.styleFrom(foregroundColor: Colors.blue),
+                            style: IconButton.styleFrom(foregroundColor: AppColors.blue),
                           ),
                           IconButton(
                             onPressed: widget.onRemove,
@@ -3940,7 +3901,7 @@ class _CartItemState extends State<_CartItem> {
                             visualDensity: VisualDensity.compact,
                             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                             padding: EdgeInsets.zero,
-                            style: IconButton.styleFrom(foregroundColor: Colors.red),
+                            style: IconButton.styleFrom(foregroundColor: AppColors.stockOut),
                           ),
                         ],
                       ),
@@ -3950,11 +3911,11 @@ class _CartItemState extends State<_CartItem> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(widget.isPerFoot ? 'Feet' : 'Quantity', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+            Text(widget.isPerFoot ? 'Feet' : 'Quantity', style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
             const SizedBox(height: 3),
             Container(
               decoration: BoxDecoration(
-                border: Border.all(color: widget.isPerFoot ? Colors.indigo.shade200 : Colors.grey.shade300),
+                border: Border.all(color: widget.isPerFoot ? Colors.indigo.shade200 : AppColors.border),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -3984,7 +3945,7 @@ class _CartItemState extends State<_CartItem> {
               ),
             ),
             const SizedBox(height: 6),
-            Text('Price', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+            Text('Price', style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
             const SizedBox(height: 3),
             TextField(
               controller: _priceController,
@@ -4006,17 +3967,17 @@ class _CartItemState extends State<_CartItem> {
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: AppColors.page, borderRadius: BorderRadius.circular(8)),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Subtotal', style: TextStyle(fontSize: 11, color: Colors.grey[700], fontWeight: FontWeight.w500)),
+                  Text('Subtotal', style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w500)),
                   const Spacer(),
                   if (discounted != null) ...[
                     Text('₹${subtotal.toStringAsFixed(2)}',
                         style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey[500],
+                            color: AppColors.textMuted,
                             decoration: TextDecoration.lineThrough)),
                     const SizedBox(width: 6),
                   ],
@@ -4025,7 +3986,7 @@ class _CartItemState extends State<_CartItem> {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
-                      color: discounted != null ? Colors.green.shade800 : null,
+                      color: discounted != null ? AppColors.green : null,
                     ),
                   ),
                 ],
@@ -4035,13 +3996,13 @@ class _CartItemState extends State<_CartItem> {
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text('Discounted rate ₹${discounted.toStringAsFixed(2)}',
-                    style: TextStyle(fontSize: 11, color: Colors.green.shade800)),
+                    style: TextStyle(fontSize: 11, color: AppColors.green)),
               )
             else if (widget.discountExempt)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text('PPR pipe — no discount',
-                    style: TextStyle(fontSize: 11, color: Colors.orange.shade800)),
+                    style: TextStyle(fontSize: 11, color: const Color(0xFFD97706))),
               ),
           ],
         ),
@@ -4218,7 +4179,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                 child: ListView(
                   controller: scrollController,
                   children: [
-                    const Text('CATEGORY', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text('CATEGORY', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted)),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _categorySearchController,
@@ -4230,7 +4191,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                             : null,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                         filled: true,
-                        fillColor: Colors.grey[100],
+                        fillColor: AppColors.page,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         isDense: true,
                       ),
@@ -4251,7 +4212,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                           return _buildCategoryCard(
                             label: 'All',
                             icon: Icons.grid_view,
-                            color: Colors.grey,
+                            color: AppColors.textMuted,
                             isSelected: _category == null,
                             onTap: () => _selectCategory(null),
                           );
@@ -4270,7 +4231,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                     ),
                     if (subcategories.isNotEmpty) ...[
                       const SizedBox(height: 24),
-                      const Text('SUBCATEGORY', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                      const Text('SUBCATEGORY', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted)),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
@@ -4280,10 +4241,10 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                           return FilterChip(
                             selected: isSelected,
                             label: Text(sub),
-                            avatar: Icon(Icons.label_outline, size: 16, color: isSelected ? Colors.indigo : Colors.grey[600]),
+                            avatar: Icon(Icons.label_outline, size: 16, color: isSelected ? Colors.indigo : AppColors.textMuted),
                             onSelected: (_) => _selectSubcategory(sub),
-                            backgroundColor: Colors.grey[100],
-                            selectedColor: Colors.indigo.withOpacity(0.2),
+                            backgroundColor: AppColors.page,
+                            selectedColor: Colors.indigo.withValues(alpha: 0.2),
                             checkmarkColor: Colors.indigo,
                             labelStyle: TextStyle(
                               color: isSelected ? Colors.indigo : Colors.black87,
@@ -4295,7 +4256,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                     ],
                     if (sizes.isNotEmpty) ...[
                       const SizedBox(height: 24),
-                      const Text('SIZE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                      const Text('SIZE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted)),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
@@ -4305,13 +4266,13 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                           return FilterChip(
                             selected: isSelected,
                             label: Text(size),
-                            avatar: Icon(Icons.straighten, size: 16, color: isSelected ? Colors.blue : Colors.grey[600]),
+                            avatar: Icon(Icons.straighten, size: 16, color: isSelected ? AppColors.blue : AppColors.textMuted),
                             onSelected: (_) => _toggleSize(size),
-                            backgroundColor: Colors.grey[100],
-                            selectedColor: Colors.blue.withOpacity(0.2),
-                            checkmarkColor: Colors.blue,
+                            backgroundColor: AppColors.page,
+                            selectedColor: Colors.blue.withValues(alpha: 0.2),
+                            checkmarkColor: AppColors.blue,
                             labelStyle: TextStyle(
-                              color: isSelected ? Colors.blue : Colors.black87,
+                              color: isSelected ? AppColors.blue : Colors.black87,
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                             ),
                           );
@@ -4319,7 +4280,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                       ),
                     ],
                     const SizedBox(height: 24),
-                    const Text('STOCK', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text('STOCK', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -4328,26 +4289,26 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                         FilterChip(
                           selected: _inStockOnly,
                           label: const Text('In Stock Only'),
-                          avatar: Icon(Icons.inventory_2_outlined, size: 16, color: _inStockOnly ? Colors.green : Colors.grey[600]),
+                          avatar: Icon(Icons.inventory_2_outlined, size: 16, color: _inStockOnly ? AppColors.green : AppColors.textMuted),
                           onSelected: (_) => _toggleInStock(),
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: Colors.green.withOpacity(0.2),
-                          checkmarkColor: Colors.green,
+                          backgroundColor: AppColors.page,
+                          selectedColor: Colors.green.withValues(alpha: 0.2),
+                          checkmarkColor: AppColors.green,
                           labelStyle: TextStyle(
-                            color: _inStockOnly ? Colors.green : Colors.black87,
+                            color: _inStockOnly ? AppColors.green : Colors.black87,
                             fontWeight: _inStockOnly ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
                         FilterChip(
                           selected: _lowStockOnly,
                           label: const Text('Low Stock'),
-                          avatar: Icon(Icons.warning_amber_rounded, size: 16, color: _lowStockOnly ? Colors.orange : Colors.grey[600]),
+                          avatar: Icon(Icons.warning_amber_rounded, size: 16, color: _lowStockOnly ? AppColors.stockLow : AppColors.textMuted),
                           onSelected: (_) => _toggleLowStock(),
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: Colors.orange.withOpacity(0.2),
-                          checkmarkColor: Colors.orange,
+                          backgroundColor: AppColors.page,
+                          selectedColor: Colors.orange.withValues(alpha: 0.2),
+                          checkmarkColor: AppColors.stockLow,
                           labelStyle: TextStyle(
-                            color: _lowStockOnly ? Colors.orange : Colors.black87,
+                            color: _lowStockOnly ? AppColors.stockLow : Colors.black87,
                             fontWeight: _lowStockOnly ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
@@ -4376,9 +4337,9 @@ class _FiltersSheetState extends State<_FiltersSheet> {
       borderRadius: BorderRadius.circular(16),
       child: Container(
         decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.2) : Colors.grey[50],
+          color: isSelected ? color.withValues(alpha: 0.2) : AppColors.page,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isSelected ? color : Colors.grey.shade300, width: isSelected ? 2.5 : 1),
+          border: Border.all(color: isSelected ? color : AppColors.border, width: isSelected ? 2.5 : 1),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -4386,7 +4347,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isSelected ? color.withOpacity(0.3) : color.withOpacity(0.1),
+                color: isSelected ? color.withValues(alpha: 0.3) : color.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 28),
@@ -4463,7 +4424,7 @@ class _CustomCartItemState extends State<_CustomCartItem> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.orange.shade200, width: 1.5)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: AppColors.stockLow, width: 1.5)),
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
@@ -4474,11 +4435,11 @@ class _CustomCartItemState extends State<_CustomCartItem> {
                 Container(
                   width: 20,
                   height: 20,
-                  decoration: BoxDecoration(color: Colors.orange.shade50, shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: AppColors.stockLow.withValues(alpha: 0.1), shape: BoxShape.circle),
                   child: Center(
                     child: Text(
                       widget.itemNumber.toString(),
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade700),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFFD97706)),
                     ),
                   ),
                 ),
@@ -4486,8 +4447,8 @@ class _CustomCartItemState extends State<_CustomCartItem> {
                 Container(
                   width: 32,
                   height: 32,
-                  decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
-                  child: Icon(Icons.note_add, color: Colors.orange.shade700, size: 16),
+                  decoration: BoxDecoration(color: AppColors.stockLow.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                  child: Icon(Icons.note_add, color: const Color(0xFFD97706), size: 16),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -4502,10 +4463,10 @@ class _CustomCartItemState extends State<_CustomCartItem> {
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(color: Colors.orange.shade100, borderRadius: BorderRadius.circular(4)),
+                        decoration: BoxDecoration(color: AppColors.stockLow.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
                         child: Text(
                           'CUSTOM',
-                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.orange.shade700),
+                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: const Color(0xFFD97706)),
                         ),
                       ),
                     ],
@@ -4517,15 +4478,15 @@ class _CustomCartItemState extends State<_CustomCartItem> {
                   visualDensity: VisualDensity.compact,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                   padding: EdgeInsets.zero,
-                  style: IconButton.styleFrom(foregroundColor: Colors.red),
+                  style: IconButton.styleFrom(foregroundColor: AppColors.stockOut),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text('Quantity', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+            Text('Quantity', style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
             const SizedBox(height: 3),
             Container(
-              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(border: Border.all(color: AppColors.border), borderRadius: BorderRadius.circular(8)),
               child: Row(
                 children: [
                   IconButton(
@@ -4552,7 +4513,7 @@ class _CustomCartItemState extends State<_CustomCartItem> {
               ),
             ),
             const SizedBox(height: 6),
-            Text('Amount', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+            Text('Amount', style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
             const SizedBox(height: 3),
             TextField(
               controller: _amountController,
@@ -4574,11 +4535,11 @@ class _CustomCartItemState extends State<_CustomCartItem> {
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: AppColors.stockLow.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Subtotal', style: TextStyle(fontSize: 11, color: Colors.grey[700], fontWeight: FontWeight.w500)),
+                  Text('Subtotal', style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w500)),
                   Text('₹${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                 ],
               ),

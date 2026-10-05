@@ -77,12 +77,24 @@ class HoverCard extends StatefulWidget {
   final EdgeInsetsGeometry padding;
   final Color? color;
 
+  /// Overrides the resting border (e.g. a selected or out-of-stock card);
+  /// hover still tints it blue unless set.
+  final Color? borderColor;
+  final double borderWidth;
+
+  /// Clip the content to the rounded corners (cards with edge-to-edge
+  /// images).
+  final bool clip;
+
   const HoverCard({
     super.key,
     required this.child,
     this.onTap,
     this.padding = const EdgeInsets.all(16),
     this.color,
+    this.borderColor,
+    this.borderWidth = 1,
+    this.clip = false,
   });
 
   @override
@@ -114,11 +126,16 @@ class _HoverCardState extends State<HoverCard> {
           curve: AppMotion.curve,
           transform: Matrix4.translationValues(0, lift, 0),
           padding: widget.padding,
+          clipBehavior: widget.clip ? Clip.antiAlias : Clip.none,
           decoration: BoxDecoration(
             color: widget.color ?? AppColors.card,
             borderRadius: BorderRadius.circular(AppRadii.card),
             border: Border.all(
-              color: _hover ? AppColors.blue.withValues(alpha: 0.35) : AppColors.border,
+              color: widget.borderColor ??
+                  (_hover
+                      ? AppColors.blue.withValues(alpha: 0.35)
+                      : AppColors.border),
+              width: widget.borderWidth,
             ),
             boxShadow: _hover ? AppShadows.raised : AppShadows.card,
           ),
