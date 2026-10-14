@@ -4,6 +4,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
+import '../../utils/quantity.dart';
 
 class PrintPriceListScreen extends StatefulWidget {
   const PrintPriceListScreen({super.key});
@@ -272,7 +273,7 @@ class _PrintPriceListScreenState extends State<PrintPriceListScreen> {
                           _buildTableCell(product.size),
                           _buildTableCell('Rs.${product.purchasePrice.toStringAsFixed(2)}'),
                           _buildTableCell('Rs.${product.salePrice.toStringAsFixed(2)}'),
-                          _buildTableCell(product.stock.toString()),
+                          _buildTableCell(formatQty(product.stock)),
                           _buildTableCell(
                             product.discountReceived != null
                                 ? '${product.discountReceived!.toStringAsFixed(1)}%'
@@ -304,7 +305,7 @@ class _PrintPriceListScreenState extends State<PrintPriceListScreen> {
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
               pw.Text(
-                'Total Stock: ${limitedProducts.fold<int>(0, (sum, p) => sum + p.stock)}',
+                'Total Stock: ${formatQty(limitedProducts.fold<double>(0, (sum, p) => sum + p.stock))}',
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
             ],
@@ -492,7 +493,7 @@ class _PrintPriceListScreenState extends State<PrintPriceListScreen> {
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
-                                          'Stock: ${product.stock}',
+                                          'Stock: ${formatQty(product.stock)}',
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: Colors.grey[600],

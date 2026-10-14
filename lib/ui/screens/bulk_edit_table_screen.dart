@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
 import '../../utils/product_field_parsing.dart';
+import '../../utils/quantity.dart';
 
 /// One editable column in the grid — mirrors the safe-to-edit product
 /// fields used by the Excel import flow (see kImportableProductKeys), so
@@ -147,7 +148,7 @@ class _BulkEditTableScreenState extends State<BulkEditTableScreen> {
       case 'wholesalePrice':
         return p.effectiveWholesalePrice.toStringAsFixed(2);
       case 'stock':
-        return p.stock.toString();
+        return formatQty(p.stock);
       case 'gst':
         return p.gst != null ? p.gst!.toStringAsFixed(1) : '';
       case 'discountReceived':
@@ -576,7 +577,8 @@ class _BulkEditTableScreenState extends State<BulkEditTableScreen> {
       child: TextField(
         controller: controller,
         keyboardType:
-            col.numeric ? TextInputType.numberWithOptions(decimal: !col.isInt) : TextInputType.text,
+            // Stock (isInt) takes decimals too, for items stocked by weight.
+            col.numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
         textAlign: col.numeric ? TextAlign.right : TextAlign.left,
         style: TextStyle(
           fontSize: 12,

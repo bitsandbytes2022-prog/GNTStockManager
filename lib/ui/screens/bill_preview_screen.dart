@@ -27,7 +27,7 @@ import '../widgets/thermal_offset_dialog.dart';
 /// when it was added to the cart.
 class BillLineItem {
   final Product product;
-  final int quantity;
+  final double quantity;
   final double price;
   final bool isPerFoot;
 
@@ -36,7 +36,7 @@ class BillLineItem {
   final double unitCost;
 
   /// Whole stock units (pipes) to deduct for this line.
-  final int stockUnits;
+  final double stockUnits;
 
   /// Customer-facing name override for this line, used in place of
   /// [product]'s real name — only ever set on an Estimate (see
@@ -683,7 +683,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     children: [
                       _buildTableCell('${e.key + 1}'),
                       _buildTableCell('${line.effectiveName} (${product.size})'),
-                      _buildTableCell(isPerFoot ? '$qty ft' : qty.toString()),
+                      _buildTableCell(product.qtyLabel(qty, perFoot: isPerFoot)),
                       _buildTableCell(
                           'INR ${formatRate(_originalRate(gst, e.key) ?? displayPrice)}'),
                       if (_hasDiscount)
@@ -955,7 +955,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           // the end rather than embedded in each line.
           final (displayPrice, amount) = _lineRateAmount(gst, e.key);
           final isPerFoot = line.isPerFoot;
-          final qtyLabel = isPerFoot ? '$qty ft' : qty.toString();
+          final qtyLabel = product.qtyLabel(qty, perFoot: isPerFoot);
 
           // Inseparable: a receipt spans several pages, and a bare Column is
           // allowed to split across a page break — leaving an item's name on
@@ -1470,7 +1470,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           ),
           Expanded(
             child: Text(
-              isPerFoot ? '$qty ft' : qty.toString(),
+              product.qtyLabel(qty, perFoot: isPerFoot),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 13),
             ),

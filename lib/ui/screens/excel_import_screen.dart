@@ -9,6 +9,7 @@ import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
 import '../../utils/product_excel_columns.dart';
 import '../../utils/product_field_parsing.dart';
+import '../../utils/quantity.dart';
 
 enum _RowStatus { changed, unchanged, notFound, error }
 
@@ -311,7 +312,7 @@ class _ExcelImportScreenState extends State<ExcelImportScreen> {
       case 'wholesalePrice':
         return '₹${p.effectiveWholesalePrice.toStringAsFixed(2)}';
       case 'stock':
-        return p.stock.toString();
+        return formatQty(p.stock);
       case 'gst':
         return p.gst != null ? '${p.gst!.toStringAsFixed(1)}%' : '—';
       case 'discountReceived':

@@ -2,13 +2,16 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/quantity.dart';
+import 'size_units.dart';
+
 class Product {
   final String id;
   final String name;
   final String size;
   final double purchasePrice;
   final double salePrice;
-  final int stock;
+  final double stock;
   final String? imageBase64;
   final dynamic createdAt; // Can be DateTime or Timestamp
   final String category;
@@ -19,7 +22,7 @@ class Product {
   final double? margin; // Profit margin percentage
   final double? wholesaleMargin; // Margin (%) over purchase price for shopkeeper buyers
   final double? wholesalePrice; // Price charged to shopkeepers (lower margin than retail)
-  final int totalSold;
+  final double totalSold;
   final int saleCount;
   final double salesFrequency;
 
@@ -53,7 +56,7 @@ class Product {
       'size': size,
       'purchasePrice': purchasePrice,
       'salePrice': salePrice,
-      'stock': stock,
+      'stock': storeQty(stock),
       'imageBase64': imageBase64,
       'createdAt': createdAt is DateTime
           ? Timestamp.fromDate(createdAt as DateTime)
@@ -66,7 +69,7 @@ class Product {
       'margin': margin,
       'wholesaleMargin': wholesaleMargin,
       'wholesalePrice': wholesalePrice,
-      'totalSold': totalSold,
+      'totalSold': storeQty(totalSold),
       'saleCount': saleCount,
       'salesFrequency': salesFrequency,
     };
@@ -90,7 +93,7 @@ class Product {
       size: map['size'] ?? '',
       purchasePrice: (map['purchasePrice'] ?? 0).toDouble(),
       salePrice: (map['salePrice'] ?? 0).toDouble(),
-      stock: map['stock'] ?? 0,
+      stock: readQty(map['stock']),
       imageBase64: map['imageBase64'],
       createdAt: createdAtValue,
       category: map['category'] ?? 'Uncategorized',
@@ -113,7 +116,7 @@ class Product {
       wholesalePrice: map['wholesalePrice'] != null
           ? (map['wholesalePrice'] as num).toDouble()
           : null,
-      totalSold: map['totalSold'] ?? 0,
+      totalSold: readQty(map['totalSold']),
       saleCount: map['saleCount'] ?? 0,
       salesFrequency: (map['salesFrequency'] ?? 0.0).toDouble(),
     );
@@ -126,7 +129,7 @@ class Product {
     String? size,
     double? purchasePrice,
     double? salePrice,
-    int? stock,
+    double? stock,
     String? imageBase64,
     dynamic createdAt,
     String? category,
@@ -137,7 +140,7 @@ class Product {
     double? margin,
     double? wholesaleMargin,
     double? wholesalePrice,
-    int? totalSold,
+    double? totalSold,
     int? saleCount,
     double? salesFrequency,
   }) {
@@ -223,6 +226,42 @@ class Product {
     final isPpr = cat == 'ppr' || sub.contains('ppr');
     return isPpr &&
         (name.toLowerCase().contains('pipe') || sub.contains('pipe'));
+  }
+
+  /// Sold by weight — size is in KG (e.g. "1 KG"), so quantity and stock
+  /// can be fractional, like 4.6 KG.
+  bool get isSoldByWeight => isWeightSize(size);
+
+  /// Unit to show after a quantity of this product ("kg"), or null.
+  String? get qtyUnit => qtyUnitForSize(size);
+
+  /// [q] as shown on carts and bills: "4.6 kg", "12 ft", "3".
+  String qtyLabel(num q, {bool perFoot = false}) =>
+      formatQtyWithUnit(q, size, perFoot: perFoot);
+
+  /// Whether a size string is in KG. Size strings are messy ("1 KG",
+  /// "1kg", "2 Kgs"), so the unit is matched loosely.
+  static bool isWeightSize(String size) {
+    final unit = unitOf(size);
+    if (unit != null) return unit.toLowerCase() == 'kg';
+    return RegExp(r'(^|[\d\s])(kg|kilo|kilogram)s?\.?$', caseSensitive: false)
+        .hasMatch(size.trim());
+  }
+
+  /// "kg" for loose KG items ("1 KG" or just "KG"), where quantity is the
+  /// weight sold. Null otherwise — including packs like "5 KG", where
+  /// quantity counts packs.
+  static String? qtyUnitForSize(String size) {
+    if (!isWeightSize(size)) return null;
+    final v = valueOf(size).replaceAll(RegExp(r'[a-zA-Z.]'), '').trim();
+    return (v.isEmpty || double.tryParse(v) == 1) ? 'kg' : null;
+  }
+
+  /// A quantity with its unit, for a product of [size].
+  static String formatQtyWithUnit(num q, String size, {bool perFoot = false}) {
+    if (perFoot) return '${formatQty(q)} ft';
+    final unit = qtyUnitForSize(size);
+    return unit == null ? formatQty(q) : '${formatQty(q)} $unit';
   }
 
   int? get feetPerPipe =>

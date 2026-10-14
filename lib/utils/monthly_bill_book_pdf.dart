@@ -197,7 +197,7 @@ Future<pw.Document> buildMonthlyBillBookPdf({
               final rate = line?.rate ?? it.salePrice;
               final amount = line?.amount ?? it.total;
               final qtyLabel =
-                  it.isPerFoot ? '${it.quantity} ft' : '${it.quantity}';
+                  it.qtyLabel;
               return pw.TableRow(children: [
                 _cell('${it.productName} (${it.productSize})'),
                 _cell(qtyLabel),

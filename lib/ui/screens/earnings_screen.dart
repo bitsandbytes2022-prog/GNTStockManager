@@ -4,6 +4,7 @@ import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../../utils/quantity.dart';
 
 enum TimePeriod { today, week, month, custom }
 
@@ -113,9 +114,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return _sales.length;
   }
 
-  int get _totalItemsSold {
-    return _sales.fold(0, (sum, sale) {
-      final itemCount = sale.items.fold(0, (itemSum, item) => itemSum + item.quantity);
+  double get _totalItemsSold {
+    return _sales.fold(0.0, (sum, sale) {
+      final itemCount = sale.items.fold(0.0, (itemSum, item) => itemSum + item.quantity);
       return sum + itemCount;
     });
   }
@@ -429,7 +430,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             Expanded(
               child: _buildStatCard(
                 'Items Sold',
-                _totalItemsSold.toDouble(),
+                _totalItemsSold,
                 _count,
                 Icons.shopping_cart,
                 const Color(0xFF7C4DFF),
@@ -710,7 +711,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
           return sum + ((item.salePrice - item.purchasePrice) * item.quantity);
         });
         final itemCount =
-            sale.items.fold(0, (sum, item) => sum + item.quantity);
+            sale.items.fold(0.0, (sum, item) => sum + item.quantity);
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
@@ -796,7 +797,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   children: [
                     _buildSaleDetailChip(
                       Icons.shopping_cart,
-                      '$itemCount items',
+                      '${formatQty(itemCount)} items',
                       const Color(0xFF7C4DFF),
                     ),
                     const SizedBox(width: 8),

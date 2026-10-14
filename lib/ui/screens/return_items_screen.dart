@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
+import '../../utils/quantity.dart';
 
 /// Screen to handle item returns and partial refunds
 class ReturnItemsScreen extends StatefulWidget {
@@ -19,7 +20,7 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
   final TextEditingController _reasonController = TextEditingController();
 
   // Track which items are being returned and how many
-  final Map<String, int> _returnQuantities = {};
+  final Map<String, double> _returnQuantities = {};
   bool _isProcessing = false;
 
   @override
@@ -40,8 +41,8 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
     return total;
   }
 
-  int get _totalItemsReturning {
-    return _returnQuantities.values.fold(0, (sum, qty) => sum + qty);
+  double get _totalItemsReturning {
+    return _returnQuantities.values.fold(0.0, (sum, qty) => sum + qty);
   }
 
   bool get _hasItemsToReturn => _totalItemsReturning > 0;
@@ -63,7 +64,7 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Return $_totalItemsReturning item(s)?'),
+            Text('Return ${formatQty(_totalItemsReturning)} item(s)?'),
             const SizedBox(height: 8),
             Text(
               'Refund Amount: ₹${_refundAmount.toStringAsFixed(2)}',
@@ -282,7 +283,7 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
                               ),
                             ),
                             Text(
-                              '$_totalItemsReturning',
+                              formatQty(_totalItemsReturning),
                               style: TextStyle(
                                 color: Colors.orange.shade900,
                                 fontWeight: FontWeight.bold,
@@ -364,8 +365,8 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
 
 class _ReturnItemCard extends StatelessWidget {
   final SaleItem item;
-  final int returnQuantity;
-  final Function(int) onQuantityChanged;
+  final double returnQuantity;
+  final Function(double) onQuantityChanged;
 
   const _ReturnItemCard({
     required this.item,
@@ -446,7 +447,7 @@ class _ReturnItemCard extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  'Purchased: ${item.quantity}',
+                  'Purchased: ${item.qtyLabel}',
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey.shade700,
@@ -467,7 +468,8 @@ class _ReturnItemCard extends StatelessWidget {
                 // Decrease button
                 IconButton(
                   onPressed: returnQuantity > 0
-                      ? () => onQuantityChanged(returnQuantity - 1)
+                      ? () => onQuantityChanged(
+                          roundQty((returnQuantity - 1).clamp(0, item.quantity)))
                       : null,
                   icon: const Icon(Icons.remove_circle_outline),
                   iconSize: 28,
@@ -482,7 +484,7 @@ class _ReturnItemCard extends StatelessWidget {
                   width: 50,
                   alignment: Alignment.center,
                   child: Text(
-                    '$returnQuantity',
+                    formatQty(returnQuantity),
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -493,8 +495,11 @@ class _ReturnItemCard extends StatelessWidget {
 
                 // Increase button
                 IconButton(
+                  // Steps by 1, topping out at the exact amount bought —
+                  // so a 4.6 kg line can return 4.6, not just 4.
                   onPressed: returnQuantity < item.quantity
-                      ? () => onQuantityChanged(returnQuantity + 1)
+                      ? () => onQuantityChanged(
+                          roundQty((returnQuantity + 1).clamp(0, item.quantity)))
                       : null,
                   icon: const Icon(Icons.add_circle_outline),
                   iconSize: 28,

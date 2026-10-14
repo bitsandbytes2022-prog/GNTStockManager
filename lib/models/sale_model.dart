@@ -1,5 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/quantity.dart';
+import 'product_model.dart';
+
 enum PaymentMethod {
   cash,
   upi,
@@ -51,7 +54,7 @@ class SaleItem {
   final String productName;
   final String productSize;
   final double salePrice;
-  final int quantity;
+  final double quantity;
   final double total;
   final double purchasePrice;
   final String? imageBase64;
@@ -65,7 +68,7 @@ class SaleItem {
   /// number of whole pipes consumed (feet / feet-per-pipe, rounded up),
   /// computed at sale-creation time since [Product] isn't available later.
   /// Null on older records — see [effectiveStockUnits].
-  final int? stockUnits;
+  final double? stockUnits;
 
   /// Set only when this line was brought in from a different sale via
   /// "Merge sales" — the date that sale was originally made on. Null means
@@ -95,6 +98,10 @@ class SaleItem {
     this.originalPrice,
   }) : total = salePrice * quantity;
 
+  /// Quantity as shown on bills and sale history: "4.6 kg", "12 ft", "3".
+  String get qtyLabel =>
+      Product.formatQtyWithUnit(quantity, productSize, perFoot: isPerFoot);
+
   /// Whether this line was sold below its [originalPrice].
   bool get isDiscounted =>
       originalPrice != null && originalPrice! - salePrice >= 0.005;
@@ -103,7 +110,7 @@ class SaleItem {
   /// ordinary lines and 0 for per-foot lines saved before [stockUnits]
   /// existed, matching how those older records already behaved (per-foot
   /// sales never touched stock until stockUnits was introduced).
-  int get effectiveStockUnits => stockUnits ?? (isPerFoot ? 0 : quantity);
+  double get effectiveStockUnits => stockUnits ?? (isPerFoot ? 0 : quantity);
 
   Map<String, dynamic> toMap() => {
     'productId': productId,
@@ -111,11 +118,11 @@ class SaleItem {
     'productSize': productSize,
     'salePrice': salePrice,
     'purchasePrice': purchasePrice,
-    'quantity': quantity,
+    'quantity': storeQty(quantity),
     'total': total,
     'imageBase64': imageBase64,
     'isPerFoot': isPerFoot,
-    'stockUnits': stockUnits,
+    'stockUnits': stockUnits == null ? null : storeQty(stockUnits!),
     'addedOn': addedOn != null ? Timestamp.fromDate(addedOn!) : null,
     if (originalPrice != null) 'originalPrice': originalPrice,
   };
@@ -127,10 +134,10 @@ class SaleItem {
       productSize: map['productSize'] ?? '',
       purchasePrice: (map['purchasePrice'] ?? 0).toDouble(),
       salePrice: (map['salePrice'] ?? 0).toDouble(),
-      quantity: map['quantity'] ?? 0,
+      quantity: readQty(map['quantity']),
       imageBase64: map['imageBase64'],
       isPerFoot: map['isPerFoot'] == true,
-      stockUnits: map['stockUnits'] as int?,
+      stockUnits: (map['stockUnits'] as num?)?.toDouble(),
       addedOn: (map['addedOn'] as Timestamp?)?.toDate(),
       originalPrice: (map['originalPrice'] as num?)?.toDouble(),
     );
@@ -146,11 +153,11 @@ class SaleItem {
     String? productName,
     String? productSize,
     double? salePrice,
-    int? quantity,
+    double? quantity,
     double? purchasePrice,
     String? imageBase64,
     bool? isPerFoot,
-    int? stockUnits,
+    double? stockUnits,
     DateTime? addedOn,
     double? originalPrice,
   }) {
@@ -368,7 +375,7 @@ extension SaleItemExtension on SaleItem {
     String? productId,
     String? productName,
     String? productSize,
-    int? quantity,
+    double? quantity,
     double? salePrice,
     double? purchasePrice,
     String? imageBase64,

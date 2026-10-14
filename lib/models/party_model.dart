@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/quantity.dart';
+
 /// Who a ledger is kept with: a shopkeeper who buys from the shop
 /// (customer), or one the shop buys from (supplier).
 enum PartyType { customer, supplier }
@@ -107,7 +109,7 @@ class PurchaseItem {
   final String productId;
   final String name;
   final String size;
-  final int quantity;
+  final double quantity;
 
   /// Purchase rate per unit.
   final double rate;
@@ -126,7 +128,7 @@ class PurchaseItem {
         'productId': productId,
         'name': name,
         'size': size,
-        'quantity': quantity,
+        'quantity': storeQty(quantity),
         'rate': rate,
       };
 
@@ -134,7 +136,7 @@ class PurchaseItem {
         productId: map['productId'] ?? '',
         name: map['name'] ?? '',
         size: map['size'] ?? '',
-        quantity: (map['quantity'] ?? 0) as int,
+        quantity: readQty(map['quantity']),
         rate: (map['rate'] ?? 0).toDouble(),
       );
 }

@@ -8,6 +8,7 @@ import '../../services/firebase_service.dart';
 import '../../services/analytics_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../../utils/quantity.dart';
 
 class AnalyticsDashboardScreen extends StatefulWidget {
   const AnalyticsDashboardScreen({super.key});
@@ -473,9 +474,9 @@ class _ComparisonAnalyticsTabState extends State<_ComparisonAnalyticsTab> {
                   _ComparisonCard(
                     title: 'Items Sold',
                     icon: Icons.shopping_bag,
-                    currentValue: metrics.currentPeriod.itemsSold.toString(),
+                    currentValue: formatQty(metrics.currentPeriod.itemsSold),
                     previousValue:
-                    metrics.previousPeriod.itemsSold.toString(),
+                    formatQty(metrics.previousPeriod.itemsSold),
                     change: metrics.itemsSoldChange,
                   ),
                 ],
@@ -1185,17 +1186,17 @@ class _LowStockCard extends StatelessWidget {
               children: [
                 _StockInfo(
                   label: 'Current Stock',
-                  value: item.product.stock.toString(),
+                  value: formatQty(item.product.stock),
                   icon: Icons.inventory,
                 ),
                 _StockInfo(
                   label: 'Total Sold',
-                  value: item.product.totalSold.toString(),
+                  value: formatQty(item.product.totalSold),
                   icon: Icons.trending_up,
                 ),
                 _StockInfo(
                   label: 'Recommend',
-                  value: '+${item.recommendedRestock}',
+                  value: '+${formatQty(item.recommendedRestock)}',
                   icon: Icons.add_shopping_cart,
                 ),
               ],

@@ -12,6 +12,7 @@ import '../../services/firebase_service.dart';
 import '../../services/settings_service.dart';
 import '../widgets/product_picker_dialog.dart';
 import '../widgets/size_input_dialog.dart';
+import '../../utils/quantity.dart';
 
 class AddProductScreen extends StatefulWidget {
   final Product? product;
@@ -194,7 +195,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
     try {
       _cloneSource = asClone ? p : null;
       _nameController.text = p.name;
-      _stockController.text = asClone ? '' : p.stock.toString();
+      _stockController.text = asClone ? '' : formatQty(p.stock);
       _selectedImage = null;
       _existingImageBase64 = p.imageBase64;
       _selectedCategory = p.category;
@@ -816,7 +817,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
         size: (_selectedSize ?? '').trim(),
         purchasePrice: double.parse(_purchasePriceController.text),
         salePrice: double.parse(_salePriceController.text),
-        stock: int.tryParse(_stockController.text) ?? 0,
+        stock: parseQty(_stockController.text) ?? 0,
         imageBase64: imageBase64,
         createdAt: isEditing ? widget.product!.createdAt : DateTime.now(),
         category: _selectedCategory!,
@@ -1504,8 +1505,9 @@ class _AddProductScreenState extends State<AddProductScreen> {
                 labelText: 'Stock Quantity (Optional)',
                 prefixIcon: Icon(Icons.inventory),
               ),
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              // Decimals allowed for items sold by weight (e.g. 12.5 KG).
+                    keyboardType: qtyKeyboard(true),
+              inputFormatters: qtyInputFormatters(true),
             ),
             const SizedBox(height: 32),
 

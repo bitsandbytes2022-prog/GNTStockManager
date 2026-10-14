@@ -6,6 +6,7 @@ import '../models/party_model.dart';
 import '../models/sale_model.dart';
 import 'firebase_service.dart';
 import 'sales_service.dart';
+import '../utils/quantity.dart';
 
 /// Everything the ledger screens need, delivered together so balances are
 /// always computed from a consistent set of parties, entries and sales.
@@ -373,7 +374,7 @@ class LedgerService {
     );
     for (final item in items) {
       batch.update(_firestore.collection(_productsCollection).doc(item.productId),
-          {'stock': FieldValue.increment(item.quantity)});
+          {'stock': FieldValue.increment(storeQty(item.quantity))});
     }
     await batch.commit();
     if (items.isNotEmpty) FirebaseService().clearCache();
@@ -458,7 +459,7 @@ class LedgerService {
       final productRef =
           _firestore.collection(_productsCollection).doc(item.productId);
       if (!(await productRef.get()).exists) continue;
-      batch.update(productRef, {'stock': FieldValue.increment(-item.quantity)});
+      batch.update(productRef, {'stock': FieldValue.increment(storeQty(-item.quantity))});
     }
     batch.delete(_entries.doc(entry.id));
     await batch.commit();

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 
 import '../models/sale_model.dart';
+import '../utils/quantity.dart';
 
 /// Optimized SalesService with Singleton pattern and counter tracking
 class SalesService {
@@ -39,9 +40,9 @@ class SalesService {
   // productId -> {coProductId: co-occurrence count across past baskets}
   Map<String, Map<String, int>>? _coOccurrenceCache;
   // productId -> quantity used in the most recent sale of that product
-  Map<String, int>? _lastQuantityCache;
+  Map<String, double>? _lastQuantityCache;
   // productId -> most common quantity across past sales of that product
-  Map<String, int>? _modeQuantityCache;
+  Map<String, double>? _modeQuantityCache;
   DateTime? _coOccurrenceComputedAt;
 
   // Cap the scan so this stays cheap regardless of shop volume: recent
@@ -78,8 +79,8 @@ class SalesService {
             .doc(item.productId);
 
         batch.update(productRef, {
-          'stock': FieldValue.increment(-item.effectiveStockUnits),
-          'totalSold': FieldValue.increment(item.quantity),
+          'stock': FieldValue.increment(storeQty(-item.effectiveStockUnits)),
+          'totalSold': FieldValue.increment(storeQty(item.quantity)),
           'saleCount': FieldValue.increment(1),
           'lastSoldAt': FieldValue.serverTimestamp(),
         });
@@ -163,7 +164,7 @@ class SalesService {
   /// - Creates return record for tracking
   Future<void> processReturn({
     required String saleId,
-    required Map<String, int> returnQuantities, // productId -> quantity to return
+    required Map<String, double> returnQuantities, // productId -> quantity to return
     String? reason,
   }) async {
     // Remove items with 0 returns
@@ -211,7 +212,7 @@ class SalesService {
           'productId': item.productId,
           'productName': item.productName,
           'productSize': item.productSize,
-          'quantity': returnQty,
+          'quantity': storeQty(returnQty),
           'salePrice': item.salePrice,
           'purchasePrice': item.purchasePrice,
           'refundAmount': itemRefund,
@@ -224,22 +225,27 @@ class SalesService {
         // pipes instead of feet (this also reduces to exactly returnQty
         // for ordinary lines, where effectiveStockUnits == quantity).
         if (!item.productId.startsWith('custom_')) {
-          final restoreUnits = item.quantity > 0
-              ? (item.effectiveStockUnits * returnQty / item.quantity).round()
-              : 0;
+          // Per-foot lines restore whole pipes; others (including
+          // fractional KG lines) restore exactly what came back.
+          final double restoreUnits = item.quantity <= 0
+              ? 0
+              : item.isPerFoot
+                  ? (item.effectiveStockUnits * returnQty / item.quantity)
+                      .roundToDouble()
+                  : roundQty(item.effectiveStockUnits * returnQty / item.quantity);
           final productRef = _firestore.collection(_productsCollection).doc(item.productId);
           // Skip products deleted since the sale — updating a missing doc
           // would fail the whole return.
           if ((await productRef.get()).exists) {
             batch.update(productRef, {
-              'stock': FieldValue.increment(restoreUnits), // Restore stock
-              'totalSold': FieldValue.increment(-returnQty), // Decrease sold count
+              'stock': FieldValue.increment(storeQty(restoreUnits)), // Restore stock
+              'totalSold': FieldValue.increment(storeQty(-returnQty)), // Decrease sold count
             });
           }
         }
 
         // If not all quantity is returned, keep the item with reduced quantity
-        final remainingQty = item.quantity - returnQty;
+        final remainingQty = roundQty(item.quantity - returnQty);
         if (remainingQty > 0) {
           updatedItems.add(item.copyWith(quantity: remainingQty));
         }
@@ -407,8 +413,8 @@ class SalesService {
 
     final sales = await _getSalesForCoOccurrence();
     final coOccurrence = <String, Map<String, int>>{};
-    final lastQuantity = <String, int>{};
-    final quantityFrequency = <String, Map<int, int>>{};
+    final lastQuantity = <String, double>{};
+    final quantityFrequency = <String, Map<double, int>>{};
 
     for (final sale in sales) {
       // Sales are ordered most-recent-first, so the first time we see a
@@ -428,9 +434,9 @@ class SalesService {
       }
     }
 
-    final modeQuantity = <String, int>{};
+    final modeQuantity = <String, double>{};
     for (final entry in quantityFrequency.entries) {
-      int bestQty = 1;
+      double bestQty = 1;
       int bestCount = -1;
       for (final qEntry in entry.value.entries) {
         if (qEntry.value > bestCount) {
@@ -491,7 +497,7 @@ class SalesService {
   Future<void> updateSale(
       Sale oldSale,
       Sale newSale,
-      Map<String, int> originalQuantities,
+      Map<String, double> originalQuantities,
       ) async {
     try {
       final batch = _firestore.batch();
@@ -510,8 +516,8 @@ class SalesService {
       // actually freed). Custom items have no real product doc and are
       // skipped — a batch update on a nonexistent doc would fail the whole
       // commit.
-      Map<String, int> unitsByProduct(List<SaleItem> items) {
-        final totals = <String, int>{};
+      Map<String, double> unitsByProduct(List<SaleItem> items) {
+        final totals = <String, double>{};
         for (final item in items) {
           if (item.productId.startsWith('custom_')) continue;
           totals[item.productId] =
@@ -520,15 +526,15 @@ class SalesService {
         return totals;
       }
 
-      final Map<String, int> stockAdjustments = {};
+      final Map<String, double> stockAdjustments = {};
       if (!skipStock) {
         final oldUnitsByProduct = unitsByProduct(oldSale.items);
         final newUnitsByProduct = unitsByProduct(newSale.items);
         final productIds = {...oldUnitsByProduct.keys, ...newUnitsByProduct.keys};
 
         for (final productId in productIds) {
-          final difference =
-              (oldUnitsByProduct[productId] ?? 0) - (newUnitsByProduct[productId] ?? 0);
+          final difference = roundQty(
+              (oldUnitsByProduct[productId] ?? 0) - (newUnitsByProduct[productId] ?? 0));
           if (difference != 0) {
             stockAdjustments[productId] = difference;
           }
@@ -546,7 +552,7 @@ class SalesService {
           final productRef = _firestore.collection('products').doc(productId);
           if (!(await productRef.get()).exists) continue;
           batch.update(productRef, {
-            'stock': FieldValue.increment(adjustment),
+            'stock': FieldValue.increment(storeQty(adjustment)),
           });
         }
       }
@@ -727,8 +733,8 @@ class SalesService {
         if (!(await productRef.get()).exists) continue;
 
         batch.update(productRef, {
-          'stock': FieldValue.increment(item.effectiveStockUnits),
-          'totalSold': FieldValue.increment(-item.quantity),
+          'stock': FieldValue.increment(storeQty(item.effectiveStockUnits)),
+          'totalSold': FieldValue.increment(storeQty(-item.quantity)),
           'saleCount': FieldValue.increment(-1),
         });
       }
@@ -818,11 +824,11 @@ class SalesService {
           (sum, sale) => sum + sale.totalAmount,
     );
 
-    final totalItems = sales.fold<int>(
+    final totalItems = sales.fold<double>(
       0,
           (sum, sale) =>
       sum +
-          sale.items.fold<int>(0, (itemSum, item) => itemSum + item.quantity),
+          sale.items.fold<double>(0, (itemSum, item) => itemSum + item.quantity),
     );
 
     return {

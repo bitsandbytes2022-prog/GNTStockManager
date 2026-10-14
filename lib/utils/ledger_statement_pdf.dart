@@ -7,6 +7,7 @@ import '../services/ledger_service.dart';
 import 'amount_in_words.dart';
 import 'pdf_fonts.dart';
 import 'pdf_logo.dart';
+import '../models/product_model.dart';
 
 // Seller identity — kept in step with the bill layouts in
 // bill_preview_screen.dart / sales_list_screen.dart / monthly_bill_book_pdf.dart.
@@ -105,12 +106,12 @@ Future<pw.Document> buildLedgerStatementPdf({
             ? ' (${item.productSize})'
             : '';
         lines.add(
-            '${item.productName}$size  ${item.quantity} x ${_money(item.salePrice)}');
+            '${item.productName}$size  ${item.qtyLabel} x ${_money(item.salePrice)}');
       }
     } else if (row.entry != null && row.entry!.items.isNotEmpty) {
       for (final item in row.entry!.items) {
         final size = item.size.isNotEmpty ? ' (${item.size})' : '';
-        lines.add('${item.name}$size  ${item.quantity} x ${_money(item.rate)}');
+        lines.add('${item.name}$size  ${Product.formatQtyWithUnit(item.quantity, item.size)} x ${_money(item.rate)}');
       }
       if (row.entry!.note?.isNotEmpty ?? false) lines.add(row.entry!.note!);
     } else if (row.subtitle?.isNotEmpty ?? false) {

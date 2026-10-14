@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
+import '../../utils/quantity.dart';
 
 enum _Period { today, week, month, custom }
 
@@ -13,7 +14,7 @@ class _ProductStats {
   final String productName;
   final String productSize;
   final String? imageBase64;
-  int totalQuantity = 0;
+  double totalQuantity = 0;
   double totalRevenue = 0;
   double totalProfit = 0;
   int transactionCount = 0;
@@ -308,7 +309,7 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
   Widget _buildList() {
     final maxQty = _topProducts.first.totalQuantity;
     final totalUnitsSold =
-        _topProducts.fold(0, (sum, p) => sum + p.totalQuantity);
+        _topProducts.fold(0.0, (sum, p) => sum + p.totalQuantity);
     final totalRevenue =
         _topProducts.fold(0.0, (sum, p) => sum + p.totalRevenue);
 
@@ -338,7 +339,7 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
 
   Widget _buildSummaryHeader({
     required int productCount,
-    required int totalUnits,
+    required double totalUnits,
     required double totalRevenue,
   }) {
     return Container(
@@ -362,7 +363,7 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
           ),
           _SummaryChip(
             label: 'Units Sold',
-            value: '$totalUnits',
+            value: formatQty(totalUnits),
             icon: Icons.shopping_bag,
           ),
           _SummaryChip(
@@ -452,7 +453,7 @@ class _SummaryChip extends StatelessWidget {
 class _ProductRankCard extends StatelessWidget {
   final int rank;
   final _ProductStats product;
-  final int maxQuantity;
+  final double maxQuantity;
 
   const _ProductRankCard({
     required this.rank,
@@ -559,7 +560,7 @@ class _ProductRankCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      '${product.totalQuantity}',
+                      formatQty(product.totalQuantity),
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.bold,

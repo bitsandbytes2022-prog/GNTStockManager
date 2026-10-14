@@ -8,6 +8,7 @@ import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
 import '../../utils/product_excel_columns.dart';
 import 'excel_import_screen.dart';
+import '../../utils/quantity.dart';
 
 // Web-only import
 // ignore: avoid_web_libraries_in_flutter
@@ -543,6 +544,12 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
     'totalSold': 14, 'saleCount': 14,
   };
 
+  /// Whole quantities export as integers; KG stock keeps its fraction.
+  CellValue _qtyCell(double q) {
+    final v = storeQty(q);
+    return v is int ? IntCellValue(v) : DoubleCellValue(v.toDouble());
+  }
+
   CellValue _cellValueFor(String key, Product p) {
     final margin = _effectiveMargin(p);
     final salePrice = _effectiveSalePrice(p);
@@ -556,13 +563,13 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
       case 'salePrice':      return DoubleCellValue(double.parse(salePrice.toStringAsFixed(2)));
       case 'minSalePrice':   return DoubleCellValue(double.parse(minSale.toStringAsFixed(2)));
       case 'wholesalePrice': return DoubleCellValue(double.parse(p.effectiveWholesalePrice.toStringAsFixed(2)));
-      case 'stock':          return IntCellValue(p.stock);
+      case 'stock':          return _qtyCell(p.stock);
       case 'gst':            return p.gst != null ? TextCellValue('${p.gst!.toStringAsFixed(1)}%') : TextCellValue('-');
       case 'discountReceived': return p.discountReceived != null ? TextCellValue('${p.discountReceived!.toStringAsFixed(1)}%') : TextCellValue('-');
       case 'sellingDiscount':
         final disc = _effectiveSellingDiscount(p);
         return disc > 0 ? TextCellValue('${disc.toStringAsFixed(1)}%') : TextCellValue('-');
-      case 'totalSold':      return IntCellValue(p.totalSold);
+      case 'totalSold':      return _qtyCell(p.totalSold);
       case 'saleCount':      return IntCellValue(p.saleCount);
       default:               return TextCellValue('');
     }
@@ -739,7 +746,7 @@ class _ExcelExportScreenState extends State<ExcelExportScreen> {
         final key = perProductCols[f]['key']!;
         final col = 1 + f;
         if (key == 'totalSold') {
-          setCell(col, IntCellValue(variants.fold(0, (s, p) => s + p.totalSold)), numStyle);
+          setCell(col, _qtyCell(variants.fold<double>(0, (s, p) => s + p.totalSold)), numStyle);
         } else if (key == 'saleCount') {
           setCell(col, IntCellValue(variants.fold(0, (s, p) => s + p.saleCount)), numStyle);
         } else {

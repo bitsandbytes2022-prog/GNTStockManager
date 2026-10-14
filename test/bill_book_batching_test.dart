@@ -3,7 +3,7 @@ import 'package:inventory_manager/models/sale_model.dart';
 import 'package:inventory_manager/utils/bill_book_batching.dart';
 
 void main() {
-  SaleItem item(String name, {int qty = 1, double price = 10}) => SaleItem(
+  SaleItem item(String name, {double qty = 1, double price = 10}) => SaleItem(
         productId: 'p_$name',
         productName: name,
         productSize: '1/2"',

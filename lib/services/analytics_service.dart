@@ -139,7 +139,7 @@ class AnalyticsService {
     double totalRevenue = 0;
     double totalCost = 0;
     double totalProfit = 0;
-    int itemsSold = 0;
+    double itemsSold = 0;
 
     for (final sale in sales) {
       totalRevenue += sale.totalAmount;
@@ -379,7 +379,7 @@ class PeriodStats {
   final double totalRevenue;
   final double totalProfit;
   final double totalCost;
-  final int itemsSold;
+  final double itemsSold;
   final double averageSaleValue;
 
   PeriodStats({
@@ -416,7 +416,7 @@ class ComparisonMetrics {
 class LowStockProduct {
   final Product product;
   final double percentageSold;
-  final int totalInventory;
+  final double totalInventory;
   final bool needsRestock; // true if 80%+ sold
 
   LowStockProduct({
@@ -433,9 +433,9 @@ class LowStockProduct {
     return 'Low';
   }
 
-  int get recommendedRestock {
+  double get recommendedRestock {
     // Recommend restocking to 2x the amount already sold
-    return (product.totalSold * 2 - product.stock).clamp(0, 999999);
+    return (product.totalSold * 2 - product.stock).clamp(0, 999999).toDouble();
   }
 }
 

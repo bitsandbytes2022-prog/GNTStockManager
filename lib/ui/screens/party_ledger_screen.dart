@@ -12,6 +12,7 @@ import 'record_sale_screen.dart';
 import '../widgets/ledger_share_sheet.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../../models/product_model.dart';
 
 /// One shopkeeper's / supplier's statement: every sale or purchase and
 /// every payment, with the running balance.
@@ -356,7 +357,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(item.productName),
                   subtitle: Text(
-                      '${item.quantity} × ${formatLedgerAmount(item.salePrice)}'),
+                      '${item.qtyLabel} × ${formatLedgerAmount(item.salePrice)}'),
                   trailing: Text(
                       formatLedgerAmount(item.quantity * item.salePrice)),
                 ),
@@ -432,7 +433,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
                     title: Text([item.name, if (item.size.isNotEmpty) item.size]
                         .join(' · ')),
                     subtitle: Text(
-                        '${item.quantity} × ${formatLedgerAmount(item.rate)} · added to stock'),
+                        '${Product.formatQtyWithUnit(item.quantity, item.size)} × ${formatLedgerAmount(item.rate)} · added to stock'),
                     trailing: Text(formatLedgerAmount(item.total)),
                   ),
               ],

@@ -4,6 +4,7 @@
 // same way regardless of which screen it came from.
 
 import '../models/product_model.dart';
+import 'quantity.dart';
 
 /// Result of parsing an optional percentage field (GST, discounts): `ok` is
 /// false when the text isn't blank/'-' and also isn't a valid number, so the
@@ -20,14 +21,12 @@ double? parseRequiredDouble(String raw) {
   return double.tryParse(t);
 }
 
-int? parseStock(String raw) {
+double? parseStock(String raw) {
   final t = raw.trim().replaceAll(',', '');
   if (t.isEmpty) return null;
-  final asInt = int.tryParse(t);
-  if (asInt != null) return asInt;
-  final asDouble = double.tryParse(t);
-  if (asDouble != null) return asDouble.round();
-  return null;
+  final v = double.tryParse(t);
+  // Fractions are kept for items stocked by weight (e.g. 12.5 KG).
+  return v == null ? null : roundQty(v);
 }
 
 OptionalDoubleParse parseOptionalPercent(String raw) {
@@ -71,7 +70,7 @@ Product mergeProductFields(Product original, Map<String, dynamic> fields) {
     purchasePrice: purchasePrice,
     salePrice:
         fields.containsKey('salePrice') ? fields['salePrice'] as double : original.salePrice,
-    stock: fields.containsKey('stock') ? fields['stock'] as int : original.stock,
+    stock: fields.containsKey('stock') ? (fields['stock'] as num).toDouble() : original.stock,
     imageBase64: original.imageBase64,
     createdAt: original.createdAt,
     category: fields.containsKey('category') ? fields['category'] as String : original.category,

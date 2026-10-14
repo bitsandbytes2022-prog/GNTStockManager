@@ -22,6 +22,7 @@ import '../widgets/thermal_offset_dialog.dart';
 import 'package:inventory_manager/ui/screens/return_items_screen.dart';
 
 import 'edit_sales_screen.dart';
+import '../../utils/quantity.dart';
 
 enum TimeSpan {
   today,
@@ -1031,7 +1032,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     ...group.value.map((item) {
                       final line = gst.lines[item]!;
                       final qtyLabel =
-                          item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}';
+                          item.qtyLabel;
                       // Inseparable: a receipt spans several pages, and a bare Column is
                       // allowed to split across a page break — leaving an item's name on
                       // one page and its qty × rate line on the next, under the wrong name.
@@ -1254,7 +1255,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
               _buildPdfTableCell('${serials[item]}'),
               _buildPdfTableCell('${item.productName} (${item.productSize})'),
               _buildPdfTableCell(
-                  item.isPerFoot ? '${item.quantity} ft' : '${item.quantity}'),
+                  item.qtyLabel),
               _buildPdfTableCell(
                   'INR ${formatRate(_originalRateOf(item) ?? line.rate)}'),
               if (withDiscount) _buildPdfTableCell('INR ${formatRate(line.rate)}'),
@@ -1466,7 +1467,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     double totalRevenue = 0;
     double totalCost = 0;
     double totalProfit = 0;
-    int itemsSold = 0;
+    double itemsSold = 0;
 
     for (final sale in sales) {
       totalRevenue += sale.totalAmount;
@@ -2414,7 +2415,7 @@ class _SaleCardState extends State<_SaleCard> {
   Widget build(BuildContext context) {
     final sale = widget.sale;
     final selected = widget.selected;
-    final itemCount = sale.items.fold(0, (sum, item) => sum + item.quantity);
+    final itemCount = sale.items.fold(0.0, (sum, item) => sum + item.quantity);
     final radius = BorderRadius.circular(AppRadii.card);
 
     return MouseRegion(
@@ -2473,7 +2474,7 @@ class _SaleCardState extends State<_SaleCard> {
                             const SizedBox(height: 2),
                             Text(
                               '#${sale.invoiceNumber} · '
-                              '$itemCount item${itemCount != 1 ? 's' : ''}',
+                              '${formatQty(itemCount)} item${itemCount != 1 ? 's' : ''}',
                               style: const TextStyle(
                                 fontSize: 12,
                                 color: AppColors.textMuted,
@@ -3062,7 +3063,7 @@ class _SaleDetailsDialogState extends State<_SaleDetailsDialog> {
                               Row(
                                 children: [
                                   Text(
-                                    '${item.quantity} × ₹${item.salePrice.toStringAsFixed(0)}',
+                                    '${item.qtyLabel} × ₹${item.salePrice.toStringAsFixed(0)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: Colors.grey[600],

@@ -6,7 +6,7 @@ import 'package:inventory_manager/utils/monthly_bill_book_pdf.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  SaleItem item(String name, {int qty = 2, double price = 100, bool perFoot = false}) =>
+  SaleItem item(String name, {double qty = 2, double price = 100, bool perFoot = false}) =>
       SaleItem(
         productId: 'p_$name',
         productName: name,
@@ -69,7 +69,7 @@ void main() {
   test('builds a combined bill book', () async {
     final sales = [
       for (var i = 1; i <= 20; i++)
-        sale(i, DateTime(2026, 8, i), [item('Item$i'), item('Elbow', qty: i)],
+        sale(i, DateTime(2026, 8, i), [item('Item$i'), item('Elbow', qty: i.toDouble())],
             buyer: i.isEven ? 'Ramesh Kumar' : null),
     ];
     final doc = await buildMonthlyBillBookPdf(

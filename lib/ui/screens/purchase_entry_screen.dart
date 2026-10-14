@@ -8,6 +8,7 @@ import '../../services/firebase_service.dart';
 import '../../services/ledger_service.dart';
 import '../widgets/product_picker_dialog.dart';
 import 'ledger_screen.dart';
+import '../../utils/quantity.dart';
 
 /// A line on the purchase being entered. [product] is null for an item not
 /// yet in the products list — it's created when the purchase is saved.
@@ -17,7 +18,7 @@ class _Line {
   final String size;
   final String category;
   final double salePrice;
-  int quantity;
+  double quantity;
   double rate;
 
   _Line.existing(Product this.product,
@@ -286,7 +287,7 @@ class _PurchaseEntryScreenState extends State<PurchaseEntryScreen> {
                       [_lines[i].name, if (_lines[i].size.isNotEmpty) _lines[i].size]
                           .join(' · ')),
                   subtitle: Text([
-                    '${_lines[i].quantity} × ${formatLedgerAmount(_lines[i].rate)}',
+                    '${Product.formatQtyWithUnit(_lines[i].quantity, _lines[i].size)} × ${formatLedgerAmount(_lines[i].rate)}',
                     if (_lines[i].isNew) 'NEW — will be added to products',
                   ].join(' · ')),
                   trailing: Row(
@@ -344,7 +345,7 @@ class _PurchaseEntryScreenState extends State<PurchaseEntryScreen> {
 }
 
 class _QtyRate {
-  final int quantity;
+  final double quantity;
   final double rate;
   _QtyRate(this.quantity, this.rate);
 }
@@ -397,7 +398,7 @@ class _QtyRateDialogState extends State<_QtyRateDialog> {
           onPressed: () {
             if (!_formKey.currentState!.validate()) return;
             Navigator.pop(context,
-                _QtyRate(int.parse(_qty.text), double.parse(_rate.text)));
+                _QtyRate(parseQty(_qty.text)!, double.parse(_rate.text)));
           },
           child: const Text('Add'),
         ),
@@ -532,7 +533,7 @@ class _NewItemDialogState extends State<_NewItemDialog> {
                 size: _size.text.trim(),
                 category: _category!,
                 salePrice: double.parse(_salePrice.text),
-                quantity: int.parse(_qty.text),
+                quantity: parseQty(_qty.text)!,
                 rate: double.parse(_rate.text),
               ),
             );
@@ -548,11 +549,12 @@ Widget _qtyField(TextEditingController controller, {bool autofocus = false}) {
   return TextFormField(
     controller: controller,
     autofocus: autofocus,
-    keyboardType: TextInputType.number,
-    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+    // Decimals allowed for items bought by weight (e.g. 12.5 KG).
+    keyboardType: qtyKeyboard(true),
+    inputFormatters: qtyInputFormatters(true),
     decoration: const InputDecoration(labelText: 'Quantity'),
     validator: (v) {
-      final value = int.tryParse(v ?? '');
+      final value = parseQty(v ?? '');
       if (value == null || value <= 0) return 'Enter quantity';
       return null;
     },

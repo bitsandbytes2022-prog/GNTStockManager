@@ -8,7 +8,7 @@
 /// discount larger than the eligible lines' value is capped at it.
 List<double> spreadCartDiscount({
   required List<double> prices,
-  required List<int> quantities,
+  required List<num> quantities,
   required List<bool> eligible,
   required double discount,
 }) {

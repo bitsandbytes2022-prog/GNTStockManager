@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../models/product_model.dart';
 import '../theme/app_theme.dart';
+import '../../utils/quantity.dart';
 
 class ProductCard extends StatefulWidget {
   final Product product;
@@ -216,7 +217,7 @@ class _ProductCardState extends State<ProductCard> {
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    '${product.totalSold} sold',
+                                    '${formatQty(product.totalSold)} sold',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: AppColors.blue,
@@ -353,7 +354,7 @@ class _ProductCardState extends State<ProductCard> {
             ),
             const SizedBox(width: 4),
             Text(
-              '${product.stock}',
+              product.qtyLabel(product.stock),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -432,7 +433,7 @@ class _ProductCardState extends State<ProductCard> {
             ),
             const SizedBox(width: 4),
             Text(
-              '${product.totalSold}',
+              formatQty(product.totalSold),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,

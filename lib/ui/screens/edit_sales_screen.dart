@@ -10,6 +10,7 @@ import '../../services/firebase_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/cart_discount.dart';
+import '../../utils/quantity.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'bill_preview_screen.dart';
@@ -56,7 +57,7 @@ class CustomItem {
 class _CartLine {
   final String lineKey;
   final Product product;
-  final int quantity;
+  final double quantity;
   /// The rate actually charged — after the sale discount, if one applies.
   final double price;
   final bool isPerFoot;
@@ -114,7 +115,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   // Every map below is keyed by a synthetic lineKey (see _newLineKey), not
   // by productId; _lineProductId resolves a lineKey back to the real
   // product. Mirrors RecordSaleScreen's cart model.
-  Map<String, int> _selectedQuantities = {};
+  Map<String, double> _selectedQuantities = {};
   Map<String, double> _customPrices = {};
 
   /// lineKey -> sold-by-length (pipes cut to feet). Quantity for these
@@ -205,8 +206,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   bool _isProductInCart(String productId) =>
       _lineProductId.values.contains(productId);
 
-  int _cartQuantityForProduct(String productId) {
-    var total = 0;
+  double _cartQuantityForProduct(String productId) {
+    double total = 0;
     for (final key in _cartItemOrder) {
       if (_lineProductId[key] == productId) {
         total += _selectedQuantities[key] ?? 0;
@@ -258,8 +259,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   // and is unaffected by this — this is purely so the UI's own guardrails
   // and displays don't falsely block/flag a valid re-edit of a product this
   // same sale already holds most (or all) of the stock for.
-  late final Map<String, int> _originalStockUnitsByProduct = () {
-    final totals = <String, int>{};
+  late final Map<String, double> _originalStockUnitsByProduct = () {
+    final totals = <String, double>{};
     for (final item in widget.sale.items) {
       if (item.productId.startsWith('custom_')) continue;
       totals[item.productId] =
@@ -268,8 +269,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     return totals;
   }();
 
-  int _effectiveStock(Product product) =>
-      product.stock + (_originalStockUnitsByProduct[product.id] ?? 0);
+  double _effectiveStock(Product product) =>
+      roundQty(product.stock + (_originalStockUnitsByProduct[product.id] ?? 0));
 
   @override
   void initState() {
@@ -349,7 +350,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           id: id,
           name: item.productName,
           amount: item.salePrice,
-          quantity: item.quantity,
+          quantity: item.quantity.round(),
         );
         continue;
       }
@@ -545,11 +546,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   int? _feetPerPipeFor(Product product) => product.feetPerPipe;
 
-  int _stockUnitsFor(Product product, int quantity, bool isPerFoot) {
+  double _stockUnitsFor(Product product, double quantity, bool isPerFoot) {
     if (!isPerFoot) return quantity;
     final feet = product.feetPerPipe;
     if (feet == null || feet <= 0) return quantity;
-    return (quantity / feet).ceil();
+    return (quantity / feet).ceilToDouble();
   }
 
   List<String> _availableSizesFor({String? category, String? subcategory}) {
@@ -748,12 +749,16 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   }) async {
     final int? feetPerPipe = _feetPerPipeFor(product);
     final bool isEditingExisting = editingLineKey != null;
-    final int availableStock = _effectiveStock(product);
+    final double availableStock = _effectiveStock(product);
 
-    final int alreadyElsewhere = _cartQuantityForProduct(product.id) -
-        (isEditingExisting ? (_selectedQuantities[editingLineKey] ?? 0) : 0);
+    final double alreadyElsewhere = roundQty(_cartQuantityForProduct(product.id) -
+        (isEditingExisting ? (_selectedQuantities[editingLineKey] ?? 0) : 0));
+    // KG items can be sold in fractions (e.g. 4.6 kg).
+    final bool byWeight = product.isSoldByWeight;
+    final String unitSuffix =
+        product.qtyUnit != null ? ' ${product.qtyUnit}' : '';
 
-    int currentQuantity = isEditingExisting ? _selectedQuantities[editingLineKey]! : 1;
+    double currentQuantity = isEditingExisting ? _selectedQuantities[editingLineKey]! : 1;
     if (!mounted) return;
     bool sellPerFoot = isEditingExisting
         ? (_perFootItems[editingLineKey] ?? false)
@@ -766,7 +771,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 : _listPriceOf(product)));
 
     final TextEditingController qtyController =
-        TextEditingController(text: currentQuantity.toString());
+        TextEditingController(text: formatQty(currentQuantity));
     final TextEditingController priceController =
         TextEditingController(text: currentPrice.toStringAsFixed(2));
     final FocusNode qtyFocusNode = FocusNode();
@@ -777,11 +782,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final remainingStock =
-                (availableStock - alreadyElsewhere).clamp(0, availableStock);
+            final double remainingStock = roundQty(
+                (availableStock - alreadyElsewhere).clamp(0, double.infinity));
 
             Future<void> submit() async {
-              int? qty = int.tryParse(qtyController.text);
+              final double? qty = byWeight && !sellPerFoot
+                  ? parseQty(qtyController.text)
+                  : int.tryParse(qtyController.text)?.toDouble();
               if (qty == null || qty <= 0) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -791,7 +798,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 );
                 return;
               }
-              if (!sellPerFoot && (alreadyElsewhere + qty) > availableStock) {
+              if (!sellPerFoot && roundQty(alreadyElsewhere + qty) > availableStock) {
                 final resolved = await _resolveInsufficientStock([product]);
                 if (!resolved) return;
                 if (mounted) setState(() {});
@@ -869,7 +876,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Available Stock: $availableStock',
+                                  'Available Stock: ${formatQty(availableStock)}$unitSuffix',
                                   style: TextStyle(
                                     color: availableStock < 5
                                         ? const Color(0xFFD97706)
@@ -879,7 +886,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                 ),
                                 if (alreadyElsewhere > 0)
                                   Text(
-                                    'Already $alreadyElsewhere in cart from earlier',
+                                    'Already ${formatQty(alreadyElsewhere)}$unitSuffix in cart from earlier',
                                     style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                                   ),
                               ],
@@ -925,7 +932,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     ],
                     const SizedBox(height: 16),
                     Text(
-                      sellPerFoot ? 'Feet' : 'Quantity',
+                      sellPerFoot
+                          ? 'Feet'
+                          : byWeight
+                              ? 'Quantity${product.qtyUnit != null ? ' (kg)' : ''} — decimals allowed'
+                              : 'Quantity',
                       style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 4),
@@ -933,9 +944,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                       children: [
                         IconButton(
                           onPressed: () {
-                            int currentVal = int.tryParse(qtyController.text) ?? 1;
+                            final currentVal = parseQty(qtyController.text) ?? 1;
                             if (currentVal > 1) {
-                              qtyController.text = (currentVal - 1).toString();
+                              qtyController.text = formatQty(currentVal - 1);
                               qtyController.selection = TextSelection.fromPosition(
                                 TextPosition(offset: qtyController.text.length),
                               );
@@ -950,25 +961,26 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             controller: qtyController,
                             focusNode: qtyFocusNode,
                             textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
+                            keyboardType: qtyKeyboard(byWeight && !sellPerFoot),
                             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                             decoration: InputDecoration(
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                               contentPadding: const EdgeInsets.symmetric(vertical: 12),
                               hintText: sellPerFoot ? 'feet' : '1',
+                              suffixText: sellPerFoot || unitSuffix.isEmpty
+                                  ? null
+                                  : unitSuffix.trim(),
                             ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              LengthLimitingTextInputFormatter(4),
-                            ],
+                            inputFormatters:
+                                qtyInputFormatters(byWeight && !sellPerFoot),
                             onSubmitted: (_) => submit(),
                           ),
                         ),
                         IconButton(
                           onPressed: () {
-                            int currentVal = int.tryParse(qtyController.text) ?? 0;
-                            if (sellPerFoot || currentVal < remainingStock) {
-                              qtyController.text = (currentVal + 1).toString();
+                            final currentVal = parseQty(qtyController.text) ?? 0;
+                            if (sellPerFoot || currentVal + 1 <= remainingStock) {
+                              qtyController.text = formatQty(currentVal + 1);
                               qtyController.selection = TextSelection.fromPosition(
                                 TextPosition(offset: qtyController.text.length),
                               );
@@ -983,14 +995,17 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
-                      children: [1, 5, 10, 25, 50].map((qty) {
+                      children: (byWeight && !sellPerFoot
+                              ? const <num>[0.25, 0.5, 1, 2, 5]
+                              : const <num>[1, 5, 10, 25, 50])
+                          .map((qty) {
                         if (!sellPerFoot && qty > remainingStock) {
                           return const SizedBox.shrink();
                         }
                         return ActionChip(
-                          label: Text(qty.toString()),
+                          label: Text(formatQty(qty)),
                           onPressed: () {
-                            qtyController.text = qty.toString();
+                            qtyController.text = formatQty(qty);
                             qtyController.selection = TextSelection.fromPosition(
                               TextPosition(offset: qtyController.text.length),
                             );
@@ -1006,7 +1021,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              sellPerFoot ? 'Price per foot' : 'Price per unit',
+                              sellPerFoot
+                                  ? 'Price per foot'
+                                  : product.qtyUnit != null
+                                      ? 'Price per kg'
+                                      : 'Price per unit',
                               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                             Text(
@@ -1094,7 +1113,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   void _addToCartWithPrice(
     Product product,
-    int quantity,
+    double quantity,
     double price, {
     bool isPerFoot = false,
     String? editLineKey,
@@ -1114,8 +1133,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       SnackBar(
         content: Text(
           editLineKey != null
-              ? 'Updated: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})'
-              : 'Added: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})',
+              ? 'Updated: ${product.name} (Qty: ${product.qtyLabel(quantity, perFoot: isPerFoot)}, Price: ₹${price.toStringAsFixed(2)})'
+              : 'Added: ${product.name} (Qty: ${product.qtyLabel(quantity, perFoot: isPerFoot)}, Price: ₹${price.toStringAsFixed(2)})',
         ),
         duration: const Duration(seconds: 1),
         backgroundColor: AppColors.green,
@@ -1272,7 +1291,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     }
   }
 
-  void _updateQuantity(String lineKey, int quantity) {
+  void _updateQuantity(String lineKey, double quantity) {
+    quantity = roundQty(quantity);
     if (quantity <= 0) {
       _removeFromCart(lineKey);
     } else {
@@ -2015,7 +2035,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
             productId: 'custom_${customItem.id}',
             productName: customItem.name,
             productSize: 'Custom Item',
-            quantity: customItem.quantity,
+            quantity: customItem.quantity.toDouble(),
             salePrice: customItem.amount,
             purchasePrice: 0,
             imageBase64: null,
@@ -3185,7 +3205,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   Future<bool> _resolveInsufficientStock(List<Product> insufficientProducts) async {
     final controllers = {
       for (final product in insufficientProducts)
-        product.id: TextEditingController(text: _cartQuantityForProduct(product.id).toString()),
+        product.id: TextEditingController(text: formatQty(_cartQuantityForProduct(product.id))),
     };
     bool isSaving = false;
 
@@ -3211,14 +3231,16 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                     for (final product in insufficientProducts) ...[
                       Text('${product.name} (${product.size})', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                       Text(
-                        'Currently ${product.stock} in stock · cart needs ${_cartQuantityForProduct(product.id)}',
+                        'Currently ${formatQty(product.stock)} in stock · cart needs ${formatQty(_cartQuantityForProduct(product.id))}',
                         style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                       ),
                       const SizedBox(height: 6),
                       TextField(
                         controller: controllers[product.id],
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        keyboardType: qtyKeyboard(product.isSoldByWeight),
+                        inputFormatters: product.isSoldByWeight
+                            ? qtyInputFormatters(true)
+                            : [FilteringTextInputFormatter.digitsOnly],
                         decoration: InputDecoration(
                           labelText: 'New stock',
                           isDense: true,
@@ -3242,7 +3264,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           setDialogState(() => isSaving = true);
                           try {
                             for (final product in insufficientProducts) {
-                              final newStock = int.tryParse(controllers[product.id]!.text);
+                              final newStock = parseQty(controllers[product.id]!.text);
                               if (newStock == null || newStock < 0) {
                                 throw Exception('Enter a valid stock number for ${product.name}');
                               }
@@ -3343,9 +3365,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 // [effectiveStock] instead of reading product.stock directly.
 class _QuickProductCell extends StatelessWidget {
   final Product product;
-  final int effectiveStock;
+  final double effectiveStock;
   final bool isInCart;
-  final int quantity;
+  final double quantity;
   final double price;
   final VoidCallback onTap;
 
@@ -3400,7 +3422,7 @@ class _QuickProductCell extends StatelessWidget {
                         ),
                       ),
                       if (isInCart)
-                        Text('×$quantity', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.blue)),
+                        Text('×${formatQty(quantity)}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.blue)),
                     ],
                   ),
                 ],
@@ -3444,9 +3466,9 @@ class _QuickProductCell extends StatelessWidget {
 // narrow layouts — see project memory project_known_bugs.md.
 class _ProductCard extends StatelessWidget {
   final Product product;
-  final int effectiveStock;
+  final double effectiveStock;
   final bool isSelected;
-  final int quantity;
+  final double quantity;
   final VoidCallback onTap;
   final bool showPurchasePrice;
   final bool showSalesInfo;
@@ -3557,7 +3579,7 @@ class _ProductCard extends StatelessWidget {
                                   Icon(Icons.trending_up, size: 10, color: AppColors.blue),
                                   const SizedBox(width: 2),
                                   Text(
-                                    '${product.totalSold} sold',
+                                    '${formatQty(product.totalSold)} sold',
                                     style: TextStyle(fontSize: 9, color: AppColors.blue, fontWeight: FontWeight.w600),
                                   ),
                                 ],
@@ -3616,7 +3638,7 @@ class _ProductCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
-          isOutOfStock ? 'Out' : 'Low: $effectiveStock',
+          isOutOfStock ? 'Out' : 'Low: ${formatQty(effectiveStock)}',
           style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
         ),
       ),
@@ -3651,7 +3673,7 @@ class _ProductCard extends StatelessWidget {
           children: [
             const Icon(Icons.check, color: Colors.white, size: 12),
             if (quantity > 0) ...[
-              Text(quantity.toString(), style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+              Text(formatQty(quantity), style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
             ],
           ],
         ),
@@ -3724,7 +3746,7 @@ class _ProductCard extends StatelessWidget {
           children: [
             const Icon(Icons.local_fire_department, size: 9, color: Colors.white),
             const SizedBox(width: 2),
-            Text('${product.totalSold}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 8)),
+            Text(formatQty(product.totalSold), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 8)),
           ],
         ),
       ),
@@ -3757,10 +3779,10 @@ class _ProductCard extends StatelessWidget {
 // product.stock directly for the quantity "+" ceiling.
 class _CartItem extends StatefulWidget {
   final Product product;
-  final int effectiveStock;
-  final int quantity;
+  final double effectiveStock;
+  final double quantity;
   final double price;
-  final Function(int) onQuantityChanged;
+  final Function(double) onQuantityChanged;
   final Function(double) onPriceChanged;
   final VoidCallback onRemove;
   final VoidCallback onEdit;
@@ -3928,13 +3950,13 @@ class _CartItemState extends State<_CartItem> {
                   ),
                   Expanded(
                     child: Text(
-                      widget.isPerFoot ? '${widget.quantity} ft' : widget.quantity.toString(),
+                      widget.product.qtyLabel(widget.quantity, perFoot: widget.isPerFoot),
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                     ),
                   ),
                   IconButton(
-                    onPressed: widget.isPerFoot || widget.quantity < widget.effectiveStock
+                    onPressed: widget.isPerFoot || roundQty(widget.quantity + 1) <= widget.effectiveStock
                         ? () => widget.onQuantityChanged(widget.quantity + 1)
                         : null,
                     icon: const Icon(Icons.add, size: 16),

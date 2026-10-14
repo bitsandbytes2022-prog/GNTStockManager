@@ -24,6 +24,7 @@ import '../screens/ledger_screen.dart';
 import '../widgets/ledger_share_sheet.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../../utils/quantity.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
 
@@ -63,7 +64,7 @@ class CustomItem {
 class _CartLine {
   final String lineKey;
   final Product product;
-  final int quantity;
+  final double quantity;
   /// The rate actually charged — after the cart discount, if one applies.
   final double price;
   final bool isPerFoot;
@@ -124,7 +125,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // instead of silently merging into a combined quantity. Every map below is
   // keyed by a synthetic lineKey (see _newLineKey), not by productId;
   // _lineProductId resolves a lineKey back to the real product.
-  Map<String, int> _selectedQuantities = {};
+  Map<String, double> _selectedQuantities = {};
   Map<String, double> _customPrices = {};
   List<String> _cartItemOrder = []; // Track order of lines added to cart
   Map<String, String> _lineProductId = {}; // lineKey -> productId
@@ -246,8 +247,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   /// Total quantity for [productId] summed across every cart line, or 0.
   /// Used for stock guardrails and "already N in cart" context, since a
   /// product's real commitment is the sum of all its lines, not any one.
-  int _cartQuantityForProduct(String productId) {
-    var total = 0;
+  double _cartQuantityForProduct(String productId) {
+    double total = 0;
     for (final key in _cartItemOrder) {
       if (_lineProductId[key] == productId) {
         total += _selectedQuantities[key] ?? 0;
@@ -517,11 +518,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // divided by feet-per-pipe, rounded up, for per-foot lines; the plain
   // quantity otherwise. Stock is allowed to go negative for per-foot sales —
   // cut-pipe remainders aren't tracked, so this never blocks the sale.
-  int _stockUnitsFor(Product product, int quantity, bool isPerFoot) {
+  double _stockUnitsFor(Product product, double quantity, bool isPerFoot) {
     if (!isPerFoot) return quantity;
     final feet = product.feetPerPipe;
     if (feet == null || feet <= 0) return quantity;
-    return (quantity / feet).ceil();
+    return (quantity / feet).ceilToDouble();
   }
 
   // Distinct sizes present given a category+subcategory scope, used to
@@ -739,10 +740,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     // Quantity already committed to *other* lines of this same product —
     // excluded from stock guardrails' own line when editing, since that
     // quantity is being replaced, not added on top of.
-    final int alreadyElsewhere = _cartQuantityForProduct(product.id) -
-        (isEditingExisting ? (_selectedQuantities[editingLineKey] ?? 0) : 0);
+    final double alreadyElsewhere = roundQty(_cartQuantityForProduct(product.id) -
+        (isEditingExisting ? (_selectedQuantities[editingLineKey] ?? 0) : 0));
+    // KG items can be sold in fractions (e.g. 4.6 kg).
+    final bool byWeight = product.isSoldByWeight;
+    final String unitSuffix =
+        product.qtyUnit != null ? ' ${product.qtyUnit}' : '';
 
-    int currentQuantity =
+    double currentQuantity =
         isEditingExisting ? _selectedQuantities[editingLineKey]! : 1;
     if (!mounted) return;
     bool sellPerFoot = isEditingExisting
@@ -756,7 +761,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 : _listPriceOf(product)));
 
     final TextEditingController qtyController = TextEditingController(
-      text: currentQuantity.toString(),
+      text: formatQty(currentQuantity),
     );
     final TextEditingController priceController = TextEditingController(
       text: currentPrice.toStringAsFixed(2),
@@ -778,11 +783,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           builder: (context, setDialogState) {
             // Stock left for *this* line to use, after what other lines of
             // the same product have already committed.
-            final remainingStock =
-                (product.stock - alreadyElsewhere).clamp(0, product.stock);
+            final double remainingStock = roundQty(
+                (product.stock - alreadyElsewhere).clamp(0, double.infinity));
 
             Future<void> submit() async {
-              int? qty = int.tryParse(qtyController.text);
+              final double? qty = byWeight && !sellPerFoot
+                  ? parseQty(qtyController.text)
+                  : int.tryParse(qtyController.text)?.toDouble();
               if (qty == null || qty <= 0) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -792,7 +799,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 );
                 return;
               }
-              if (!sellPerFoot && (alreadyElsewhere + qty) > product.stock) {
+              if (!sellPerFoot &&
+                  roundQty(alreadyElsewhere + qty) > roundQty(product.stock)) {
                 // Offer an inline stock fix instead of just blocking —
                 // covers "forgot to update stock after a restock"
                 // without losing anything already in the cart.
@@ -880,7 +888,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Available Stock: ${product.stock}',
+                                  'Available Stock: ${formatQty(product.stock)}$unitSuffix',
                                   style: TextStyle(
                                     color: product.stock < 5
                                         ? const Color(0xFFD97706)
@@ -890,7 +898,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                                 ),
                                 if (alreadyElsewhere > 0)
                                   Text(
-                                    'Already $alreadyElsewhere in cart from earlier',
+                                    'Already ${formatQty(alreadyElsewhere)}$unitSuffix in cart from earlier',
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: AppColors.textMuted,
@@ -962,7 +970,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     const SizedBox(height: 16),
 
                     Text(
-                      sellPerFoot ? 'Feet' : 'Quantity',
+                      sellPerFoot
+                          ? 'Feet'
+                          : byWeight
+                              ? 'Quantity${product.qtyUnit != null ? ' (kg)' : ''} — decimals allowed'
+                              : 'Quantity',
                       style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 4),
@@ -973,9 +985,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         // Decrease button
                         IconButton(
                           onPressed: () {
-                            int currentVal = int.tryParse(qtyController.text) ?? 1;
+                            final currentVal = parseQty(qtyController.text) ?? 1;
                             if (currentVal > 1) {
-                              qtyController.text = (currentVal - 1).toString();
+                              qtyController.text = formatQty(currentVal - 1);
                               qtyController.selection = TextSelection.fromPosition(
                                 TextPosition(offset: qtyController.text.length),
                               );
@@ -992,7 +1004,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                             controller: qtyController,
                             focusNode: qtyFocusNode,
                             textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
+                            keyboardType: qtyKeyboard(byWeight && !sellPerFoot),
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -1005,11 +1017,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                                 vertical: 12,
                               ),
                               hintText: sellPerFoot ? 'feet' : '1',
+                              suffixText: sellPerFoot || unitSuffix.isEmpty
+                                  ? null
+                                  : unitSuffix.trim(),
                             ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              LengthLimitingTextInputFormatter(4),
-                            ],
+                            inputFormatters:
+                                qtyInputFormatters(byWeight && !sellPerFoot),
                             onSubmitted: (_) => submit(),
                           ),
                         ),
@@ -1017,9 +1030,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         // Increase button
                         IconButton(
                           onPressed: () {
-                            int currentVal = int.tryParse(qtyController.text) ?? 0;
-                            if (sellPerFoot || currentVal < remainingStock) {
-                              qtyController.text = (currentVal + 1).toString();
+                            final currentVal = parseQty(qtyController.text) ?? 0;
+                            if (sellPerFoot || currentVal + 1 <= remainingStock) {
+                              qtyController.text = formatQty(currentVal + 1);
                               qtyController.selection = TextSelection.fromPosition(
                                 TextPosition(offset: qtyController.text.length),
                               );
@@ -1037,14 +1050,17 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     // Quick quantity buttons
                     Wrap(
                       spacing: 8,
-                      children: [1, 5, 10, 25, 50].map((qty) {
+                      children: (byWeight && !sellPerFoot
+                              ? const <num>[0.25, 0.5, 1, 2, 5]
+                              : const <num>[1, 5, 10, 25, 50])
+                          .map((qty) {
                         if (!sellPerFoot && qty > remainingStock) {
                           return const SizedBox.shrink();
                         }
                         return ActionChip(
-                          label: Text(qty.toString()),
+                          label: Text(formatQty(qty)),
                           onPressed: () {
-                            qtyController.text = qty.toString();
+                            qtyController.text = formatQty(qty);
                             qtyController.selection = TextSelection.fromPosition(
                               TextPosition(offset: qtyController.text.length),
                             );
@@ -1062,7 +1078,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              sellPerFoot ? 'Price per foot' : 'Price per unit',
+                              sellPerFoot
+                                  ? 'Price per foot'
+                                  : product.qtyUnit != null
+                                      ? 'Price per kg'
+                                      : 'Price per unit',
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -1186,7 +1206,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   /// new one.
   void _addToCartWithPrice(
     Product product,
-    int quantity,
+    double quantity,
     double price, {
     bool isPerFoot = false,
     String? editLineKey,
@@ -1217,8 +1237,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       SnackBar(
         content: Text(
           editLineKey != null
-              ? 'Updated: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})'
-              : 'Added: ${product.name} (Qty: $quantity${isPerFoot ? ' ft' : ''}, Price: ₹${price.toStringAsFixed(2)})',
+              ? 'Updated: ${product.name} (Qty: ${formatQty(quantity)}${isPerFoot ? ' ft' : product.qtyUnit != null ? ' ${product.qtyUnit}' : ''}, Price: ₹${price.toStringAsFixed(2)})'
+              : 'Added: ${product.name} (Qty: ${formatQty(quantity)}${isPerFoot ? ' ft' : product.qtyUnit != null ? ' ${product.qtyUnit}' : ''}, Price: ₹${price.toStringAsFixed(2)})',
         ),
         duration: const Duration(seconds: 1),
         backgroundColor: AppColors.green,
@@ -1404,7 +1424,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
   }
 
-  void _updateQuantity(String lineKey, int quantity) {
+  void _updateQuantity(String lineKey, double quantity) {
+    quantity = roundQty(quantity);
     if (quantity <= 0) {
       _removeFromCart(lineKey);
     } else {
@@ -2323,7 +2344,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             productId: 'custom_${customItem.id}',
             productName: customItem.name,
             productSize: 'Custom Item',
-            quantity: customItem.quantity,
+            quantity: customItem.quantity.toDouble(),
             salePrice: customItem.amount,
             purchasePrice: 0, // Custom items don't have purchase price
             imageBase64: null,
@@ -3838,7 +3859,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           // Suggest the total cart quantity for this product across every
           // line (a customer's repeat visits can add up to more than any
           // single line), not just one line's own quantity.
-          text: _cartQuantityForProduct(product.id).toString(),
+          text: formatQty(_cartQuantityForProduct(product.id)),
         ),
     };
     bool isSaving = false;
@@ -3868,15 +3889,17 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                       ),
                       Text(
-                        'Currently ${product.stock} in stock · cart needs '
-                        '${_cartQuantityForProduct(product.id)}',
+                        'Currently ${formatQty(product.stock)} in stock · cart needs '
+                        '${formatQty(_cartQuantityForProduct(product.id))}',
                         style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                       ),
                       const SizedBox(height: 6),
                       TextField(
                         controller: controllers[product.id],
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        keyboardType: qtyKeyboard(product.isSoldByWeight),
+                        inputFormatters: product.isSoldByWeight
+                            ? qtyInputFormatters(true)
+                            : [FilteringTextInputFormatter.digitsOnly],
                         decoration: InputDecoration(
                           labelText: 'New stock',
                           isDense: true,
@@ -3900,7 +3923,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           setDialogState(() => isSaving = true);
                           try {
                             for (final product in insufficientProducts) {
-                              final newStock = int.tryParse(controllers[product.id]!.text);
+                              final newStock = parseQty(controllers[product.id]!.text);
                               if (newStock == null || newStock < 0) {
                                 throw Exception('Enter a valid stock number for ${product.name}');
                               }
@@ -4003,7 +4026,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     // add up to more than any single line commits to), and every shortfall
     // is collected at once (not just the first) so the fix dialog below can
     // offer them all together instead of one at a time.
-    final Map<String, int> nonPerFootQtyByProduct = {};
+    final Map<String, double> nonPerFootQtyByProduct = {};
     for (final line in _cartLines) {
       if (line.isPerFoot) continue;
       nonPerFootQtyByProduct[line.product.id] =
@@ -4011,7 +4034,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
     final insufficientProducts = <Product>[
       for (final entry in nonPerFootQtyByProduct.entries)
-        if (entry.value > _findProductById(entry.key)!.stock)
+        if (roundQty(entry.value) > roundQty(_findProductById(entry.key)!.stock))
           _findProductById(entry.key)!,
     ];
 
@@ -4134,7 +4157,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 class _QuickProductCell extends StatelessWidget {
   final Product product;
   final bool isInCart;
-  final int quantity;
+  final double quantity;
   final double price;
   final VoidCallback onTap;
 
@@ -4194,7 +4217,7 @@ class _QuickProductCell extends StatelessWidget {
                       ),
                       if (isInCart)
                         Text(
-                          '×$quantity',
+                          '×${formatQty(quantity)}',
                           style: const TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
@@ -4250,7 +4273,7 @@ class _QuickProductCell extends StatelessWidget {
 class _ProductCard extends StatelessWidget {
   final Product product;
   final bool isSelected;
-  final int quantity;
+  final double quantity;
   final VoidCallback onTap;
   final bool showPurchasePrice;
   final bool showSalesInfo;
@@ -4392,7 +4415,7 @@ class _ProductCard extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 2),
                                   Text(
-                                    '${product.totalSold} sold',
+                                    '${formatQty(product.totalSold)} sold',
                                     style: TextStyle(
                                       fontSize: 9,
                                       color: AppColors.blue,
@@ -4471,7 +4494,7 @@ class _ProductCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
-          isOutOfStock ? 'Out' : 'Low: ${product.stock}',
+          isOutOfStock ? 'Out' : 'Low: ${formatQty(product.stock)}',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 8,
@@ -4525,7 +4548,7 @@ class _ProductCard extends StatelessWidget {
             ),
             if (quantity > 0) ...[
               Text(
-                quantity.toString(),
+                formatQty(quantity),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 9,
@@ -4645,7 +4668,7 @@ class _ProductCard extends StatelessWidget {
             ),
             const SizedBox(width: 2),
             Text(
-              '${product.totalSold}',
+              formatQty(product.totalSold),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -4721,9 +4744,9 @@ class _ProductCard extends StatelessWidget {
 // Cart Item Widget with improved controls
 class _CartItem extends StatefulWidget {
   final Product product;
-  final int quantity;
+  final double quantity;
   final double price;
-  final Function(int) onQuantityChanged;
+  final Function(double) onQuantityChanged;
   final Function(double) onPriceChanged;
   final VoidCallback onRemove;
   final VoidCallback onEdit;
@@ -4945,8 +4968,8 @@ class _CartItemState extends State<_CartItem> {
                   Expanded(
                     child: Text(
                       widget.isPerFoot
-                          ? '${widget.quantity} ft'
-                          : widget.quantity.toString(),
+                          ? '${formatQty(widget.quantity)} ft'
+                          : '${formatQty(widget.quantity)}${widget.product.qtyUnit != null ? ' ${widget.product.qtyUnit}' : ''}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 13,
@@ -4956,7 +4979,7 @@ class _CartItemState extends State<_CartItem> {
                   ),
                   IconButton(
                     onPressed: widget.isPerFoot ||
-                            widget.quantity < widget.product.stock
+                            roundQty(widget.quantity + 1) <= widget.product.stock
                         ? () => widget.onQuantityChanged(widget.quantity + 1)
                         : null,
                     icon: const Icon(Icons.add, size: 16),

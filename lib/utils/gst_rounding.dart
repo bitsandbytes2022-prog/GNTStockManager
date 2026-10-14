@@ -30,7 +30,7 @@ class GstBreakup {
 /// than ₹1 keeps its rate in paise and rounds only the amount.
 GstBreakup roundedGstBreakup({
   required List<double> prices,
-  required List<int> quantities,
+  required List<num> quantities,
   required double total,
   required double gstRate,
 }) {
@@ -49,10 +49,13 @@ GstBreakup roundedGstBreakup({
 /// GST-inclusive [price], and its amount over [qty], rounded as described
 /// there. Also used on its own to print a discounted line's original rate
 /// the same way as the rate charged.
-GstLine roundedGstLine(double price, int qty, double gstRate) {
+GstLine roundedGstLine(double price, num qty, double gstRate) {
   final exact = price / (1 + gstRate / 100);
   final whole = exact.roundToDouble();
-  if ((whole - exact).abs() * qty <= 1) return GstLine(whole, whole * qty);
+  if ((whole - exact).abs() * qty <= 1) {
+    // Fractional (KG) quantities can leave paise on a whole rate.
+    return GstLine(whole, (whole * qty * 100).roundToDouble() / 100);
+  }
   final paise = (exact * 100).roundToDouble() / 100;
   return GstLine(paise, (paise * qty).roundToDouble());
 }
