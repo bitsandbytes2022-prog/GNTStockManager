@@ -23,6 +23,7 @@ import 'package:inventory_manager/ui/screens/return_items_screen.dart';
 
 import 'edit_sales_screen.dart';
 import '../../utils/quantity.dart';
+import 'credit_sales_screen.dart';
 
 enum TimeSpan {
   today,
@@ -1613,6 +1614,44 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       ),
                     ),
                     const SizedBox(width: 12),
+
+                    // All credit sales in one list
+                    Tooltip(
+                      message: 'Credit sales',
+                      child: InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const CreditSalesScreen()),
+                        ),
+                        borderRadius: BorderRadius.circular(AppRadii.control),
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: _isDesktop || _isTablet ? 14 : 12,
+                              vertical: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.page,
+                            borderRadius:
+                                BorderRadius.circular(AppRadii.control),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.schedule,
+                                  color: Color(0xFFD97706)),
+                              if (_isDesktop || _isTablet) ...[
+                                const SizedBox(width: 8),
+                                const Text('Credit sales',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.navy)),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
 
                     // Settings menu
                     PopupMenuButton<String>(

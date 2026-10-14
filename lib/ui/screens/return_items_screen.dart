@@ -18,6 +18,8 @@ class ReturnItemsScreen extends StatefulWidget {
 class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
   final SalesService _salesService = SalesService();
   final TextEditingController _reasonController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   // Track which items are being returned and how many
   final Map<String, double> _returnQuantities = {};
@@ -47,6 +49,18 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
 
   bool get _hasItemsToReturn => _totalItemsReturning > 0;
 
+  /// Sale items matching the product search (name or size). Items already
+  /// marked for return stay visible so they can't be lost from view.
+  List<SaleItem> get _visibleItems {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return widget.sale.items;
+    return widget.sale.items.where((item) {
+      return item.productName.toLowerCase().contains(q) ||
+          item.productSize.toLowerCase().contains(q) ||
+          (_returnQuantities[item.productId] ?? 0) > 0;
+    }).toList();
+  }
+
   Future<void> _processReturn() async {
     if (!_hasItemsToReturn) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -58,42 +72,43 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
     // Confirm dialog
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Return'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Return ${formatQty(_totalItemsReturning)} item(s)?'),
-            const SizedBox(height: 8),
-            Text(
-              'Refund Amount: ₹${_refundAmount.toStringAsFixed(2)}',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Confirm Return'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Return ${formatQty(_totalItemsReturning)} item(s)?'),
+                const SizedBox(height: 8),
+                Text(
+                  'Refund Amount: ₹${_refundAmount.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'This will:',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const Text('• Update the sale record'),
+                const Text('• Restore stock quantities'),
+                const Text('• Update revenue counters'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'This will:',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const Text('• Update the sale record'),
-            const Text('• Restore stock quantities'),
-            const Text('• Update revenue counters'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Confirm Return'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm Return'),
-          ),
-        ],
-      ),
     );
 
     if (confirmed != true) return;
@@ -135,10 +150,7 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Return Items'),
-        elevation: 0,
-      ),
+      appBar: AppBar(title: const Text('Return Items'), elevation: 0),
       body: Column(
         children: [
           // Sale info header
@@ -180,12 +192,10 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  DateFormat('MMM dd, yyyy • hh:mm a')
-                      .format(widget.sale.createdAt),
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
+                  DateFormat(
+                    'MMM dd, yyyy • hh:mm a',
+                  ).format(widget.sale.createdAt),
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
                 Row(
@@ -208,26 +218,62 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
             ),
           ),
 
+          // Product search
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (v) => setState(() => _searchQuery = v),
+              decoration: InputDecoration(
+                hintText: 'Search product in this sale',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon:
+                    _searchQuery.isEmpty
+                        ? null
+                        : IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        ),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+
           // Items list
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: widget.sale.items.length,
-              itemBuilder: (context, index) {
-                final item = widget.sale.items[index];
-                final returnQty = _returnQuantities[item.productId] ?? 0;
+            child:
+                _visibleItems.isEmpty
+                    ? Center(
+                      child: Text(
+                        'No product matches "$_searchQuery"',
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    )
+                    : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _visibleItems.length,
+                      itemBuilder: (context, index) {
+                        final item = _visibleItems[index];
+                        final returnQty =
+                            _returnQuantities[item.productId] ?? 0;
 
-                return _ReturnItemCard(
-                  item: item,
-                  returnQuantity: returnQty,
-                  onQuantityChanged: (newQty) {
-                    setState(() {
-                      _returnQuantities[item.productId] = newQty;
-                    });
-                  },
-                );
-              },
-            ),
+                        return _ReturnItemCard(
+                          item: item,
+                          returnQuantity: returnQty,
+                          onQuantityChanged: (newQty) {
+                            setState(() {
+                              _returnQuantities[item.productId] = newQty;
+                            });
+                          },
+                        );
+                      },
+                    ),
           ),
 
           // Return reason
@@ -324,25 +370,26 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
                     width: double.infinity,
                     child: FilledButton.icon(
                       onPressed:
-                      _isProcessing || !_hasItemsToReturn ? null : _processReturn,
+                          _isProcessing || !_hasItemsToReturn
+                              ? null
+                              : _processReturn,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         backgroundColor: Colors.orange,
                       ),
-                      icon: _isProcessing
-                          ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                          : const Icon(Icons.keyboard_return),
+                      icon:
+                          _isProcessing
+                              ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                              : const Icon(Icons.keyboard_return),
                       label: Text(
-                        _isProcessing
-                            ? 'Processing...'
-                            : 'Process Return',
+                        _isProcessing ? 'Processing...' : 'Process Return',
                         style: const TextStyle(fontSize: 16),
                       ),
                     ),
@@ -359,6 +406,7 @@ class _ReturnItemsScreenState extends State<ReturnItemsScreen> {
   @override
   void dispose() {
     _reasonController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 }
@@ -467,10 +515,14 @@ class _ReturnItemCard extends StatelessWidget {
 
                 // Decrease button
                 IconButton(
-                  onPressed: returnQuantity > 0
-                      ? () => onQuantityChanged(
-                          roundQty((returnQuantity - 1).clamp(0, item.quantity)))
-                      : null,
+                  onPressed:
+                      returnQuantity > 0
+                          ? () => onQuantityChanged(
+                            roundQty(
+                              (returnQuantity - 1).clamp(0, item.quantity),
+                            ),
+                          )
+                          : null,
                   icon: const Icon(Icons.remove_circle_outline),
                   iconSize: 28,
                   color: Colors.orange,
@@ -497,10 +549,14 @@ class _ReturnItemCard extends StatelessWidget {
                 IconButton(
                   // Steps by 1, topping out at the exact amount bought —
                   // so a 4.6 kg line can return 4.6, not just 4.
-                  onPressed: returnQuantity < item.quantity
-                      ? () => onQuantityChanged(
-                          roundQty((returnQuantity + 1).clamp(0, item.quantity)))
-                      : null,
+                  onPressed:
+                      returnQuantity < item.quantity
+                          ? () => onQuantityChanged(
+                            roundQty(
+                              (returnQuantity + 1).clamp(0, item.quantity),
+                            ),
+                          )
+                          : null,
                   icon: const Icon(Icons.add_circle_outline),
                   iconSize: 28,
                   color: Colors.orange,
