@@ -2070,7 +2070,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           salePrice: line.price,
           originalPrice: line.originalPrice,
           purchasePrice: _effectiveUnitCost(product, isPerFoot),
-          imageBase64: product.imageBase64,
+          // No photo copy on the sale (see RecordSaleScreen).
           isPerFoot: isPerFoot,
           stockUnits: _stockUnitsFor(product, line.quantity, isPerFoot),
         );

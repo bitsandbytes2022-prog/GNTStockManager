@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/sale_model.dart';
+import '../../services/firebase_service.dart';
 import '../../services/sales_service.dart';
 import '../../utils/quantity.dart';
+import '../widgets/collapsing_header.dart';
 
 enum _Period { today, week, month, custom }
 
@@ -97,6 +99,11 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
           (await _salesService.getSalesInRange(startDate: start, endDate: end))
               .where((s) => !s.isMock)
               .toList();
+      // Photos come from the products (sales no longer carry a copy).
+      final photos = {
+        for (final p in await FirebaseService().getCachedProducts())
+          if (p.imageBase64?.isNotEmpty ?? false) p.id: p.imageBase64,
+      };
 
       final Map<String, _ProductStats> statsMap = {};
       for (final sale in sales) {
@@ -106,7 +113,7 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
               productId: item.productId,
               productName: item.productName,
               productSize: item.productSize,
-              imageBase64: item.imageBase64,
+              imageBase64: photos[item.productId] ?? item.imageBase64,
             );
           }
           statsMap[item.productId]!.addItem(item);
@@ -189,7 +196,13 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(
+      body: CollapsingHeader(
+        // App bar and period picker hide on scroll down (phones), back on
+        // scroll up.
+        header: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+          AppBar(
         title: const Text('Top Selling Items'),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -201,8 +214,6 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
           // ── Period selector ──────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -265,16 +276,13 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
               ],
             ),
           ),
-
-          // ── Content ──────────────────────────────────────────────────────
-          Expanded(
-            child: _isLoading
+          ],
+        ),
+        body: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _topProducts.isEmpty
                     ? _buildEmpty()
                     : _buildList(),
-          ),
-        ],
       ),
     );
   }

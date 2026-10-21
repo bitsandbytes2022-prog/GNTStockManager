@@ -2355,7 +2355,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           salePrice: line.price,
           originalPrice: line.originalPrice,
           purchasePrice: _effectiveUnitCost(line.product, line.isPerFoot),
-          imageBase64: line.product.imageBase64,
+          // No photo copy on the sale — it made every sale ~100 KB and
+          // loading the sales list ran phones out of memory. Screens look
+          // the photo up from the product instead.
           isPerFoot: line.isPerFoot,
           stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
         );

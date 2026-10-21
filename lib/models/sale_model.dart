@@ -57,6 +57,10 @@ class SaleItem {
   final double quantity;
   final double total;
   final double purchasePrice;
+
+  /// Legacy: a copy of the product photo that older sales stored on each
+  /// line. No longer written — it bloated sales until loading them ran
+  /// phones out of memory. Look the photo up from the product instead.
   final String? imageBase64;
 
   /// True when this line was sold by length (e.g. a pipe cut to a number of
@@ -120,7 +124,7 @@ class SaleItem {
     'purchasePrice': purchasePrice,
     'quantity': storeQty(quantity),
     'total': total,
-    'imageBase64': imageBase64,
+    if (imageBase64 != null) 'imageBase64': imageBase64,
     'isPerFoot': isPerFoot,
     'stockUnits': stockUnits == null ? null : storeQty(stockUnits!),
     'addedOn': addedOn != null ? Timestamp.fromDate(addedOn!) : null,
