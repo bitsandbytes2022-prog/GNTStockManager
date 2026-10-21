@@ -103,6 +103,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   final TextEditingController _amountPaidController = TextEditingController();
   final TextEditingController _incentiveController = TextEditingController();
 
+  /// A credit bill still owing money: no plumber/painter incentive yet.
+  bool get _hasAmountDue {
+    if (_paymentMethod != 'Credit') return false;
+    final paid = double.tryParse(_amountPaidController.text) ?? 0;
+    return paid + 0.001 < _totalAmount;
+  }
+
   /// The plumber/painter credited with this sale, if any.
   String? _referrerId;
   String? _referrerName;
@@ -1452,6 +1459,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         ReferrerSelector(
           name: _referrerName,
           incentiveController: _incentiveController,
+          allowIncentive: !_hasAmountDue,
           onTap: () async {
             final referrer = await showReferrerPicker(context);
             if (referrer == null || !mounted) return;
@@ -1521,6 +1529,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           TextField(
             controller: _amountPaidController,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) {
+              setState(() {});
+              afterChange?.call();
+            },
             decoration: InputDecoration(
               labelText: 'Amount received so far',
               helperText: 'Set to 0 if nothing has been received yet',
@@ -2120,8 +2132,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         partyId: widget.sale.partyId,
         referrerId: _referrerId,
         referrerName: _referrerName,
-        referrerIncentive:
-            _referrerId == null ? null : parseIncentive(_incentiveController),
+        referrerIncentive: _referrerId == null || _hasAmountDue
+            ? null
+            : parseIncentive(_incentiveController),
         discountAmount: _appliedDiscount > 0 ? _discountAmount : null,
         buyerName:
             _buyerNameController.text.trim().isEmpty ? null : _buyerNameController.text.trim(),

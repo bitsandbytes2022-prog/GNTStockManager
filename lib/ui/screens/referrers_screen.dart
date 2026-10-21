@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/referrer_model.dart';
@@ -8,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../widgets/referrer_widgets.dart';
 import 'ledger_screen.dart' show formatLedgerAmount;
+import 'sales_list_screen.dart' show showSaleDetailsDialog;
 
 /// A small label/value pair on the orange summary cards.
 Widget _stat(String label, String value) => Expanded(
@@ -463,7 +465,6 @@ class _ReferrerDetailScreenState extends State<ReferrerDetailScreen> {
   Widget _buildBody(ReferrerData data, Referrer referrer) {
     final sales = data.salesFor(referrer.id, year: _year);
     final business = ReferrerBusiness.of(sales);
-    final dateFormat = DateFormat('dd MMM yyyy');
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -547,64 +548,224 @@ class _ReferrerDetailScreenState extends State<ReferrerDetailScreen> {
           )
         else
           for (final Sale sale in sales)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: HoverCard(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Row(
+            _InvoiceRow(sale: sale, referrerName: referrer.name),
+      ],
+    );
+  }
+}
+
+/// One invoice a plumber/painter brought: paid/credit status, the
+/// incentive paid on it, and a tap through to the full invoice.
+class _InvoiceRow extends StatelessWidget {
+  final Sale sale;
+  final String referrerName;
+
+  const _InvoiceRow({required this.sale, required this.referrerName});
+
+  static final _dateFormat = DateFormat('dd MMM yyyy');
+
+  Future<void> _editIncentive(BuildContext context) async {
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (_) => _IncentiveDialog(
+        invoiceNumber: sale.invoiceNumber,
+        referrerName: referrerName,
+        initial: sale.referrerIncentive,
+      ),
+    );
+    if (amount == null || !context.mounted) return;
+    try {
+      await ReferrerService().setIncentive(sale, amount);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final incentive = sale.referrerIncentive ?? 0;
+    // A credit bill still owing money can't carry an incentive yet — the
+    // worker gets paid once the customer pays.
+    final onCredit = !sale.isFullyPaid;
+    final statusColor = onCredit ? AppColors.stockOut : AppColors.green;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: HoverCard(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+        onTap: () => showSaleDetailsDialog(context, sale),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Invoice #${sale.invoiceNumber}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                      Text(
+                        [
+                          _dateFormat.format(sale.createdAt),
+                          if (sale.buyerName?.isNotEmpty ?? false)
+                            sale.buyerName!,
+                        ].join(' · '),
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textMuted),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          onCredit
+                              ? 'Credit · ${formatLedgerAmount(sale.amountDue)} due'
+                              : 'Paid',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: statusColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Invoice #${sale.invoiceNumber}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.navy,
-                            ),
-                          ),
-                          Text(
-                            [
-                              dateFormat.format(sale.createdAt),
-                              if (sale.buyerName?.isNotEmpty ?? false)
-                                sale.buyerName!,
-                            ].join(' · '),
-                            style: const TextStyle(
-                                fontSize: 12, color: AppColors.textMuted),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                    Text(
+                      formatLedgerAmount(sale.totalAmount),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.navy,
                       ),
                     ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          formatLedgerAmount(sale.totalAmount),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.navy,
-                          ),
-                        ),
-                        Text(
-                          'Profit ${formatLedgerAmount(ReferrerBusiness.of([sale]).profit)}',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppColors.green),
-                        ),
-                        if ((sale.referrerIncentive ?? 0) > 0)
-                          Text(
-                            'Incentive ${formatLedgerAmount(sale.referrerIncentive!)}',
-                            style: const TextStyle(
-                                fontSize: 11, color: Color(0xFFC2410C)),
-                          ),
-                      ],
+                    Text(
+                      'Profit ${formatLedgerAmount(ReferrerBusiness.of([sale]).profit)}',
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.green),
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+              ],
             ),
+            const Divider(height: 16),
+            Row(
+              children: [
+                const Icon(Icons.payments_outlined,
+                    size: 16, color: Color(0xFFC2410C)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    incentive > 0
+                        ? 'Incentive paid ${formatLedgerAmount(incentive)}'
+                        : onCredit
+                            ? 'Incentive can be added once this bill is paid'
+                            : 'No incentive paid',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: incentive > 0
+                          ? const Color(0xFFC2410C)
+                          : AppColors.textMuted,
+                      fontWeight:
+                          incentive > 0 ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+                if (!onCredit)
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => _editIncentive(context),
+                    child: Text(incentive > 0 ? 'Edit' : 'Add incentive'),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Asks for the incentive paid on one invoice. Returns the amount (0 to
+/// remove it), or null when cancelled.
+class _IncentiveDialog extends StatefulWidget {
+  final int invoiceNumber;
+  final String referrerName;
+  final double? initial;
+
+  const _IncentiveDialog({
+    required this.invoiceNumber,
+    required this.referrerName,
+    this.initial,
+  });
+
+  @override
+  State<_IncentiveDialog> createState() => _IncentiveDialogState();
+}
+
+class _IncentiveDialogState extends State<_IncentiveDialog> {
+  late final _controller = TextEditingController(
+    text: widget.initial == null
+        ? ''
+        : widget.initial! == widget.initial!.roundToDouble()
+            ? widget.initial!.toStringAsFixed(0)
+            : widget.initial!.toStringAsFixed(2),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() =>
+      Navigator.pop(context, double.tryParse(_controller.text.trim()) ?? 0);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text('Incentive · Invoice #${widget.invoiceNumber}'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+        ],
+        decoration: InputDecoration(
+          labelText: 'Amount paid',
+          helperText: 'Cash given to ${widget.referrerName}. Leave empty to remove.',
+          helperMaxLines: 2,
+          prefixText: '₹',
+        ),
+        onSubmitted: (_) => _save(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Save')),
       ],
     );
   }

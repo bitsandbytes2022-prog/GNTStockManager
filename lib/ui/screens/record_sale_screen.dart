@@ -1687,6 +1687,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           ReferrerSelector(
             name: _referrer?.name,
             incentiveController: _incentiveController,
+            allowIncentive: _paymentMethod != 'Credit',
             onTap: () async {
               final referrer = await showReferrerPicker(context);
               if (referrer == null || !mounted) return;
@@ -2410,8 +2411,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         partyId: _party?.id,
         referrerId: _referrer?.id,
         referrerName: _referrer?.name,
-        referrerIncentive:
-            _referrer == null ? null : parseIncentive(_incentiveController),
+        referrerIncentive: _referrer == null || _paymentMethod == 'Credit'
+            ? null
+            : parseIncentive(_incentiveController),
         buyerName: _buyerNameController.text.trim().isEmpty
             ? null
             : _buyerNameController.text.trim(),
@@ -4106,8 +4108,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           partyId: _party?.id,
           referrerId: _referrer?.id,
           referrerName: _referrer?.name,
-          referrerIncentive:
-              _referrer == null ? null : parseIncentive(_incentiveController),
+          referrerIncentive: _referrer == null || _paymentMethod == 'Credit'
+              ? null
+              : parseIncentive(_incentiveController),
           buyerName: _buyerNameController.text.trim().isEmpty
               ? null
               : _buyerNameController.text.trim(),

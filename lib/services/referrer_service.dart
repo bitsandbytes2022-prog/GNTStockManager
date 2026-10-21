@@ -149,6 +149,18 @@ class ReferrerService {
     if (count > 0) await batch.commit();
   }
 
+  /// Records the incentive paid on [sale] after the fact (0 removes it).
+  /// Refused while the bill is still on credit with money due.
+  Future<void> setIncentive(Sale sale, double amount) async {
+    final ref = _firestore.collection(_salesCollection).doc(sale.id);
+    final current = Sale.fromFirestore(await ref.get());
+    if (amount > 0 && !current.isFullyPaid) {
+      throw Exception(
+          'Invoice #${current.invoiceNumber} is still on credit. Add the incentive once it is paid.');
+    }
+    await ref.update({'referrerIncentive': amount > 0 ? amount : null});
+  }
+
   /// Deletes a referrer only when no sale is tagged with them, so their
   /// business history is never lost by accident.
   Future<void> deleteReferrer(Referrer referrer) async {

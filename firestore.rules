@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+    match /sales/{salesId} {
+      allow read, write: if true;
+    }
+    match /returns/{returnId} {
+      allow read, write: if true;
+    }
+    match /stats/{statId} {
+      allow read, write: if true;
+    }
+    match /settings/{settingsId} {
+      allow read, write: if true;
+    }
+    match /udhar/{document=**} {
+      allow read, write: if true;
+    }
+    match /parties/{partyId} {
+      allow read, write: if true;
+    }
+    match /ledger_entries/{entryId} {
+      allow read, write: if true;
+    }
+    match /counters/{document=**} {
+      allow read, write: if true;
+    }
+    match /referrers/{document=**} {
+      allow read, write: if true;
+    }
+    match /category_images/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

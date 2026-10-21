@@ -19,12 +19,16 @@ class ReferrerSelector extends StatelessWidget {
   /// once someone is selected.
   final TextEditingController incentiveController;
 
+  /// False on a credit bill — no incentive until the customer pays.
+  final bool allowIncentive;
+
   const ReferrerSelector({
     super.key,
     required this.name,
     required this.onTap,
     required this.onClear,
     required this.incentiveController,
+    this.allowIncentive = true,
   });
 
   @override
@@ -63,6 +67,21 @@ class ReferrerSelector extends StatelessWidget {
       ),
     );
     if (!selected) return tile;
+    if (!allowIncentive) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          tile,
+          const Padding(
+            padding: EdgeInsets.fromLTRB(4, 6, 4, 0),
+            child: Text(
+              'Credit bill — add the incentive from Plumbers & Painters once it is paid.',
+              style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

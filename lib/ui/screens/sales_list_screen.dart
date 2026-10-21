@@ -2853,6 +2853,13 @@ class _TimeSpanPickerBottomSheet extends StatelessWidget {
 }
 
 // Sale Details Dialog
+/// The full invoice view used by the Sales list, for other screens too.
+Future<void> showSaleDetailsDialog(BuildContext context, Sale sale) =>
+    showDialog(
+      context: context,
+      builder: (_) => _SaleDetailsDialog(sale: sale),
+    );
+
 class _SaleDetailsDialog extends StatefulWidget {
   final Sale sale;
 
