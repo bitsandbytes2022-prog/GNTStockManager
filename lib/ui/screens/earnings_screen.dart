@@ -97,9 +97,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final profit = (item.salePrice - item.purchasePrice) * item.quantity;
         return itemSum + profit;
       });
-      return sum + saleProfit;
+      // Incentive handed to the plumber/painter comes out of the profit.
+      return sum + saleProfit - (sale.referrerIncentive ?? 0);
     });
   }
+
+  /// Incentives paid to plumbers/painters on these sales.
+  double get _totalIncentives =>
+      _sales.fold(0, (sum, sale) => sum + (sale.referrerIncentive ?? 0));
 
   double get _totalCost {
     return _sales.fold(0, (sum, sale) {
@@ -412,6 +417,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
             ),
           ],
         ),
+        if (_totalIncentives > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                'Profit is after ${_rupees(_totalIncentives)} incentive paid to plumbers/painters',
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+              ),
+            ),
+          ),
         const SizedBox(height: 12),
 
         // Transactions and Items Row
@@ -707,9 +723,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
       itemCount: sortedSales.length,
       itemBuilder: (context, index) {
         final sale = sortedSales[index];
+        final incentive = sale.referrerIncentive ?? 0;
         final profit = sale.items.fold(0.0, (sum, item) {
           return sum + ((item.salePrice - item.purchasePrice) * item.quantity);
-        });
+        }) - incentive;
         final itemCount =
             sale.items.fold(0.0, (sum, item) => sum + item.quantity);
 
@@ -779,7 +796,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Profit: ₹${profit.toStringAsFixed(0)}',
+                          incentive > 0
+                              ? 'Profit: ₹${profit.toStringAsFixed(0)} (after ₹${incentive.toStringAsFixed(0)} incentive)'
+                              : 'Profit: ₹${profit.toStringAsFixed(0)}',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.green,
