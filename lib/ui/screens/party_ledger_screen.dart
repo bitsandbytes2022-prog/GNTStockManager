@@ -13,6 +13,7 @@ import '../widgets/ledger_share_sheet.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../../models/product_model.dart';
+import '../widgets/collapsing_header.dart';
 
 /// One shopkeeper's / supplier's statement: every sale or purchase and
 /// every payment, with the running balance.
@@ -76,7 +77,9 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
     final label = balanceLabel(party, balance);
 
     return Scaffold(
-      appBar: AppBar(
+      body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(
         title: Text(party.name),
         actions: [
           IconButton(
@@ -97,7 +100,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
           ),
         ],
       ),
-      body: ListView(
+        body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           FadeSlideIn(
@@ -247,6 +250,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
               ),
           ],
         ],
+      ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/firebase_service.dart';
 import '../../services/settings_service.dart';
 import '../widgets/size_input_dialog.dart';
+import '../widgets/collapsing_header.dart';
 
 /// Result of the image-source bottom sheet.
 enum _ImageAction { camera, gallery, remove }
@@ -402,11 +403,13 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(
         title: const Text('Category Settings'),
         elevation: 0,
       ),
-      body: _isLoading
+        body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
@@ -440,6 +443,7 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
                 ),
               ],
             ),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addCategory,
         tooltip: 'Add Category',

@@ -9,6 +9,7 @@ import '../../services/analytics_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../../utils/quantity.dart';
+import '../widgets/collapsing_header.dart';
 
 class AnalyticsDashboardScreen extends StatefulWidget {
   const AnalyticsDashboardScreen({super.key});
@@ -44,7 +45,9 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(
         title: const Text('Analytics Dashboard'),
         elevation: 0,
         bottom: TabBar(
@@ -58,7 +61,7 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen>
           ],
         ),
       ),
-      body: TabBarView(
+        body: TabBarView(
         controller: _tabController,
         children: [
           _TimingAnalyticsTab(),
@@ -66,6 +69,7 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen>
           _LowStockTab(),
           _PaymentMethodTab(),
         ],
+      ),
       ),
     );
   }

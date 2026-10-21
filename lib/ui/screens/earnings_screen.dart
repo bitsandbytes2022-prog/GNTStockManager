@@ -5,6 +5,7 @@ import '../../services/sales_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../../utils/quantity.dart';
+import '../widgets/collapsing_header.dart';
 
 enum TimePeriod { today, week, month, custom }
 
@@ -192,13 +193,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.page,
-      appBar: AppBar(
+      body: CollapsingHeader(
+        // App bar and period picker hide on scroll down (phones), back on
+        // scroll up.
+        header: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+          AppBar(
         elevation: 0,
         title: const Text('Earnings'),
         backgroundColor: Colors.white,
       ),
-      body: Column(
-        children: [
           // Time period selector
           Container(
             width: double.infinity,
@@ -237,16 +242,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
               ],
             ),
           ),
-
-          // Content
-          Expanded(
-            child: _isLoading
+          ],
+        ),
+        body: _isLoading
                 ? _buildLoading()
                 : _sales.isEmpty
                     ? _buildEmptyState()
                     : _buildEarningsContent(),
-          ),
-        ],
       ),
     );
   }

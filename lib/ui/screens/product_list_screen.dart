@@ -6,6 +6,7 @@ import '../../services/firebase_service.dart';
 import '../widgets/product_card.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../widgets/collapsing_header.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'downloads_screen.dart';
@@ -336,8 +337,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.page,
-      body: Column(
-        children: [
+      // On phones the header and category bar slide away while scrolling
+      // products and come back on scrolling up.
+      body: CollapsingHeader(
+        statusBarColor: AppColors.page,
+        header: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
           // Gradient header with search and filters
           GradientHeader(
             title: 'Products',
@@ -715,10 +721,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
           // Quick category bar (Mobile) — rail sits beside the grid instead
           // on wider layouts, see below.
           if (!isDesktop && !isTablet) _buildQuickCategoryBar(),
+          ],
+        ),
 
           // Product grid
-          Expanded(
-            child: Row(
+        body: Row(
               children: [
                 if (isDesktop || isTablet) _buildQuickCategoryRail(),
                 Expanded(
@@ -730,8 +737,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 ),
               ],
             ),
-          ),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _navigateToAddProduct,

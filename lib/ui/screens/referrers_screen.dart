@@ -10,6 +10,7 @@ import '../theme/motion.dart';
 import '../widgets/referrer_widgets.dart';
 import 'ledger_screen.dart' show formatLedgerAmount;
 import 'sales_list_screen.dart' show showSaleDetailsDialog;
+import '../widgets/collapsing_header.dart';
 
 /// A small label/value pair on the orange summary cards.
 Widget _stat(String label, String value) => Expanded(
@@ -85,7 +86,14 @@ class _ReferrersScreenState extends State<ReferrersScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showReferrerFormDialog(context, type: _type),
+        icon: const Icon(Icons.person_add),
+        label: Text('Add ${_type.label}'),
+      ),
+      body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(
         title: const Text('Plumbers & Painters'),
         bottom: TabBar(
           controller: _tabController,
@@ -95,12 +103,7 @@ class _ReferrersScreenState extends State<ReferrersScreen>
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => showReferrerFormDialog(context, type: _type),
-        icon: const Icon(Icons.person_add),
-        label: Text('Add ${_type.label}'),
-      ),
-      body: StreamBuilder<ReferrerData>(
+        body: StreamBuilder<ReferrerData>(
         stream: _stream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -122,6 +125,7 @@ class _ReferrersScreenState extends State<ReferrersScreen>
           }
           return _buildTab(snapshot.data!);
         },
+      ),
       ),
     );
   }
@@ -431,7 +435,9 @@ class _ReferrerDetailScreenState extends State<ReferrerDetailScreen> {
             .where((r) => r.id == widget.referrerId)
             .firstOrNull;
         return Scaffold(
-          appBar: AppBar(
+          body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(
             title: Text(referrer?.name ?? ''),
             actions: [
               if (referrer != null)
@@ -450,13 +456,14 @@ class _ReferrerDetailScreenState extends State<ReferrerDetailScreen> {
                 ),
             ],
           ),
-          body: snapshot.hasError
+        body: snapshot.hasError
               ? Center(child: Text('Error loading: ${snapshot.error}'))
               : data == null
                   ? const Center(child: CircularProgressIndicator())
                   : referrer == null
                       ? const Center(child: Text('Not found'))
                       : _buildBody(data, referrer),
+      ),
         );
       },
     );

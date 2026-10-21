@@ -8,6 +8,7 @@ import 'party_ledger_screen.dart';
 import 'referrers_screen.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../widgets/collapsing_header.dart';
 
 final NumberFormat _rupees =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -48,7 +49,14 @@ class _LedgerScreenState extends State<LedgerScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showPartyFormDialog(context, type: _type),
+        icon: const Icon(Icons.person_add),
+        label: Text(_type == PartyType.customer ? 'Add Shopkeeper' : 'Add Supplier'),
+      ),
+      body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(
         title: const Text('Ledger'),
         actions: [
           TextButton.icon(
@@ -69,12 +77,7 @@ class _LedgerScreenState extends State<LedgerScreen>
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => showPartyFormDialog(context, type: _type),
-        icon: const Icon(Icons.person_add),
-        label: Text(_type == PartyType.customer ? 'Add Shopkeeper' : 'Add Supplier'),
-      ),
-      body: StreamBuilder<LedgerData>(
+        body: StreamBuilder<LedgerData>(
         stream: _stream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -98,6 +101,7 @@ class _LedgerScreenState extends State<LedgerScreen>
           }
           return _buildTab(snapshot.data!);
         },
+      ),
       ),
     );
   }

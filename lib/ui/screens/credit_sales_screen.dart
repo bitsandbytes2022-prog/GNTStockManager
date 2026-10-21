@@ -8,6 +8,7 @@ import '../../services/sales_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import 'ledger_screen.dart' show formatLedgerAmount;
+import '../widgets/collapsing_header.dart';
 
 enum _CreditFilter { all, pending, settled }
 
@@ -180,8 +181,10 @@ class _CreditSalesScreenState extends State<CreditSalesScreen> {
     final isWide = MediaQuery.of(context).size.width >= 768;
     return Scaffold(
       backgroundColor: AppColors.page,
-      appBar: AppBar(title: const Text('Credit sales')),
-      body: StreamBuilder<List<Sale>>(
+      body: CollapsingHeader(
+        // Hides on scroll down (phones), back on scroll up.
+        header: AppBar(title: const Text('Credit sales')),
+        body: StreamBuilder<List<Sale>>(
         stream: _stream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -248,6 +251,7 @@ class _CreditSalesScreenState extends State<CreditSalesScreen> {
             ],
           );
         },
+      ),
       ),
     );
   }

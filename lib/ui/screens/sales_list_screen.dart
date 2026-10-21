@@ -14,6 +14,7 @@ import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../widgets/collapsing_header.dart';
 import '../../utils/gst_rounding.dart';
 import '../../utils/monthly_bill_book_pdf.dart';
 import '../../utils/pdf_fonts.dart';
@@ -1555,14 +1556,15 @@ class _SalesListScreenState extends State<SalesListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.page,
-      body: Column(
-        children: [
-          // Header with filters — replaced by a selection toolbar while
-          // picking sales to merge.
-          if (_selectionMode)
-            _buildSelectionBar()
-          else
-          GradientHeader(
+      // On phones the header slides away while scrolling sales and comes
+      // back on scrolling up.
+      body: CollapsingHeader(
+        statusBarColor: AppColors.page,
+        // Header with filters — replaced by a selection toolbar while
+        // picking sales to merge.
+        header: _selectionMode
+            ? _buildSelectionBar()
+            : GradientHeader(
             title: 'Sales',
             subtitle: 'Bills, payments and returns',
             padding: EdgeInsets.fromLTRB(_isDesktop ? 24 : 16,
@@ -1783,11 +1785,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
             ),
           ),
 
-          // Sales grid
-          Expanded(
-            child: _useStreamMode ? _buildStreamView() : _buildCachedView(),
-          ),
-        ],
+        // Sales grid
+        body: _useStreamMode ? _buildStreamView() : _buildCachedView(),
       ),
       // Phones start a sale from the bottom bar's New Sale button.
       floatingActionButton: _selectionMode ||
