@@ -79,6 +79,9 @@ class BillPreviewScreen extends StatefulWidget {
 
   /// The shopkeeper ledger the sale goes on, if any.
   final String? partyId;
+  final String? referrerId;
+  final String? referrerName;
+  final double? referrerIncentive;
 
   // Optional buyer details, recorded for future reference on the bill.
   final String? buyerName;
@@ -120,6 +123,9 @@ class BillPreviewScreen extends StatefulWidget {
     this.isMock = false,
     this.isWholesale = false,
     this.partyId,
+    this.referrerId,
+    this.referrerName,
+    this.referrerIncentive,
     this.buyerName,
     this.buyerPhone,
     this.buyerAddress,
@@ -308,6 +314,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         isMock: widget.isMock,
         isWholesale: widget.isWholesale,
         partyId: widget.partyId,
+        referrerId: widget.referrerId,
+        referrerName: widget.referrerName,
+        referrerIncentive: widget.referrerIncentive,
         buyerName: widget.buyerName,
         buyerPhone: widget.buyerPhone,
         buyerAddress: widget.buyerAddress,

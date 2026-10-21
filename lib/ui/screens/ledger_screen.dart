@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../models/party_model.dart';
 import '../../services/ledger_service.dart';
 import 'party_ledger_screen.dart';
+import 'referrers_screen.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 
@@ -49,6 +50,17 @@ class _LedgerScreenState extends State<LedgerScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Ledger'),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ReferrersScreen()),
+            ),
+            icon: const Icon(Icons.handyman),
+            label: const Text('Plumbers & Painters'),
+          ),
+          const SizedBox(width: 8),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

@@ -14,6 +14,7 @@ import '../../utils/quantity.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'bill_preview_screen.dart';
+import '../widgets/referrer_widgets.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 
@@ -100,6 +101,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   final TextEditingController _buyerPhoneController = TextEditingController();
   final TextEditingController _buyerAddressController = TextEditingController();
   final TextEditingController _amountPaidController = TextEditingController();
+  final TextEditingController _incentiveController = TextEditingController();
+
+  /// The plumber/painter credited with this sale, if any.
+  String? _referrerId;
+  String? _referrerName;
 
   List<Product> _allProducts = [];
 
@@ -327,6 +333,14 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _buyerNameController.text = widget.sale.buyerName ?? '';
     _buyerPhoneController.text = widget.sale.buyerPhone ?? '';
     _buyerAddressController.text = widget.sale.buyerAddress ?? '';
+    _referrerId = widget.sale.referrerId;
+    _referrerName = widget.sale.referrerName;
+    final incentive = widget.sale.referrerIncentive;
+    if (incentive != null) {
+      _incentiveController.text = incentive == incentive.roundToDouble()
+          ? incentive.toStringAsFixed(0)
+          : incentive.toStringAsFixed(2);
+    }
     // A non-credit sale counts as fully paid, so only carry its amountPaid
     // over when it was already credit. Otherwise switching Cash → Credit
     // would pre-fill the full total and save the bill as already received,
@@ -1434,6 +1448,28 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 8),
+        ReferrerSelector(
+          name: _referrerName,
+          incentiveController: _incentiveController,
+          onTap: () async {
+            final referrer = await showReferrerPicker(context);
+            if (referrer == null || !mounted) return;
+            setState(() {
+              _referrerId = referrer.id;
+              _referrerName = referrer.name;
+            });
+            afterChange?.call();
+          },
+          onClear: () {
+            _incentiveController.clear();
+            setState(() {
+              _referrerId = null;
+              _referrerName = null;
+            });
+            afterChange?.call();
+          },
+        ),
         Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
@@ -1528,6 +1564,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     final parts = <String>[_paymentMethod];
     final buyerName = _buyerNameController.text.trim();
     if (buyerName.isNotEmpty) parts.add(buyerName);
+    if (_referrerName != null) parts.add(_referrerName!);
     if (_isWholesale) parts.add('Wholesale');
     if (_isMockSale) parts.add('Mock');
     return parts.join(' · ');
@@ -2081,6 +2118,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         isMock: _isMockSale,
         isWholesale: _isWholesale,
         partyId: widget.sale.partyId,
+        referrerId: _referrerId,
+        referrerName: _referrerName,
+        referrerIncentive:
+            _referrerId == null ? null : parseIncentive(_incentiveController),
         discountAmount: _appliedDiscount > 0 ? _discountAmount : null,
         buyerName:
             _buyerNameController.text.trim().isEmpty ? null : _buyerNameController.text.trim(),
@@ -3356,6 +3397,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     _buyerPhoneController.dispose();
     _buyerAddressController.dispose();
     _amountPaidController.dispose();
+    _incentiveController.dispose();
     super.dispose();
   }
 }

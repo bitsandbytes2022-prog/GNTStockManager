@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/party_model.dart';
+import '../../models/referrer_model.dart';
 import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
 import '../../services/firebase_service.dart';
@@ -22,6 +23,7 @@ import '../screens/add_product_web_screen.dart';
 import '../screens/bill_preview_screen.dart';
 import '../screens/ledger_screen.dart';
 import '../widgets/ledger_share_sheet.dart';
+import '../widgets/referrer_widgets.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../../utils/quantity.dart';
@@ -115,6 +117,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   final TextEditingController _buyerPhoneController = TextEditingController();
   final TextEditingController _buyerAddressController = TextEditingController();
   final TextEditingController _creditPaidController = TextEditingController();
+  final TextEditingController _incentiveController = TextEditingController();
 
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
@@ -205,6 +208,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   /// The shopkeeper this sale goes on the ledger of, if any.
   Party? _party;
+
+  /// The plumber/painter who brought this sale, if any.
+  Referrer? _referrer;
 
   // Margin & discount readout is hidden by default (it's internal-only, not
   // needed for a quick sale) — shown via a toggle when actually wanted.
@@ -1677,6 +1683,22 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildPartySelector(afterChange: afterChange),
+          const SizedBox(height: 8),
+          ReferrerSelector(
+            name: _referrer?.name,
+            incentiveController: _incentiveController,
+            onTap: () async {
+              final referrer = await showReferrerPicker(context);
+              if (referrer == null || !mounted) return;
+              setState(() => _referrer = referrer);
+              afterChange?.call();
+            },
+            onClear: () {
+              _incentiveController.clear();
+              setState(() => _referrer = null);
+              afterChange?.call();
+            },
+          ),
           Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
@@ -1782,6 +1804,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final parts = <String>[_paymentMethod];
     final buyerName = _buyerNameController.text.trim();
     if (buyerName.isNotEmpty) parts.add(buyerName);
+    if (_referrer != null) parts.add(_referrer!.name);
     if (_isWholesale) parts.add('Wholesale');
     if (_isMockSale) parts.add('Mock');
     return parts.join(' · ');
@@ -2385,6 +2408,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         isMock: _isMockSale,
         isWholesale: _isWholesale,
         partyId: _party?.id,
+        referrerId: _referrer?.id,
+        referrerName: _referrer?.name,
+        referrerIncentive:
+            _referrer == null ? null : parseIncentive(_incentiveController),
         buyerName: _buyerNameController.text.trim().isEmpty
             ? null
             : _buyerNameController.text.trim(),
@@ -2422,11 +2449,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _buyerPhoneController.clear();
           _buyerAddressController.clear();
           _creditPaidController.clear();
+          _incentiveController.clear();
           _searchController.clear();
           _cartSearchController.clear();
           _isMockSale = false;
           _isWholesale = false;
           _party = null;
+          _referrer = null;
           _discountPercent = 0;
         });
 
@@ -4075,6 +4104,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           isMock: _isMockSale,
           isWholesale: _isWholesale,
           partyId: _party?.id,
+          referrerId: _referrer?.id,
+          referrerName: _referrer?.name,
+          referrerIncentive:
+              _referrer == null ? null : parseIncentive(_incentiveController),
           buyerName: _buyerNameController.text.trim().isEmpty
               ? null
               : _buyerNameController.text.trim(),
@@ -4113,9 +4146,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _buyerPhoneController.clear();
         _buyerAddressController.clear();
         _creditPaidController.clear();
+        _incentiveController.clear();
         _isMockSale = false;
         _isWholesale = false;
         _party = null;
+        _referrer = null;
         _discountPercent = 0;
       });
 
@@ -4144,6 +4179,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     _buyerPhoneController.dispose();
     _buyerAddressController.dispose();
     _creditPaidController.dispose();
+    _incentiveController.dispose();
     super.dispose();
   }
 }

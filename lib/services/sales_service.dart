@@ -587,6 +587,12 @@ class SalesService {
   /// revenue/profit/sold-count effects when they were originally created —
   /// merging only consolidates the records after the fact, it isn't a new
   /// sale and isn't undoing one, so none of those counters are touched here.
+  static double? _sumIncentives(List<Sale> sales) {
+    final total =
+        sales.fold<double>(0, (sum, s) => sum + (s.referrerIncentive ?? 0));
+    return total > 0 ? total : null;
+  }
+
   Future<Sale> mergeSales(List<Sale> sales) async {
     if (sales.length < 2) {
       throw Exception('Select at least 2 sales to merge');
@@ -615,7 +621,14 @@ class SalesService {
             '(${DateFormat('dd/MM/yyyy').format(other.createdAt)})',
     ].join('\n');
 
+    // Keep the survivor's plumber/painter, or else the first one tagged on
+    // a merged-in sale.
+    final referred = sorted.where((s) => s.referrerId != null).firstOrNull;
+
     final mergedSale = survivor.copyWith(
+      referrerId: referred?.referrerId,
+      referrerName: referred?.referrerName,
+      referrerIncentive: _sumIncentives(sorted),
       items: mergedItems,
       totalAmount: sorted.fold<double>(0.0, (sum, s) => sum + s.totalAmount),
       amountPaid: sorted.fold<double>(0.0, (sum, s) => sum + s.amountPaid),

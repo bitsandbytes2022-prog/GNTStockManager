@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'ledger_screen.dart' show formatLedgerAmount;
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -1437,6 +1438,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return sales.where((sale) {
       if (sale.buyerName != null &&
           sale.buyerName!.toLowerCase().contains(query)) {
+        return true;
+      }
+      if (sale.referrerName != null &&
+          sale.referrerName!.toLowerCase().contains(query)) {
         return true;
       }
       // Check if any item in the sale contains the search query
@@ -2975,6 +2980,35 @@ class _SaleDetailsDialogState extends State<_SaleDetailsDialog> {
                         ),
                       ),
                     ],
+                    if (sale.referrerName?.isNotEmpty ?? false)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange.shade100),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.handyman,
+                                size: 16, color: Colors.orange.shade800),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                [
+                                  'Plumber / Painter: ${sale.referrerName}',
+                                  if ((sale.referrerIncentive ?? 0) > 0)
+                                    'Incentive paid: ${formatLedgerAmount(sale.referrerIncentive!)}',
+                                ].join('\n'),
+                                style: const TextStyle(
+                                    fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (sale.isCredit) ...[
                       Container(
                         width: double.infinity,

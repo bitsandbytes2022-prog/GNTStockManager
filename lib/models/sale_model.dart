@@ -249,6 +249,17 @@ class Sale {
   /// the sale can re-spread exactly the same amount. Null when none.
   final double? discountAmount;
 
+  /// The plumber/painter who brought this sale, if any (see [Referrer]).
+  /// [referrerName] is a copy of their name so the sale still reads right
+  /// without loading the referrer.
+  final String? referrerId;
+  final String? referrerName;
+
+  /// Cash incentive handed to the referrer on the spot for this sale. Kept
+  /// for their business report only — it isn't taken out of the shop's
+  /// revenue/profit counters. Null when none was paid.
+  final double? referrerIncentive;
+
   Sale({
     required this.id,
     required this.invoiceNumber,
@@ -266,6 +277,9 @@ class Sale {
     double? amountPaid,
     List<Payment>? payments,
     this.discountAmount,
+    this.referrerId,
+    this.referrerName,
+    this.referrerIncentive,
   })  : createdAt = createdAt ?? DateTime.now(),
         amountPaid =
             amountPaid ?? (paymentMethod == PaymentMethod.credit ? 0 : totalAmount),
@@ -291,6 +305,9 @@ class Sale {
     'amountPaid': amountPaid,
     'payments': payments.map((p) => p.toMap()).toList(),
     if (discountAmount != null) 'discountAmount': discountAmount,
+    'referrerId': referrerId,
+    'referrerName': referrerName,
+    'referrerIncentive': referrerIncentive,
   };
 
   factory Sale.fromFirestore(DocumentSnapshot doc) {
@@ -324,6 +341,9 @@ class Sale {
           .toList() ??
           const [],
       discountAmount: (data['discountAmount'] as num?)?.toDouble(),
+      referrerId: data['referrerId'],
+      referrerName: data['referrerName'],
+      referrerIncentive: (data['referrerIncentive'] as num?)?.toDouble(),
     );
   }
 
@@ -345,6 +365,9 @@ class Sale {
     double? amountPaid,
     List<Payment>? payments,
     double? discountAmount,
+    String? referrerId,
+    String? referrerName,
+    double? referrerIncentive,
   }) {
     return Sale(
       id: id ?? this.id,
@@ -363,6 +386,9 @@ class Sale {
       amountPaid: amountPaid ?? this.amountPaid,
       payments: payments ?? this.payments,
       discountAmount: discountAmount ?? this.discountAmount,
+      referrerId: referrerId ?? this.referrerId,
+      referrerName: referrerName ?? this.referrerName,
+      referrerIncentive: referrerIncentive ?? this.referrerIncentive,
     );
   }
 }
