@@ -1562,25 +1562,14 @@ class _SalesListScreenState extends State<SalesListScreen> {
           if (_selectionMode)
             _buildSelectionBar()
           else
-          Container(
-            padding: EdgeInsets.all(_isDesktop ? 24 : 16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: AppColors.border)),
-            ),
+          GradientHeader(
+            title: 'Sales',
+            subtitle: 'Bills, payments and returns',
+            padding: EdgeInsets.fromLTRB(_isDesktop ? 24 : 16,
+                _isDesktop ? 22 : 14, _isDesktop ? 24 : 16, 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_isTablet) ...[
-                  Text(
-                    'Sales',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: AppColors.navy,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 14),
-                ],
                 Row(
                   children: [
                     // Time period selector
@@ -1594,14 +1583,12 @@ class _SalesListScreenState extends State<SalesListScreen> {
                             vertical: 14,
                           ),
                           decoration: BoxDecoration(
-                            color: AppColors.page,
-                            borderRadius:
-                                BorderRadius.circular(AppRadii.control),
-                            border: Border.all(color: AppColors.border),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.calendar_today,
+                              const Icon(Icons.calendar_month_rounded,
                                   size: 20, color: AppColors.blue),
                               const SizedBox(width: 12),
                               Text(
@@ -1635,15 +1622,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                               horizontal: _isDesktop || _isTablet ? 14 : 12,
                               vertical: 12),
                           decoration: BoxDecoration(
-                            color: AppColors.page,
-                            borderRadius:
-                                BorderRadius.circular(AppRadii.control),
-                            border: Border.all(color: AppColors.border),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.schedule,
+                              const Icon(Icons.hourglass_top_rounded,
                                   color: Color(0xFFD97706)),
                               if (_isDesktop || _isTablet) ...[
                                 const SizedBox(width: 8),
@@ -1663,10 +1648,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
                       icon: Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.page,
-                          borderRadius:
-                              BorderRadius.circular(AppRadii.control),
-                          border: Border.all(color: AppColors.border),
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
                         ),
                         child: const Icon(Icons.more_vert,
                             color: AppColors.navy),
@@ -1754,7 +1737,15 @@ class _SalesListScreenState extends State<SalesListScreen> {
                           )
                         : null,
                     filled: true,
-                    fillColor: AppColors.page,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 14,
@@ -1775,11 +1766,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     showCheckmark: false,
                     backgroundColor: Colors.white,
                     selectedColor: AppColors.coral,
-                    side: BorderSide(
-                      color: _creditDueOnly
-                          ? AppColors.coral
-                          : AppColors.border,
-                    ),
+                    side: BorderSide.none,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
@@ -1802,7 +1789,9 @@ class _SalesListScreenState extends State<SalesListScreen> {
           ),
         ],
       ),
-      floatingActionButton: _selectionMode
+      // Phones start a sale from the bottom bar's New Sale button.
+      floatingActionButton: _selectionMode ||
+              MediaQuery.of(context).size.width < 768
           ? null
           : FloatingActionButton.extended(
         onPressed: () {

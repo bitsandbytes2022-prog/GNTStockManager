@@ -1,31 +1,39 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-/// Design tokens for the app's look, modelled on Zoho Inventory's site:
-/// bright blue as the brand colour, coral for the main call to action, deep
-/// navy for headings and the sidebar, airy light-grey pages with white
-/// cards, 10px corners and soft shadows.
+/// Design tokens for the app's look: a vivid violet brand colour with
+/// hot-pink accents, deep indigo ink for headings and the sidebar, soft
+/// lavender pages with white cards, and gradients for anything that should
+/// catch the eye (headers, the New Sale button, selected tabs).
+///
+/// The names (blue, coral, navy…) are kept from the earlier palette so every
+/// screen that already uses them picks up the new colours.
 class AppColors {
   AppColors._();
 
-  static const Color blue = Color(0xFF0089FB);
-  static const Color blueLight = Color(0xFF03A9F5);
-  static const Color blueTint = Color(0xFFE8F3FF);
-  static const Color coral = Color(0xFFF0483E);
-  static const Color navy = Color(0xFF0F254E);
-  static const Color navyLight = Color(0xFF1B3566);
-  static const Color green = Color(0xFF009C3E);
-  static const Color amber = Color(0xFFFFAE00);
-  static const Color red = Color(0xFFFA0011);
+  /// Brand violet.
+  static const Color blue = Color(0xFF6D3CF5);
+  static const Color blueLight = Color(0xFF9B6BFF);
+  static const Color blueTint = Color(0xFFF0EBFF);
 
-  static const Color page = Color(0xFFF5F7FA);
+  /// Hot pink — the main call to action.
+  static const Color coral = Color(0xFFFF3D77);
+
+  /// Deep indigo ink.
+  static const Color navy = Color(0xFF1E1B4B);
+  static const Color navyLight = Color(0xFF312E81);
+  static const Color green = Color(0xFF00A76F);
+  static const Color amber = Color(0xFFFFB020);
+  static const Color red = Color(0xFFF43F5E);
+
+  static const Color page = Color(0xFFF6F5FC);
   static const Color card = Colors.white;
-  static const Color border = Color(0xFFE5E8EC);
-  static const Color text = Color(0xFF272727);
-  static const Color textMuted = Color(0xFF6B7280);
+  static const Color border = Color(0xFFE8E5F4);
+  static const Color text = Color(0xFF26233F);
+  static const Color textMuted = Color(0xFF6E6B85);
 
-  /// Zoho's four-colour brand strip.
-  static const List<Color> stripe = [blue, green, amber, red];
+  /// The thin brand strip along the top of the content.
+  static const List<Color> stripe = [blue, Color(0xFFC026D3), coral];
 
   /// Stock level colours.
   static const Color stockOk = green;
@@ -64,20 +72,92 @@ class AppColors {
   }
 }
 
+/// The app's gradients. Each is a top-left → bottom-right sweep.
+class AppGradients {
+  AppGradients._();
+
+  /// Headers and hero cards: deep violet into magenta.
+  static const LinearGradient hero = LinearGradient(
+    colors: [Color(0xFF4C1DB8), Color(0xFF7C3AED), Color(0xFFC026D3)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// Selected tabs and primary highlights.
+  static const LinearGradient primary = LinearGradient(
+    colors: [Color(0xFF7C3AED), Color(0xFF5B5BF7)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// The main call to action (New Sale): sunset orange into hot pink.
+  static const LinearGradient action = LinearGradient(
+    colors: [Color(0xFFFF8A3D), Color(0xFFFF3D77)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient money = LinearGradient(
+    colors: [Color(0xFF10B981), Color(0xFF047857)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient ocean = LinearGradient(
+    colors: [Color(0xFF06B6D4), Color(0xFF3B82F6)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient gold = LinearGradient(
+    colors: [Color(0xFFFBBF24), Color(0xFFF97316)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient rose = LinearGradient(
+    colors: [Color(0xFFFB7185), Color(0xFFE11D48)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient slate = LinearGradient(
+    colors: [Color(0xFF64748B), Color(0xFF334155)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// The desktop sidebar: deep indigo, a touch lighter at the bottom.
+  static const LinearGradient sidebar = LinearGradient(
+    colors: [Color(0xFF1E1B4B), Color(0xFF2E1065)],
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+  );
+}
+
 class AppRadii {
   AppRadii._();
-  static const double card = 10;
-  static const double control = 8;
+  static const double card = 14;
+  static const double control = 10;
 }
 
 class AppShadows {
   AppShadows._();
   static const List<BoxShadow> card = [
-    BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x0F2E1065), blurRadius: 14, offset: Offset(0, 4)),
   ];
   static const List<BoxShadow> raised = [
-    BoxShadow(color: Color(0x26000000), blurRadius: 25, offset: Offset(0, 5)),
+    BoxShadow(color: Color(0x262E1065), blurRadius: 28, offset: Offset(0, 10)),
   ];
+
+  /// A coloured glow under a gradient element.
+  static List<BoxShadow> glow(Color color) => [
+        BoxShadow(
+          color: color.withValues(alpha: 0.38),
+          blurRadius: 18,
+          offset: const Offset(0, 8),
+        ),
+      ];
 }
 
 /// Motion timings — quick, so animation never slows down billing.
@@ -133,9 +213,9 @@ ThemeData buildAppTheme() {
       foregroundColor: AppColors.navy,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      scrolledUnderElevation: 1,
-      shadowColor: const Color(0x14000000),
-      // Left-aligned bold page titles, like Zoho's (web would otherwise
+      scrolledUnderElevation: 2,
+      shadowColor: const Color(0x1A2E1065),
+      // Left-aligned bold page titles (web would otherwise
       // centre them on macOS/iOS).
       centerTitle: false,
       titleTextStyle: text.titleLarge?.copyWith(
@@ -192,7 +272,8 @@ ThemeData buildAppTheme() {
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
       backgroundColor: AppColors.coral,
       foregroundColor: Colors.white,
-      elevation: 2,
+      elevation: 4,
+      highlightElevation: 8,
       shape: StadiumBorder(),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -221,13 +302,23 @@ ThemeData buildAppTheme() {
       ),
       labelStyle: text.labelMedium,
     ),
+    // Selected tab sits on a gradient pill.
     tabBarTheme: TabBarThemeData(
-      labelColor: AppColors.blue,
+      labelColor: Colors.white,
       unselectedLabelColor: AppColors.textMuted,
-      indicatorColor: AppColors.blue,
-      indicatorSize: TabBarIndicatorSize.label,
-      labelStyle: text.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-      dividerColor: AppColors.border,
+      // The white border insets the pill from the tab's edges (tab bars
+      // sit on white app bars).
+      indicator: BoxDecoration(
+        gradient: AppGradients.primary,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white, width: 5),
+      ),
+      indicatorSize: TabBarIndicatorSize.tab,
+      labelStyle: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+      dividerColor: Colors.transparent,
+      splashBorderRadius: BorderRadius.circular(AppRadii.control),
+      overlayColor: WidgetStatePropertyAll(
+          AppColors.blue.withValues(alpha: 0.06)),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: Colors.white,
@@ -254,7 +345,7 @@ ThemeData buildAppTheme() {
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(20),
       ),
       titleTextStyle: text.titleLarge?.copyWith(
         color: AppColors.navy,
@@ -265,7 +356,7 @@ ThemeData buildAppTheme() {
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
     ),
     snackBarTheme: SnackBarThemeData(

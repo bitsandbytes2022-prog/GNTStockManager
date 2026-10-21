@@ -338,26 +338,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
       backgroundColor: AppColors.page,
       body: Column(
         children: [
-          // Header with search and filters
-          Container(
-            padding: EdgeInsets.all(isDesktop ? 24 : 16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: AppColors.border)),
-            ),
+          // Gradient header with search and filters
+          GradientHeader(
+            title: 'Products',
+            subtitle: 'Your stock at a glance',
+            padding: EdgeInsets.fromLTRB(
+                isDesktop ? 24 : 16, isDesktop ? 22 : 14, isDesktop ? 24 : 16, 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (isDesktop || isTablet) ...[
-                  Text(
-                    'Products',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: AppColors.navy,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 14),
-                ],
                 // Search and Filter Row
                 Row(
                   children: [
@@ -379,7 +368,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
                             )
                                 : null,
                             filled: true,
-                            fillColor: AppColors.page,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide.none,
+                            ),
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 14,
@@ -397,17 +394,14 @@ class _ProductListScreenState extends State<ProductListScreen> {
                         icon: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: _selectedCategory != null
-                                ? _getCategoryColor(_selectedCategory!)
-                                    .withValues(alpha: 0.12)
-                                : AppColors.page,
-                            borderRadius:
-                                BorderRadius.circular(AppRadii.control),
-                            border: Border.all(
-                              color: _selectedCategory != null
-                                  ? _getCategoryColor(_selectedCategory!)
-                                  : AppColors.border,
-                            ),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: _selectedCategory != null
+                                ? Border.all(
+                                    color: _getCategoryColor(_selectedCategory!),
+                                    width: 2,
+                                  )
+                                : null,
                           ),
                           child: Icon(
                             Icons.filter_list,
@@ -423,10 +417,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       icon: Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.page,
-                          borderRadius:
-                              BorderRadius.circular(AppRadii.control),
-                          border: Border.all(color: AppColors.border),
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
                         ),
                         child: const Icon(Icons.more_vert,
                             color: AppColors.navy),
@@ -908,8 +900,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   });
                 },
                 deleteIcon: const Icon(Icons.close, size: 16),
-                backgroundColor: _getCategoryColor(_selectedCategory!)
-                    .withOpacity(0.15),
+                backgroundColor: Colors.white,
                 side: BorderSide.none,
               ),
             ),
@@ -919,13 +910,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
             avatar: Icon(
               _getSortOptionIcon(_currentSortOption),
               size: 16,
-              color: Colors.blue,
+              color: AppColors.blue,
             ),
             label: Text(
               _getSortOptionLabel(_currentSortOption),
               style: const TextStyle(fontSize: 12),
             ),
-            backgroundColor: Colors.blue.withOpacity(0.1),
+            backgroundColor: Colors.white,
             side: BorderSide.none,
           ),
 
@@ -942,7 +933,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 'Purchase Prices',
                 style: TextStyle(fontSize: 12),
               ),
-              backgroundColor: Colors.green.withOpacity(0.1),
+              backgroundColor: Colors.white,
               side: BorderSide.none,
             ),
           ],

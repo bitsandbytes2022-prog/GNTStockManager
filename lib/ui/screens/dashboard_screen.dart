@@ -1,11 +1,12 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:inventory_manager/ui/screens/add_product_screen.dart';
+import 'package:flutter/services.dart';
 import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
 import 'package:inventory_manager/ui/screens/category_settings_screen.dart';
 import 'package:inventory_manager/ui/screens/earnings_screen.dart';
 import 'package:inventory_manager/ui/screens/ledger_screen.dart';
- import 'package:inventory_manager/ui/screens/product_list_screen.dart';
+import 'package:inventory_manager/ui/screens/more_screen.dart';
+import 'package:inventory_manager/ui/screens/product_list_screen.dart';
 import 'package:inventory_manager/ui/screens/profile_screen.dart';
 import 'package:inventory_manager/ui/screens/record_sale_screen.dart';
 import 'package:inventory_manager/ui/screens/sales_list_screen.dart';
@@ -26,45 +27,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final List<_NavItem> _navItems = [
     _NavItem(
       icon: Icons.inventory_2_outlined,
-      selectedIcon: Icons.inventory_2,
+      selectedIcon: Icons.inventory_2_rounded,
       label: 'Products',
       page: ProductListScreen(),
     ),
     _NavItem(
       icon: Icons.receipt_long_outlined,
-      selectedIcon: Icons.receipt_long,
+      selectedIcon: Icons.receipt_long_rounded,
       label: 'Sales',
       page: const SalesListScreen(),
     ),
     _NavItem(
-      icon: Icons.menu_book_outlined,
-      selectedIcon: Icons.menu_book,
+      icon: Icons.auto_stories_outlined,
+      selectedIcon: Icons.auto_stories_rounded,
       label: 'Ledger',
       page: const LedgerScreen(),
     ),
     _NavItem(
-      icon: Icons.account_balance_wallet_outlined,
-      selectedIcon: Icons.account_balance_wallet,
+      icon: Icons.savings_outlined,
+      selectedIcon: Icons.savings_rounded,
       label: 'Earnings',
       page: const EarningsScreen(),
     ),
     _NavItem(
-      icon: Icons.analytics_outlined,
-      selectedIcon: Icons.analytics,
+      icon: Icons.insights_outlined,
+      selectedIcon: Icons.insights_rounded,
       label: 'Analytics',
       page: const AnalyticsDashboardScreen(),
     ),
     _NavItem(
-      icon: Icons.leaderboard_outlined,
-      selectedIcon: Icons.leaderboard,
+      icon: Icons.local_fire_department_outlined,
+      selectedIcon: Icons.local_fire_department_rounded,
       label: 'Top Sellers',
       page: const TopSellingScreen(),
     ),
     _NavItem(
-      icon: Icons.settings_outlined,
-      selectedIcon: Icons.settings,
+      icon: Icons.tune_outlined,
+      selectedIcon: Icons.tune_rounded,
       label: 'Settings',
       page: const CategorySettingsScreen(),
+    ),
+  ];
+
+  /// Mobile tab: 0 Products, 1 Sales, 2 Ledger, 3 More. Phones get four
+  /// tabs plus a New Sale button instead of all seven sections; the rest
+  /// live on the More page.
+  int _mobileIndex = 0;
+
+  late final List<_NavItem> _mobileItems = [
+    _navItems[0],
+    _navItems[1],
+    _navItems[2],
+    _NavItem(
+      icon: Icons.grid_view_outlined,
+      selectedIcon: Icons.grid_view_rounded,
+      label: 'More',
+      page: const MoreScreen(),
     ),
   ];
 
@@ -113,49 +131,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       );
     } else {
-      // Mobile: Bottom navigation
+      // Mobile: four tabs and a New Sale button.
       return Scaffold(
-        body: _buildPage(),
-        bottomNavigationBar: _buildBottomNav(),
-        floatingActionButton: _buildFAB(),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        body: _buildPage(mobile: true),
+        bottomNavigationBar: _MobileNavBar(
+          items: _mobileItems,
+          selectedIndex: _mobileIndex,
+          onItemSelected: (i) => setState(() => _mobileIndex = i),
+          onNewSale: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const RecordSaleScreen()),
+          ),
+        ),
       );
     }
   }
 
-  Widget _buildBottomNav() {
-    return NavigationBar(
-      selectedIndex: _selectedIndex,
-      // Seven sections don't fit seven labels on a phone — label only the
-      // selected one, the rest stay recognisable by icon.
-      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-      onDestinationSelected: (index) {
-        setState(() => _selectedIndex = index);
-      },
-      destinations: _navItems
-          .map(
-            (item) => NavigationDestination(
-              icon: Icon(item.icon),
-              selectedIcon: Icon(item.selectedIcon),
-              label: item.label,
-            ),
-          )
-          .toList(),
-    );
-  }
-
-  Widget? _buildFAB() {
-    if (_selectedIndex == 0 && !kIsWeb) {
-      // Show FAB only on Products tab and not on web
-      return null; // FAB is handled in ProductListScreen
-    }
-
-    return null;
-  }
-
   /// The selected section, cross-faded with a short upward slide when the
   /// section changes. The brand stripe runs along the top of the content.
-  Widget _buildPage() {
+  Widget _buildPage({bool mobile = false}) {
+    final index = mobile ? _mobileIndex : _selectedIndex;
+    final items = mobile ? _mobileItems : _navItems;
     return ColoredBox(
       color: AppColors.page,
       child: Column(
@@ -177,8 +173,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               child: KeyedSubtree(
-                key: ValueKey(_selectedIndex),
-                child: _navItems[_selectedIndex].page,
+                key: ValueKey('${mobile ? 'm' : 'd'}$index'),
+                child: items[index].page,
               ),
             ),
           ),
@@ -235,7 +231,7 @@ class _DesktopSidebar extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     return Container(
       width: 256,
-      color: AppColors.navy,
+      decoration: const BoxDecoration(gradient: AppGradients.sidebar),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -296,16 +292,10 @@ class _DesktopSidebar extends StatelessWidget {
                     height: _itemHeight,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: AppColors.blue,
+                        gradient: AppGradients.primary,
                         borderRadius:
                             BorderRadius.circular(AppRadii.control),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.blue.withValues(alpha: 0.35),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                        boxShadow: AppShadows.glow(AppColors.blue),
                       ),
                     ),
                   ),
@@ -499,6 +489,160 @@ class _TabletNavigationRail extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Phone bottom bar: a white floating panel with four tabs around a
+/// gradient New Sale button. The selected tab's icon sits on a gradient
+/// pill that pops in with a little bounce.
+class _MobileNavBar extends StatelessWidget {
+  final List<_NavItem> items;
+  final int selectedIndex;
+  final ValueChanged<int> onItemSelected;
+  final VoidCallback onNewSale;
+
+  const _MobileNavBar({
+    required this.items,
+    required this.selectedIndex,
+    required this.onItemSelected,
+    required this.onNewSale,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tab(int i) => Expanded(
+          child: _MobileNavTab(
+            item: items[i],
+            selected: i == selectedIndex,
+            onTap: () {
+              if (i != selectedIndex) HapticFeedback.selectionClick();
+              onItemSelected(i);
+            },
+          ),
+        );
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x1F2E1065),
+            blurRadius: 24,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 72,
+          child: Row(
+            children: [
+              tab(0),
+              tab(1),
+              _NewSaleButton(onTap: onNewSale),
+              tab(2),
+              tab(3),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileNavTab extends StatelessWidget {
+  final _NavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _MobileNavTab({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: onTap,
+      haptic: false,
+      pressedScale: 0.88,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: AppMotion.normal,
+            curve: AppMotion.curve,
+            width: selected ? 52 : 40,
+            height: 32,
+            decoration: BoxDecoration(
+              gradient: selected ? AppGradients.primary : null,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: selected ? AppShadows.glow(AppColors.blue) : null,
+            ),
+            child: TweenAnimationBuilder<double>(
+              // Re-keyed on selection so the icon pops each time.
+              key: ValueKey(selected),
+              tween: Tween(begin: selected ? 0.6 : 1, end: 1),
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.elasticOut,
+              builder: (context, v, child) =>
+                  Transform.scale(scale: v, child: child),
+              child: Icon(
+                selected ? item.selectedIcon : item.icon,
+                size: 22,
+                color: selected ? Colors.white : AppColors.textMuted,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          AnimatedDefaultTextStyle(
+            duration: AppMotion.fast,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? AppColors.blue : AppColors.textMuted,
+            ),
+            child: Text(item.label),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The big round gradient button in the middle of the phone bar.
+class _NewSaleButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NewSaleButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Tooltip(
+        message: 'New sale',
+        child: Pressable(
+          onTap: onTap,
+          pressedScale: 0.86,
+          child: Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              gradient: AppGradients.action,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: AppShadows.glow(AppColors.coral),
+            ),
+            child: const Icon(Icons.add_shopping_cart_rounded,
+                color: Colors.white, size: 26),
+          ),
+        ),
+      ),
     );
   }
 }
