@@ -71,6 +71,27 @@ class SalesService {
       // skipped here — a batch update on a nonexistent doc would fail the
       // whole commit. Per-foot lines (pipes cut to length) deduct whole
       // pipes via effectiveStockUnits rather than the feet in `quantity`.
+      //
+      // On a wholesale sale, the rate each item went at is saved back as the
+      // product's wholesale price, so the next shopkeeper sale starts at the
+      // last price given. The rate before a bill discount was spread over
+      // the line is used, and per-foot lines are skipped (their rate is per
+      // foot, not per pipe). If a product is on more than one line, the
+      // last line wins. The wholesale margin is kept in step with it, as the
+      // product form does when a wholesale price is typed in.
+      final wholesaleUpdates = <String, Map<String, double>>{};
+      if (sale.isWholesale) {
+        for (final item in sale.items) {
+          if (item.productId.startsWith('custom_') || item.isPerFoot) continue;
+          final rate = item.originalPrice ?? item.salePrice;
+          final cost = item.purchasePrice;
+          wholesaleUpdates[item.productId] = {
+            'wholesalePrice': rate,
+            if (cost > 0) 'wholesaleMargin': (rate - cost) / cost * 100,
+          };
+        }
+      }
+
       for (final item in sale.items) {
         if (item.productId.startsWith('custom_')) continue;
 
@@ -83,6 +104,7 @@ class SalesService {
           'totalSold': FieldValue.increment(storeQty(item.quantity)),
           'saleCount': FieldValue.increment(1),
           'lastSoldAt': FieldValue.serverTimestamp(),
+          ...?wholesaleUpdates[item.productId],
         });
       }
 
