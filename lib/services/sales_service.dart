@@ -83,7 +83,10 @@ class SalesService {
       if (sale.isWholesale) {
         for (final item in sale.items) {
           if (item.productId.startsWith('custom_') || item.isPerFoot) continue;
-          final rate = item.originalPrice ?? item.salePrice;
+          // A tinted bucket's rate includes its tint charge, which isn't
+          // part of the bucket's own price.
+          final rate =
+              (item.originalPrice ?? item.salePrice) - (item.tintPrice ?? 0);
           final cost = item.purchasePrice;
           wholesaleUpdates[item.productId] = {
             'wholesalePrice': rate,

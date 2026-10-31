@@ -228,6 +228,16 @@ class Product {
         (name.toLowerCase().contains('pipe') || sub.contains('pipe'));
   }
 
+  /// An emulsion paint bucket that's tinted to a shade on the tinting
+  /// machine when sold — its sale line takes a colour code and a tint
+  /// charge on top of the bucket price. Emulsion is usually the paint's
+  /// subcategory, but the name is checked too.
+  bool get isTintable {
+    if (!category.toLowerCase().contains('paint')) return false;
+    final text = '${subcategory ?? ''} $name'.toLowerCase();
+    return text.contains('emul');
+  }
+
   /// Sold by weight — size is in KG (e.g. "1 KG"), so quantity and stock
   /// can be fractional, like 4.6 KG.
   bool get isSoldByWeight => isWeightSize(size);

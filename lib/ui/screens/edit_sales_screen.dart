@@ -14,6 +14,7 @@ import '../../utils/quantity.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'bill_preview_screen.dart';
+import '../widgets/tinting_fields.dart';
 import '../widgets/referrer_widgets.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
@@ -67,9 +68,18 @@ class _CartLine {
   /// this line; null when the line isn't discounted.
   final double? originalPrice;
 
+  /// Shade and per-unit tint charge of a tinted paint bucket; [price]
+  /// already includes the tint charge.
+  final String? colorCode;
+  final double? tintPrice;
+
   /// The line's own rate before any sale discount — what its price field
   /// edits.
   double get basePrice => originalPrice ?? price;
+
+  /// The product's name, with the colour code of a tinted bucket.
+  String get productName =>
+      SaleItem.nameWithColorCode(product.name, colorCode);
 
   const _CartLine({
     required this.lineKey,
@@ -78,6 +88,8 @@ class _CartLine {
     required this.price,
     required this.isPerFoot,
     this.originalPrice,
+    this.colorCode,
+    this.tintPrice,
   });
 }
 
@@ -134,6 +146,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   /// lineKey -> sold-by-length (pipes cut to feet). Quantity for these
   /// products is feet, not units — see Product.feetPerPipe.
   Map<String, bool> _perFootItems = {};
+
+  // Tinted emulsion buckets, keyed by lineKey — same as RecordSaleScreen.
+  Map<String, String> _lineColorCode = {};
+  Map<String, double> _lineTintPrice = {};
 
   /// Tracks line order (original sale order, then append-on-add) so the
   /// saved sale's item list isn't silently reshuffled into product-catalog
@@ -250,9 +266,17 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       _discountPercent = 0;
       for (final line in _cartLines) {
         _customPrices[line.lineKey] =
-            _effectiveListPrice(line.product, line.isPerFoot);
+            _effectiveListPrice(line.product, line.isPerFoot) +
+                (line.tintPrice ?? 0);
       }
     });
+  }
+
+  double _lastTintForProduct(String productId) {
+    for (final key in _cartItemOrder.reversed) {
+      if (_lineProductId[key] == productId) return _lineTintPrice[key] ?? 0;
+    }
+    return 0;
   }
 
   bool _lastPerFootForProduct(String productId) {
@@ -375,11 +399,18 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         );
         continue;
       }
+      // A tinted line's saved name already carries its colour code, which
+      // the cart adds back on — so the stand-in takes the plain name.
+      final code = item.colorCode;
+      final plainName = code != null && item.productName.endsWith(' ($code)')
+          ? item.productName.substring(
+              0, item.productName.length - code.length - 3)
+          : item.productName;
       _deletedProducts.putIfAbsent(
         item.productId,
         () => Product(
           id: item.productId,
-          name: item.productName,
+          name: plainName,
           size: item.productSize,
           // SaleItem prices are already per-foot for per-foot lines, and the
           // stand-in has no pipe category, so no further per-foot division
@@ -400,6 +431,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       _customPrices[lineKey] =
           item.isDiscounted ? item.originalPrice! : item.salePrice;
       _perFootItems[lineKey] = item.isPerFoot;
+      if (item.colorCode != null) _lineColorCode[lineKey] = item.colorCode!;
+      if (item.tintPrice != null) _lineTintPrice[lineKey] = item.tintPrice!;
     }
 
     // Re-spreading the amount that was entered gives back exactly the saved
@@ -791,10 +824,24 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 ? _listPriceOf(product) / feetPerPipe
                 : _listPriceOf(product)));
 
+    // A tinted emulsion bucket's price field holds just the bucket's price;
+    // the tint charge has its own field and is added on top.
+    final bool tintable = product.isTintable;
+    final double initialTint = isEditingExisting
+        ? (_lineTintPrice[editingLineKey] ?? 0)
+        : _lastTintForProduct(product.id);
+    currentPrice -= initialTint;
+
     final TextEditingController qtyController =
         TextEditingController(text: formatQty(currentQuantity));
     final TextEditingController priceController =
         TextEditingController(text: currentPrice.toStringAsFixed(2));
+    final TextEditingController colorCodeController = TextEditingController(
+      text: isEditingExisting ? (_lineColorCode[editingLineKey] ?? '') : '',
+    );
+    final TextEditingController tintController = TextEditingController(
+      text: initialTint > 0 ? initialTint.toStringAsFixed(2) : '',
+    );
     final FocusNode qtyFocusNode = FocusNode();
 
     final result = await showDialog<Map<String, dynamic>>(
@@ -836,10 +883,28 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 return;
               }
 
+              double tint = 0;
+              if (tintable && tintController.text.trim().isNotEmpty) {
+                final parsed = double.tryParse(tintController.text);
+                if (parsed == null || parsed < 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a valid tint price'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                  return;
+                }
+                tint = parsed;
+              }
+              final colorCode = colorCodeController.text.trim().toUpperCase();
+
               Navigator.of(context).pop({
                 'quantity': qty,
-                'price': price,
+                'price': price + tint,
                 'isPerFoot': sellPerFoot,
+                'colorCode': colorCode.isEmpty ? null : colorCode,
+                'tintPrice': tint > 0 ? tint : null,
               });
             }
 
@@ -1044,9 +1109,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                             Text(
                               sellPerFoot
                                   ? 'Price per foot'
-                                  : product.qtyUnit != null
-                                      ? 'Price per kg'
-                                      : 'Price per unit',
+                                  : tintable
+                                      ? 'Bucket price'
+                                      : product.qtyUnit != null
+                                          ? 'Price per kg'
+                                          : 'Price per unit',
                               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                             Text(
@@ -1059,6 +1126,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         TextField(
                           controller: priceController,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onChanged: tintable ? (_) => setDialogState(() {}) : null,
                           decoration: InputDecoration(
                             prefixText: '₹',
                             hintText: _listPriceOf(product).toStringAsFixed(2),
@@ -1081,6 +1149,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         ),
                       ],
                     ),
+                    if (tintable)
+                      TintingFields(
+                        colorCodeController: colorCodeController,
+                        tintController: tintController,
+                        bucketPrice: double.tryParse(priceController.text) ?? 0,
+                        onChanged: () => setDialogState(() {}),
+                      ),
                   ],
                 ),
               ),
@@ -1127,6 +1202,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           result['price'],
           isPerFoot: result['isPerFoot'] == true,
           editLineKey: editingLineKey,
+          colorCode: result['colorCode'] as String?,
+          tintPrice: result['tintPrice'] as double?,
         );
       }
     }
@@ -1138,9 +1215,21 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     double price, {
     bool isPerFoot = false,
     String? editLineKey,
+    String? colorCode,
+    double? tintPrice,
   }) {
     setState(() {
       final lineKey = editLineKey ?? _newLineKey(product.id);
+      if (colorCode != null) {
+        _lineColorCode[lineKey] = colorCode;
+      } else {
+        _lineColorCode.remove(lineKey);
+      }
+      if (tintPrice != null) {
+        _lineTintPrice[lineKey] = tintPrice;
+      } else {
+        _lineTintPrice.remove(lineKey);
+      }
       if (editLineKey == null) {
         _cartItemOrder.add(lineKey);
         _lineProductId[lineKey] = product.id;
@@ -1168,6 +1257,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       _selectedQuantities.remove(lineKey);
       _customPrices.remove(lineKey);
       _perFootItems.remove(lineKey);
+      _lineColorCode.remove(lineKey);
+      _lineTintPrice.remove(lineKey);
       _lineProductId.remove(lineKey);
       _cartItemOrder.remove(lineKey);
     });
@@ -1389,7 +1480,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   double get _listRevenue {
     double total = 0;
     for (final line in _cartLines) {
-      total += _effectiveListPrice(line.product, line.isPerFoot) * line.quantity;
+      total += (_effectiveListPrice(line.product, line.isPerFoot) +
+              (line.tintPrice ?? 0)) *
+          line.quantity;
     }
     return total;
   }
@@ -1420,10 +1513,12 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     setState(() {
       _discountPercent = discountPercent;
       for (final line in _cartLines) {
+        // The tint charge isn't discounted — only the bucket's own price.
+        final tint = line.tintPrice ?? 0;
         final floor = _getMinimumPrice(line.product, line.isPerFoot);
         final target =
             _effectiveListPrice(line.product, line.isPerFoot) * (1 - discountPercent / 100);
-        _customPrices[line.lineKey] = target < floor ? floor : target;
+        _customPrices[line.lineKey] = (target < floor ? floor : target) + tint;
       }
     });
   }
@@ -1894,6 +1989,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         quantity: quantity,
         price: price,
         isPerFoot: _perFootItems[key] ?? false,
+        colorCode: _lineColorCode[key],
+        tintPrice: _lineTintPrice[key],
       ));
     }
     if (_discountAmount <= 0) return lines;
@@ -1915,6 +2012,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 price: discounted[i],
                 isPerFoot: lines[i].isPerFoot,
                 originalPrice: lines[i].price,
+                colorCode: lines[i].colorCode,
+                tintPrice: lines[i].tintPrice,
               ),
     ];
   }
@@ -2064,11 +2163,13 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         final isPerFoot = line.isPerFoot;
         return SaleItem(
           productId: product.id,
-          productName: product.name,
+          productName: line.productName,
           productSize: product.size,
           quantity: line.quantity,
           salePrice: line.price,
           originalPrice: line.originalPrice,
+          colorCode: line.colorCode,
+          tintPrice: line.tintPrice,
           purchasePrice: _effectiveUnitCost(product, isPerFoot),
           // No photo copy on the sale (see RecordSaleScreen).
           isPerFoot: isPerFoot,
@@ -2846,6 +2947,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                       _customPrices.clear();
                       _clearDiscount();
                       _perFootItems.clear();
+                      _lineColorCode.clear();
+                      _lineTintPrice.clear();
                       _cartItemOrder.clear();
                       _lineProductId.clear();
                       _customItems.clear();
@@ -2934,6 +3037,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                           isPerFoot: _filteredCartLines[i].isPerFoot,
                           itemNumber: i + 1,
                           isDeleted: _isDeletedProduct(_filteredCartLines[i].product.id),
+                          colorCode: _filteredCartLines[i].colorCode,
                         ),
                       for (int i = 0; i < _customItemOrder.length; i++)
                         if (_customItems[_customItemOrder[i]] != null)
@@ -3120,6 +3224,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                                     isPerFoot: _filteredCartLines[i].isPerFoot,
                                     itemNumber: i + 1,
                                     isDeleted: _isDeletedProduct(_filteredCartLines[i].product.id),
+                                    colorCode: _filteredCartLines[i].colorCode,
                                   ),
                                 for (int i = 0; i < _customItemOrder.length; i++)
                                   if (_customItems[_customItemOrder[i]] != null)
@@ -3377,6 +3482,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               isPerFoot: line.isPerFoot,
               unitCost: _effectiveUnitCost(line.product, line.isPerFoot),
               stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
+              colorCode: line.colorCode,
+              tintPrice: line.tintPrice,
             ))
         .toList();
 
@@ -3856,6 +3963,9 @@ class _CartItem extends StatefulWidget {
   /// is shown from the sale's own saved details.
   final bool isDeleted;
 
+  /// Shade of a tinted paint bucket, shown after its name.
+  final String? colorCode;
+
   const _CartItem({
     required this.product,
     required this.effectiveStock,
@@ -3869,6 +3979,7 @@ class _CartItem extends StatefulWidget {
     this.isPerFoot = false,
     required this.itemNumber,
     this.isDeleted = false,
+    this.colorCode,
     this.discountedPrice,
     this.discountExempt = false,
   });
@@ -3928,7 +4039,8 @@ class _CartItemState extends State<_CartItem> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.product.name,
+                        SaleItem.nameWithColorCode(
+                            widget.product.name, widget.colorCode),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),

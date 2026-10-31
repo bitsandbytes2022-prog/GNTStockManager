@@ -49,6 +49,11 @@ class BillLineItem {
   /// when it wasn't discounted. [price] is the rate actually charged.
   final double? originalPrice;
 
+  /// Shade and per-unit tint charge of a tinted paint bucket; [price]
+  /// already includes the tint charge.
+  final String? colorCode;
+  final double? tintPrice;
+
   const BillLineItem({
     required this.product,
     required this.quantity,
@@ -58,9 +63,15 @@ class BillLineItem {
     required this.unitCost,
     required this.stockUnits,
     this.displayName,
+    this.colorCode,
+    this.tintPrice,
   });
 
-  String get effectiveName => displayName ?? product.name;
+  /// The name saved on the sale: the product's, with a tinted bucket's
+  /// colour code — "Bucket (CODE)".
+  String get productName => SaleItem.nameWithColorCode(product.name, colorCode);
+
+  String get effectiveName => displayName ?? productName;
 
   bool get isDiscounted =>
       originalPrice != null && originalPrice! - price >= 0.005;
@@ -299,11 +310,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       final saleItems = widget.lineItems.map((line) {
         return SaleItem(
           productId: line.product.id,
-          productName: line.product.name,
+          productName: line.productName,
           productSize: line.product.size,
           quantity: line.quantity,
           salePrice: line.price,
           originalPrice: line.isDiscounted ? line.originalPrice : null,
+          colorCode: line.colorCode,
+          tintPrice: line.tintPrice,
           purchasePrice: line.unitCost,
           isPerFoot: line.isPerFoot,
           stockUnits: line.stockUnits,

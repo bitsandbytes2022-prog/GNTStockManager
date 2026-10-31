@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import '../widgets/buy_list_button.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/product_model.dart';
@@ -820,6 +821,12 @@ class _AddProductWebScreenState extends State<AddProductWebScreen> {
               icon: const Icon(Icons.copy_all_outlined),
               tooltip: 'Duplicate as new variant',
               onPressed: _isLoading ? null : _duplicateAsVariant,
+            ),
+          if (isEditing)
+            BuyListButton(
+              key: ValueKey(widget.product!.id),
+              product: widget.product!,
+              iconOnly: true,
             ),
           if (isEditing)
             IconButton(

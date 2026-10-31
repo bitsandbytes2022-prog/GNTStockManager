@@ -88,6 +88,15 @@ class SaleItem {
   /// wasn't discounted.
   final double? originalPrice;
 
+  /// Shade a tinted paint bucket was mixed to (see Product.isTintable).
+  /// [productName] already carries it, as "Bucket (CODE)", so bills and
+  /// history show it; it's kept here too so editing the sale can reload it.
+  final String? colorCode;
+
+  /// Per-unit tinting charge included in [salePrice] (the rest is the
+  /// bucket's own price). Null when the line wasn't tinted.
+  final double? tintPrice;
+
   SaleItem({
     required this.productId,
     required this.productName,
@@ -100,7 +109,13 @@ class SaleItem {
     this.stockUnits,
     this.addedOn,
     this.originalPrice,
+    this.colorCode,
+    this.tintPrice,
   }) : total = salePrice * quantity;
+
+  /// [name] with a tinted line's colour code appended: "Bucket (CODE)".
+  static String nameWithColorCode(String name, String? colorCode) =>
+      colorCode == null || colorCode.isEmpty ? name : '$name ($colorCode)';
 
   /// Quantity as shown on bills and sale history: "4.6 kg", "12 ft", "3".
   String get qtyLabel =>
@@ -129,6 +144,8 @@ class SaleItem {
     'stockUnits': stockUnits == null ? null : storeQty(stockUnits!),
     'addedOn': addedOn != null ? Timestamp.fromDate(addedOn!) : null,
     if (originalPrice != null) 'originalPrice': originalPrice,
+    if (colorCode != null) 'colorCode': colorCode,
+    if (tintPrice != null) 'tintPrice': tintPrice,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -144,6 +161,8 @@ class SaleItem {
       stockUnits: (map['stockUnits'] as num?)?.toDouble(),
       addedOn: (map['addedOn'] as Timestamp?)?.toDate(),
       originalPrice: (map['originalPrice'] as num?)?.toDouble(),
+      colorCode: map['colorCode'] as String?,
+      tintPrice: (map['tintPrice'] as num?)?.toDouble(),
     );
   }
 
@@ -166,6 +185,8 @@ class SaleItem {
     double? originalPrice,
   }) {
     return SaleItem(
+      colorCode: colorCode,
+      tintPrice: tintPrice,
       productId: productId ?? this.productId,
       productName: productName ?? this.productName,
       productSize: productSize ?? this.productSize,
