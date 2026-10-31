@@ -97,6 +97,10 @@ class SaleItem {
   /// bucket's own price). Null when the line wasn't tinted.
   final double? tintPrice;
 
+  /// What [tintPrice] cost the shop (from the Tint product's cost ratio),
+  /// included in [purchasePrice].
+  final double? tintCost;
+
   SaleItem({
     required this.productId,
     required this.productName,
@@ -111,6 +115,7 @@ class SaleItem {
     this.originalPrice,
     this.colorCode,
     this.tintPrice,
+    this.tintCost,
   }) : total = salePrice * quantity;
 
   /// [name] with a tinted line's colour code appended: "Bucket (CODE)".
@@ -146,6 +151,7 @@ class SaleItem {
     if (originalPrice != null) 'originalPrice': originalPrice,
     if (colorCode != null) 'colorCode': colorCode,
     if (tintPrice != null) 'tintPrice': tintPrice,
+    if (tintCost != null) 'tintCost': tintCost,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -163,6 +169,7 @@ class SaleItem {
       originalPrice: (map['originalPrice'] as num?)?.toDouble(),
       colorCode: map['colorCode'] as String?,
       tintPrice: (map['tintPrice'] as num?)?.toDouble(),
+      tintCost: (map['tintCost'] as num?)?.toDouble(),
     );
   }
 
@@ -187,6 +194,7 @@ class SaleItem {
     return SaleItem(
       colorCode: colorCode,
       tintPrice: tintPrice,
+      tintCost: tintCost,
       productId: productId ?? this.productId,
       productName: productName ?? this.productName,
       productSize: productSize ?? this.productSize,

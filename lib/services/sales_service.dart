@@ -87,7 +87,7 @@ class SalesService {
           // part of the bucket's own price.
           final rate =
               (item.originalPrice ?? item.salePrice) - (item.tintPrice ?? 0);
-          final cost = item.purchasePrice;
+          final cost = item.purchasePrice - (item.tintCost ?? 0);
           wholesaleUpdates[item.productId] = {
             'wholesalePrice': rate,
             if (cost > 0) 'wholesaleMargin': (rate - cost) / cost * 100,

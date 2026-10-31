@@ -10,12 +10,16 @@ class TintingFields extends StatelessWidget {
   final double bucketPrice;
   final VoidCallback onChanged;
 
+  /// What a tint charge costs the shop (see tintCostFor).
+  final double Function(double tintPrice) tintCostOf;
+
   const TintingFields({
     super.key,
     required this.colorCodeController,
     required this.tintController,
     required this.bucketPrice,
     required this.onChanged,
+    required this.tintCostOf,
   });
 
   @override
@@ -82,6 +86,11 @@ class TintingFields extends StatelessWidget {
             ' = ₹${(bucketPrice + tint).toStringAsFixed(2)} per bucket',
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           ),
+          if (tint > 0)
+            Text(
+              'Tint cost: ₹${tintCostOf(tint).toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            ),
         ],
       ),
     );

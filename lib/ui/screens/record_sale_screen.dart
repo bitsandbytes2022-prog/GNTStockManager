@@ -29,6 +29,7 @@ import '../widgets/referrer_widgets.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../../utils/quantity.dart';
+import '../../utils/tint_cost.dart';
 
 enum ProductSortOption { newest, lowStock, highSelling }
 
@@ -86,6 +87,9 @@ class _CartLine {
   final String? colorCode;
   final double? tintPrice;
 
+  /// What the tint charge costs the shop (see tintCostFor).
+  final double? tintCost;
+
   /// The line's own rate before any cart discount — what its price field
   /// edits.
   double get basePrice => originalPrice ?? price;
@@ -104,6 +108,7 @@ class _CartLine {
     this.originalPrice,
     this.colorCode,
     this.tintPrice,
+    this.tintCost,
   });
 }
 
@@ -1215,6 +1220,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         tintController: tintController,
                         bucketPrice: double.tryParse(priceController.text) ?? 0,
                         onChanged: () => setDialogState(() {}),
+                        tintCostOf: (t) => tintCostFor(t, _allProducts),
                       ),
                   ],
                 ),
@@ -1552,6 +1558,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // cost and produces nonsense (e.g. a huge apparent loss). isPerFoot is now
   // a per-*line* attribute (not per-product), so it's passed in explicitly
   // rather than looked up from a productId-keyed map.
+  /// [line]'s per-unit cost: the product's, plus a tinted bucket's tint.
+  double _lineUnitCost(_CartLine line) =>
+      _effectiveUnitCost(line.product, line.isPerFoot) + (line.tintCost ?? 0);
+
   double _effectiveUnitCost(Product product, bool isPerFoot) {
     if (isPerFoot) {
       final feet = _feetPerPipeFor(product);
@@ -1591,8 +1601,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   double get _totalProfit {
     double profit = 0;
     for (final line in _cartLines) {
-      profit += (line.price - _effectiveUnitCost(line.product, line.isPerFoot)) *
-          line.quantity;
+      profit += (line.price - _lineUnitCost(line)) * line.quantity;
     }
     return profit;
   }
@@ -1622,7 +1631,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   double get _listCost {
     double total = 0;
     for (final line in _cartLines) {
-      total += _effectiveUnitCost(line.product, line.isPerFoot) * line.quantity;
+      total += _lineUnitCost(line) * line.quantity;
     }
     return total;
   }
@@ -2242,6 +2251,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         nameOverride: _lineNameOverride[key],
         colorCode: _lineColorCode[key],
         tintPrice: _lineTintPrice[key],
+        tintCost: _lineTintPrice[key] == null
+            ? null
+            : tintCostFor(_lineTintPrice[key]!, _allProducts),
       ));
     }
     if (_discountAmount <= 0) return lines;
@@ -2266,6 +2278,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 originalPrice: lines[i].price,
                 colorCode: lines[i].colorCode,
                 tintPrice: lines[i].tintPrice,
+                tintCost: lines[i].tintCost,
               ),
     ];
   }
@@ -2453,7 +2466,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           originalPrice: line.originalPrice,
           colorCode: line.colorCode,
           tintPrice: line.tintPrice,
-          purchasePrice: _effectiveUnitCost(line.product, line.isPerFoot),
+          tintCost: line.tintCost,
+          purchasePrice: _lineUnitCost(line),
           // No photo copy on the sale — it made every sale ~100 KB and
           // loading the sales list ran phones out of memory. Screens look
           // the photo up from the product instead.
@@ -4192,10 +4206,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               price: line.price,
               originalPrice: line.originalPrice,
               isPerFoot: line.isPerFoot,
-              unitCost: _effectiveUnitCost(line.product, line.isPerFoot),
+              unitCost: _lineUnitCost(line),
               stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
               colorCode: line.colorCode,
               tintPrice: line.tintPrice,
+              tintCost: line.tintCost,
               // A renamed line only ever shows on the Estimate — a real
               // Bill/Invoice always prints the product's actual name.
               displayName: isEstimate ? line.nameOverride : null,

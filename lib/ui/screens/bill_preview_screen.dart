@@ -54,6 +54,9 @@ class BillLineItem {
   final String? colorCode;
   final double? tintPrice;
 
+  /// What the tint charge cost the shop; already included in [unitCost].
+  final double? tintCost;
+
   const BillLineItem({
     required this.product,
     required this.quantity,
@@ -65,6 +68,7 @@ class BillLineItem {
     this.displayName,
     this.colorCode,
     this.tintPrice,
+    this.tintCost,
   });
 
   /// The name saved on the sale: the product's, with a tinted bucket's
@@ -288,7 +292,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
   double _calculateTotalProfit() {
     return widget.lineItems.fold(0.0, (sum, line) {
-      final profit = (line.price - line.product.purchasePrice) * line.quantity;
+      final profit = (line.price - line.unitCost) * line.quantity;
       return sum + profit;
     });
   }
@@ -317,6 +321,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           originalPrice: line.isDiscounted ? line.originalPrice : null,
           colorCode: line.colorCode,
           tintPrice: line.tintPrice,
+          tintCost: line.tintCost,
           purchasePrice: line.unitCost,
           isPerFoot: line.isPerFoot,
           stockUnits: line.stockUnits,

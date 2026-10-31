@@ -11,6 +11,7 @@ import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/cart_discount.dart';
 import '../../utils/quantity.dart';
+import '../../utils/tint_cost.dart';
 import 'add_product_screen.dart';
 import 'add_product_web_screen.dart';
 import 'bill_preview_screen.dart';
@@ -73,6 +74,9 @@ class _CartLine {
   final String? colorCode;
   final double? tintPrice;
 
+  /// What the tint charge costs the shop (see tintCostFor).
+  final double? tintCost;
+
   /// The line's own rate before any sale discount — what its price field
   /// edits.
   double get basePrice => originalPrice ?? price;
@@ -90,6 +94,7 @@ class _CartLine {
     this.originalPrice,
     this.colorCode,
     this.tintPrice,
+    this.tintCost,
   });
 }
 
@@ -1155,6 +1160,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                         tintController: tintController,
                         bucketPrice: double.tryParse(priceController.text) ?? 0,
                         onChanged: () => setDialogState(() {}),
+                        tintCostOf: (t) => tintCostFor(t, _allProducts),
                       ),
                   ],
                 ),
@@ -1432,6 +1438,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     return _effectiveUnitCost(product, isPerFoot) / (1 - _minMarginFraction);
   }
 
+  /// [line]'s per-unit cost: the product's, plus a tinted bucket's tint.
+  double _lineUnitCost(_CartLine line) =>
+      _effectiveUnitCost(line.product, line.isPerFoot) + (line.tintCost ?? 0);
+
   double _effectiveUnitCost(Product product, bool isPerFoot) {
     if (isPerFoot) {
       final feet = _feetPerPipeFor(product);
@@ -1464,7 +1474,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   double get _totalProfit {
     double profit = 0;
     for (final line in _cartLines) {
-      profit += (line.price - _effectiveUnitCost(line.product, line.isPerFoot)) * line.quantity;
+      profit += (line.price - _lineUnitCost(line)) * line.quantity;
     }
     return profit;
   }
@@ -1490,7 +1500,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
   double get _listCost {
     double total = 0;
     for (final line in _cartLines) {
-      total += _effectiveUnitCost(line.product, line.isPerFoot) * line.quantity;
+      total += _lineUnitCost(line) * line.quantity;
     }
     return total;
   }
@@ -1991,6 +2001,9 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         isPerFoot: _perFootItems[key] ?? false,
         colorCode: _lineColorCode[key],
         tintPrice: _lineTintPrice[key],
+        tintCost: _lineTintPrice[key] == null
+            ? null
+            : tintCostFor(_lineTintPrice[key]!, _allProducts),
       ));
     }
     if (_discountAmount <= 0) return lines;
@@ -2014,6 +2027,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
                 originalPrice: lines[i].price,
                 colorCode: lines[i].colorCode,
                 tintPrice: lines[i].tintPrice,
+                tintCost: lines[i].tintCost,
               ),
     ];
   }
@@ -2170,7 +2184,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
           originalPrice: line.originalPrice,
           colorCode: line.colorCode,
           tintPrice: line.tintPrice,
-          purchasePrice: _effectiveUnitCost(product, isPerFoot),
+          tintCost: line.tintCost,
+          purchasePrice: _lineUnitCost(line),
           // No photo copy on the sale (see RecordSaleScreen).
           isPerFoot: isPerFoot,
           stockUnits: _stockUnitsFor(product, line.quantity, isPerFoot),
@@ -3480,10 +3495,11 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
               price: line.price,
               originalPrice: line.originalPrice,
               isPerFoot: line.isPerFoot,
-              unitCost: _effectiveUnitCost(line.product, line.isPerFoot),
+              unitCost: _lineUnitCost(line),
               stockUnits: _stockUnitsFor(line.product, line.quantity, line.isPerFoot),
               colorCode: line.colorCode,
               tintPrice: line.tintPrice,
+              tintCost: line.tintCost,
             ))
         .toList();
 
