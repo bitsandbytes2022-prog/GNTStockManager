@@ -15,6 +15,7 @@ class SettingsService {
   static const int _maxRecentSearches = 8;
   static const String _thermalOffsetKey = 'thermal_print_offset_mm';
   static const String _thermalPageLengthKey = 'thermal_print_page_length_mm';
+  static const String _showBankDetailsKey = 'show_bank_details_on_bill';
 
   // Cache the SharedPreferences instance for better performance
   static SharedPreferences? _prefsInstance;
@@ -174,6 +175,27 @@ class SettingsService {
       await prefs?.setDouble(_thermalPageLengthKey, value);
     } catch (e) {
       debugPrint('❌ Error saving thermal page length: $e');
+    }
+  }
+
+  /// Whether bills print the shop's bank details (see BankDetails). Shown
+  /// by default; the last choice made on a bill is remembered.
+  Future<bool> getShowBankDetails() async {
+    try {
+      final prefs = await _getPrefs();
+      return prefs?.getBool(_showBankDetailsKey) ?? true;
+    } catch (e) {
+      debugPrint('❌ Error getting bank details setting: $e');
+      return true;
+    }
+  }
+
+  Future<void> setShowBankDetails(bool value) async {
+    try {
+      final prefs = await _getPrefs();
+      await prefs?.setBool(_showBankDetailsKey, value);
+    } catch (e) {
+      debugPrint('❌ Error saving bank details setting: $e');
     }
   }
 }

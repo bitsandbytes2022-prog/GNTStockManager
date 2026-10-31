@@ -12,6 +12,7 @@ import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
+import '../../utils/bank_details.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../widgets/collapsing_header.dart';
@@ -463,6 +464,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
   }
 
   Future<void> _showPrintOptions(Sale sale, {bool isEstimate = false}) async {
+    var showBankDetails = await SettingsService().getShowBankDetails();
+    if (!mounted) return;
     await showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -478,6 +481,17 @@ class _SalesListScreenState extends State<SalesListScreen> {
                 child: Text(
                   'Print As',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              StatefulBuilder(
+                builder: (context, setSheetState) => SwitchListTile(
+                  secondary: const Icon(Icons.account_balance_outlined),
+                  title: const Text('Show bank account details'),
+                  value: showBankDetails,
+                  onChanged: (value) {
+                    setSheetState(() => showBankDetails = value);
+                    SettingsService().setShowBankDetails(value);
+                  },
                 ),
               ),
               ListTile(
@@ -521,6 +535,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     try {
       final offsetMm = await SettingsService().getThermalOffsetMm();
       final pageLengthMm = await SettingsService().getThermalPageLengthMm();
+      final showBankDetails = await SettingsService().getShowBankDetails();
       final initialFormat = thermalSize != null
           ? thermalPageFormat(thermalSize,
               offsetMm: offsetMm, pageLengthMm: pageLengthMm)
@@ -538,9 +553,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
           final pdf = thermalSize != null
               ? await _generateThermalInvoicePdf(sale, thermalSize,
                   isEstimate: isEstimate,
+                  showBankDetails: showBankDetails,
                   offsetMm: offsetMm,
                   pageLengthMm: pageLengthMm)
-              : await _generateInvoicePdf(sale, isEstimate: isEstimate);
+              : await _generateInvoicePdf(sale,
+                  isEstimate: isEstimate, showBankDetails: showBankDetails);
           return pdf.save();
         },
       );
@@ -588,7 +605,11 @@ class _SalesListScreenState extends State<SalesListScreen> {
     return entries;
   }
 
-  Future<pw.Document> _generateInvoicePdf(Sale sale, {bool isEstimate = false}) async {
+  Future<pw.Document> _generateInvoicePdf(
+    Sale sale, {
+    bool isEstimate = false,
+    bool showBankDetails = false,
+  }) async {
     final pdf = pw.Document(
       theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
     );
@@ -837,6 +858,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
               ),
             ),
 
+            if (showBankDetails) bankDetailsPdfSection(_sectionBorder()),
+
             // Declaration + signature
             pw.Container(
               width: double.infinity,
@@ -911,6 +934,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     Sale sale,
     ThermalRollSize thermalSize, {
     bool isEstimate = false,
+    bool showBankDetails = false,
     double offsetMm = 0,
     double pageLengthMm = thermalPageLengthDefaultMm,
   }) async {
@@ -1138,6 +1162,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
               if (sale.notes != null && sale.notes!.isNotEmpty) ...[
                 pw.SizedBox(height: 2),
                 pw.Text('Notes: ${sale.notes}', style: const pw.TextStyle(fontSize: 8)),
+              ],
+
+              if (showBankDetails) ...[
+                pw.SizedBox(height: 4),
+                dashedDivider(),
+                pw.SizedBox(height: 4),
+                ...bankDetailsThermalLines(),
               ],
 
               pw.SizedBox(height: 6),

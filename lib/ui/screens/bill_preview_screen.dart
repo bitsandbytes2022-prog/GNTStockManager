@@ -16,6 +16,7 @@ import '../../services/settings_service.dart';
 import '../../utils/amount_in_words.dart';
 import '../../utils/gst_rounding.dart';
 import '../../utils/pdf_fonts.dart';
+import '../../utils/bank_details.dart';
 import '../../utils/thermal_print.dart';
 import '../widgets/thermal_offset_dialog.dart';
 
@@ -162,6 +163,10 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
   // changes: this just reverse-calculates the taxable value + CGST/SGST
   // split baked into that total, in whole rupees with a round-off line.
   bool _gstEnabled = true;
+
+  /// Print the shop's bank details on the bill; remembered between bills.
+  bool _showBankDetails = true;
+
   final TextEditingController _gstRateController =
       TextEditingController(text: '18');
 
@@ -252,8 +257,11 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
         debugPrint('Logo not found: $e');
       }
 
+      final showBankDetails = await SettingsService().getShowBankDetails();
+
       setState(() {
         _invoiceNumber = previewNumber;
+        _showBankDetails = showBankDetails;
         _isLoading = false;
       });
     } catch (e) {
@@ -788,6 +796,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               ),
             ),
 
+            if (_showBankDetails) bankDetailsPdfSection(_sectionBorder()),
+
             // Declaration + signature
             pw.Container(
               width: double.infinity,
@@ -1083,6 +1093,13 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           pw.Text('Notes: ${widget.notes}', style: const pw.TextStyle(fontSize: 8)),
         ],
 
+        if (_showBankDetails) ...[
+          pw.SizedBox(height: 4),
+          dashedDivider(),
+          pw.SizedBox(height: 4),
+          ...bankDetailsThermalLines(),
+        ],
+
         pw.SizedBox(height: 6),
         pw.Center(
           child: pw.Text(
@@ -1249,6 +1266,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           // Payment method — not applicable to an estimate, since no
           // payment has actually been taken yet.
           if (!widget.isEstimate) _buildPaymentInfo(),
+
+          _buildBankDetailsControl(),
+          if (_showBankDetails) _buildBankDetails(),
 
           // Footer
           _buildFooter(),
@@ -1569,6 +1589,75 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBankDetailsControl() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blue.shade100),
+        ),
+        child: Row(
+          children: [
+            Checkbox(
+              value: _showBankDetails,
+              onChanged: (v) {
+                final value = v ?? true;
+                setState(() => _showBankDetails = value);
+                SettingsService().setShowBankDetails(value);
+              },
+            ),
+            const Text(
+              'Show bank account details',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBankDetails() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'BANK DETAILS',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final (label, value) in BankDetails.rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 80,
+                    child: Text(label, style: const TextStyle(fontSize: 13)),
+                  ),
+                  Expanded(
+                    child: Text(
+                      value,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
