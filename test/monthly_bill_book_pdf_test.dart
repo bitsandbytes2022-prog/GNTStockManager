@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:inventory_manager/models/sale_model.dart';
 import 'package:inventory_manager/utils/gst_rounding.dart';
 import 'package:inventory_manager/utils/monthly_bill_book_pdf.dart';
+import 'package:inventory_manager/utils/thermal_print.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -97,5 +98,25 @@ void main() {
     expect(g.lines.single.amount, 169);
     expect(g.taxable + 2 * g.halfGst + g.roundOff, closeTo(200, 0.001));
     expect(g.roundOff.abs(), lessThanOrEqualTo(1.5));
+  });
+
+  test('lays a long month out on every thermal roll size', () async {
+    final sales = [
+      for (var n = 1; n <= 40; n++)
+        sale(n, DateTime(2026, 8, 1 + n % 28), [
+          for (var k = 0; k < 6; k++)
+            item('Suraksha Plus Base SL$k very long paint name (8203)',
+                qty: k + 1),
+        ], buyer: n.isEven ? 'Ramesh Kumar' : null),
+    ];
+    for (final size in ThermalRollSize.values) {
+      final doc = await buildMonthlyBillBookPdf(
+        sales: sales,
+        month: DateTime(2026, 8, 1),
+        thermalSize: size,
+      );
+      final bytes = await doc.save();
+      expect(bytes.sublist(0, 4), equals('%PDF'.codeUnits));
+    }
   });
 }

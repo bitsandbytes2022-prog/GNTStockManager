@@ -1373,10 +1373,22 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
 
     try {
+      final thermalSize = config.thermalSize;
+      final offsetMm = await SettingsService().getThermalOffsetMm();
+      final pageLengthMm = await SettingsService().getThermalPageLengthMm();
       await Printing.layoutPdf(
         name: 'Bill Book ${DateFormat('MMM yyyy').format(start)}',
+        format: thermalSize != null
+            ? thermalPageFormat(thermalSize,
+                offsetMm: offsetMm, pageLengthMm: pageLengthMm)
+            : PdfPageFormat.a4,
+        // The negotiated format is ignored, as for single bills: print
+        // dialogs misreport paper size.
         onLayout: (_) async {
           final doc = await buildMonthlyBillBookPdf(
+            thermalSize: thermalSize,
+            thermalOffsetMm: offsetMm,
+            thermalPageLengthMm: pageLengthMm,
             sales: monthSales,
             month: start,
             showGst: config.showGst,
@@ -3321,6 +3333,9 @@ class _BillBookConfig {
   final int maxItemsPerBill;
   final bool separateBuyers;
 
+  /// Thermal roll to print on; null for A4.
+  final ThermalRollSize? thermalSize;
+
   const _BillBookConfig({
     required this.month,
     required this.showGst,
@@ -3328,6 +3343,7 @@ class _BillBookConfig {
     required this.combine,
     required this.maxItemsPerBill,
     required this.separateBuyers,
+    this.thermalSize,
   });
 }
 
@@ -3346,6 +3362,7 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
       TextEditingController(text: '18');
   bool _combine = false;
   bool _separateBuyers = true;
+  ThermalRollSize? _thermalSize; // null = A4
   final TextEditingController _maxItemsController =
       TextEditingController(text: '15');
 
@@ -3403,6 +3420,36 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
               if (value != null) setState(() => _month = value);
             },
           ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<ThermalRollSize?>(
+            initialValue: _thermalSize,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'Print on',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            items: [
+              const DropdownMenuItem(
+                  value: null, child: Text('Standard (A4)')),
+              for (final size in ThermalRollSize.values)
+                DropdownMenuItem(
+                  value: size,
+                  child: Text(size.label, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (value) => setState(() => _thermalSize = value),
+          ),
+          if (_thermalSize != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: const Icon(Icons.tune, size: 18),
+                label: const Text('Receipt settings'),
+                onPressed: () => showThermalOffsetDialog(context,
+                    showOffset: _thermalSize!.adjustable),
+              ),
+            ),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -3500,6 +3547,7 @@ class _MonthlyBillBookDialogState extends State<_MonthlyBillBookDialog> {
                 combine: _combine,
                 maxItemsPerBill: maxItems < 1 ? 15 : maxItems,
                 separateBuyers: _separateBuyers,
+                thermalSize: _thermalSize,
               ),
             );
           },

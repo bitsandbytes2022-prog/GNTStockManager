@@ -8,6 +8,7 @@ import 'bill_book_batching.dart';
 import 'gst_rounding.dart';
 import 'pdf_fonts.dart';
 import 'pdf_logo.dart';
+import 'thermal_print.dart';
 
 // Seller identity — kept in step with the single-bill layouts in
 // bill_preview_screen.dart / sales_list_screen.dart.
@@ -35,6 +36,11 @@ const String _shopGstin = '02FDUPK4649R1ZK';
 /// as possible, each with at most [maxItemsPerBill] lines — see
 /// [combineSalesIntoBills]. [separateBuyers] keeps different customers'
 /// sales on separate bills.
+///
+/// With [thermalSize] set, the book is laid out as one long receipt for that
+/// roll width (bills one after another, split by dashed lines) instead of on
+/// A4 — see [thermalPageFormat] for [thermalOffsetMm] and
+/// [thermalPageLengthMm].
 Future<pw.Document> buildMonthlyBillBookPdf({
   required List<Sale> sales,
   required DateTime month,
@@ -43,6 +49,9 @@ Future<pw.Document> buildMonthlyBillBookPdf({
   bool combine = false,
   int maxItemsPerBill = 15,
   bool separateBuyers = true,
+  ThermalRollSize? thermalSize,
+  double thermalOffsetMm = 0,
+  double thermalPageLengthMm = thermalPageLengthDefaultMm,
 }) async {
   final pdf = pw.Document(
     theme: pw.ThemeData.withFont(fontFallback: await loadUnicodeFallbackFonts()),
@@ -260,6 +269,156 @@ Future<pw.Document> buildMonthlyBillBookPdf({
               style: const pw.TextStyle(fontSize: 8)),
         ),
     ];
+  }
+
+  if (thermalSize != null) {
+    pw.Widget dashed() => pw.Center(
+        child: pw.Text('--------------------------------',
+            style: const pw.TextStyle(fontSize: 8)));
+    pw.Widget row(String label, String value, {bool bold = false}) => pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(label,
+                style: pw.TextStyle(
+                    fontSize: bold ? 10 : 8,
+                    fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+            pw.Text(value,
+                style: pw.TextStyle(
+                    fontSize: bold ? 10 : 8,
+                    fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+          ],
+        );
+    const small = pw.TextStyle(fontSize: 8);
+
+    List<pw.Widget> thermalBill(BookBill sale) {
+      final gst = breakups[sale];
+      final due = sale.amountDue;
+      return [
+        pw.SizedBox(height: 4),
+        pw.Container(height: 1.2, color: PdfColors.black),
+        pw.SizedBox(height: 2),
+        pw.Text('${showGst ? 'Tax Invoice' : 'Bill'} #: ${sale.number}',
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+        pw.Text('Date: ${DateFormat('dd/MM/yyyy').format(sale.date)}', style: small),
+        pw.Text('Payment: ${sale.paymentLabel}', style: small),
+        if (sale.isCombined)
+          pw.Text(
+              'Covers sales ${sale.sourceInvoices.map((n) => '#$n').join(', ')}',
+              style: const pw.TextStyle(fontSize: 7)),
+        if (sale.hasBuyer) ...[
+          pw.SizedBox(height: 2),
+          pw.Text('BILL TO',
+              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+          if (sale.buyerName?.isNotEmpty ?? false)
+            pw.Text(sale.buyerName!,
+                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+          if (sale.buyerPhone?.isNotEmpty ?? false)
+            pw.Text(sale.buyerPhone!, style: small),
+          if (sale.buyerAddress?.isNotEmpty ?? false)
+            pw.Text(sale.buyerAddress!, style: small),
+        ],
+        pw.SizedBox(height: 2),
+        dashed(),
+        pw.SizedBox(height: 2),
+        for (var i = 0; i < sale.items.length; i++)
+          () {
+            final it = sale.items[i];
+            final line = gst?.lines[i];
+            final rate = line?.rate ?? it.salePrice;
+            final amount = line?.amount ?? it.total;
+            // Inseparable: keeps an item's name and its qty x rate line on
+            // the same page of the roll.
+            return pw.Inseparable(
+              child: pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 3),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('${i + 1}. ${it.productName} (${it.productSize})',
+                        style: pw.TextStyle(
+                            fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                    row('${it.qtyLabel} x ${formatRate(rate)}',
+                        'INR ${amount.toStringAsFixed(2)}'),
+                  ],
+                ),
+              ),
+            );
+          }(),
+        dashed(),
+        pw.SizedBox(height: 2),
+        if (gst != null) ...[
+          row('Taxable Value', 'INR ${gst.taxable.toStringAsFixed(2)}'),
+          row('CGST @ $halfRateLabel%', 'INR ${gst.halfGst.toStringAsFixed(2)}'),
+          row('SGST @ $halfRateLabel%', 'INR ${gst.halfGst.toStringAsFixed(2)}'),
+          if (gst.hasRoundOff)
+            row('Round off', 'INR ${formatRoundOff(gst.roundOff)}'),
+          pw.SizedBox(height: 2),
+        ],
+        row('TOTAL', 'INR ${sale.totalAmount.toStringAsFixed(2)}', bold: true),
+        if (due > 0.005)
+          pw.Text('Due: INR ${due.toStringAsFixed(2)}',
+              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+        pw.Text('(${amountInWords(sale.totalAmount)})',
+            style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic)),
+        if (sale.notes?.isNotEmpty ?? false)
+          pw.Text('Notes: ${sale.notes}', style: small),
+      ];
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: thermalPageFormat(thermalSize,
+            offsetMm: thermalOffsetMm, pageLengthMm: thermalPageLengthMm),
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        maxPages: 2000,
+        build: (ctx) => [
+          pw.Center(
+            child: pw.Column(
+              children: [
+                if (logo != null)
+                  pw.Container(
+                    width: 32,
+                    height: 32,
+                    margin: const pw.EdgeInsets.only(bottom: 4),
+                    child: pw.Image(logo),
+                  ),
+                pw.Text(_shopName,
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                        fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                pw.Text(_shopAddress,
+                    textAlign: pw.TextAlign.center, style: small),
+                if (showGst)
+                  pw.Text('GSTIN: $_shopGstin',
+                      textAlign: pw.TextAlign.center, style: small),
+                pw.Text(_shopContact,
+                    textAlign: pw.TextAlign.center, style: small),
+                pw.SizedBox(height: 4),
+                pw.Text('Monthly Bill Book - $monthLabel',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                        fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 4),
+          dashed(),
+          row('Bills in month', '${ordered.length}'),
+          if (combine) row('Combined from', '${realSales.length} sales'),
+          if (ordered.isNotEmpty)
+            row('Bill no.', '${ordered.first.number} to ${ordered.last.number}'),
+          if (showGst) ...[
+            row('Taxable value', 'INR ${grandTaxable.toStringAsFixed(2)}'),
+            row('GST (CGST+SGST)', 'INR ${grandGst.toStringAsFixed(2)}'),
+          ],
+          row('Total sales', 'INR ${grandTotal.toStringAsFixed(2)}', bold: true),
+          if (ordered.isEmpty) pw.Text('No sales recorded for $monthLabel.'),
+          ...ordered.expand(thermalBill),
+          pw.SizedBox(height: 10),
+        ],
+      ),
+    );
+    return pdf;
   }
 
   pdf.addPage(
