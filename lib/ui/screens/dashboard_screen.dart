@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:inventory_manager/ui/screens/analytics_dashboard_screen.dart';
 import 'package:inventory_manager/ui/screens/buy_list_screen.dart';
+import 'package:inventory_manager/ui/screens/store_stock_screen.dart';
 import 'package:inventory_manager/ui/screens/category_settings_screen.dart';
 import 'package:inventory_manager/ui/screens/earnings_screen.dart';
 import 'package:inventory_manager/ui/screens/ledger_screen.dart';
@@ -67,6 +68,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       selectedIcon: Icons.playlist_add_check_rounded,
       label: 'Buy List',
       page: const BuyListScreen(),
+    ),
+    _NavItem(
+      icon: Icons.warehouse_outlined,
+      selectedIcon: Icons.warehouse_rounded,
+      label: 'Store Stock',
+      page: const StoreStockScreen(),
     ),
     _NavItem(
       icon: Icons.tune_outlined,

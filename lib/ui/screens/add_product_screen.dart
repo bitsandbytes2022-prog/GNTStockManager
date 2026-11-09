@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../widgets/buy_list_button.dart';
+import '../widgets/store_stock_button.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -913,6 +914,12 @@ class _AddProductScreenState extends State<AddProductScreen> {
               icon: const Icon(Icons.copy_all_outlined),
               tooltip: 'Duplicate as new variant',
               onPressed: _isLoading ? null : _duplicateAsVariant,
+            ),
+          if (isEditing)
+            StoreStockButton(
+              key: ValueKey('store-${widget.product!.id}'),
+              product: widget.product!,
+              iconOnly: true,
             ),
           if (isEditing)
             BuyListButton(

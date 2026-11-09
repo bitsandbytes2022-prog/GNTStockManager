@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import 'analytics_dashboard_screen.dart';
 import 'buy_list_screen.dart';
+import 'store_stock_screen.dart';
 import 'category_settings_screen.dart';
 import 'credit_sales_screen.dart';
 import 'earnings_screen.dart';
@@ -46,6 +47,8 @@ class MoreScreen extends StatelessWidget {
     'Tools': [
       _MoreEntry('Buy List', 'Items to restock', Icons.playlist_add_check_rounded,
           AppGradients.money, (_) => const BuyListScreen()),
+      _MoreEntry('Store Stock', 'Kept in the godown', Icons.warehouse_rounded,
+          AppGradients.ocean, (_) => const StoreStockScreen()),
       _MoreEntry('GST calculator', 'Quick tax maths', Icons.calculate_rounded,
           AppGradients.primary, (_) => const GstCalculatorScreen()),
       _MoreEntry('Settings', 'Categories & app', Icons.tune_rounded,
