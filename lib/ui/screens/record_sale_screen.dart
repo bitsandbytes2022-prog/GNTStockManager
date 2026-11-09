@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../widgets/buy_list_button.dart';
+import '../widgets/store_stock_button.dart';
 import '../widgets/tinting_fields.dart';
 import 'package:flutter/services.dart';
 
@@ -28,6 +29,7 @@ import '../widgets/ledger_share_sheet.dart';
 import '../widgets/referrer_widgets.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../../utils/product_search.dart';
 import '../../utils/quantity.dart';
 import '../../utils/tint_cost.dart';
 
@@ -482,16 +484,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
       // Filter by search query
       if (_searchQuery.isNotEmpty) {
-        final queryWords = _searchQuery.split(' ').where((w) => w.isNotEmpty);
-
-        filtered = filtered.where((product) {
-          final name = product.name.toLowerCase();
-          final size = product.size.toLowerCase();
-
-          return queryWords.every(
-                (word) => name.contains(word) || size.contains(word),
-          );
-        }).toList();
+        filtered = searchProducts(filtered.toList(), _searchQuery);
       }
 
       // Sort products
@@ -524,7 +517,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         break;
     }
 
-    return sortedList;
+    // A search ranks best matches first; the sort above breaks ties.
+    return _searchQuery.isEmpty
+        ? sortedList
+        : searchProducts(sortedList, _searchQuery);
   }
 
   String _getSortOptionLabel(ProductSortOption option) {
@@ -639,12 +635,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     }
 
     if (_searchQuery.isNotEmpty) {
-      final queryWords = _searchQuery.split(' ').where((w) => w.isNotEmpty);
-      products = products.where((product) {
-        final name = product.name.toLowerCase();
-        final size = product.size.toLowerCase();
-        return queryWords.every((word) => name.contains(word) || size.contains(word));
-      });
+      products = searchProducts(products.toList(), _searchQuery);
     }
 
     return products.toList();
@@ -927,7 +918,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  BuyListButton(product: product),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      BuyListButton(product: product),
+                      StoreStockButton(product: product),
+                    ],
+                  ),
                 ],
               ),
               content: SingleChildScrollView(
@@ -2387,12 +2385,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   List<_CartLine> get _filteredCartLines {
     if (_cartSearchQuery.isEmpty) return _cartLines;
-
-    return _cartLines.where((line) {
-      final name = line.product.name.toLowerCase();
-      final size = line.product.size.toLowerCase();
-      return name.contains(_cartSearchQuery) || size.contains(_cartSearchQuery);
-    }).toList();
+    return rankBySearch(_cartLines, _cartSearchQuery,
+        name: (l) => l.product.name, size: (l) => l.product.size);
   }
 
   Future<void> _completeSale() async {

@@ -10,6 +10,7 @@ import '../../services/firebase_service.dart';
 import '../../services/sales_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/cart_discount.dart';
+import '../../utils/product_search.dart';
 import '../../utils/quantity.dart';
 import '../../utils/tint_cost.dart';
 import 'add_product_screen.dart';
@@ -540,12 +541,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
       }
 
       if (_searchQuery.isNotEmpty) {
-        final queryWords = _searchQuery.split(' ').where((w) => w.isNotEmpty);
-        filtered = filtered.where((product) {
-          final name = product.name.toLowerCase();
-          final size = product.size.toLowerCase();
-          return queryWords.every((word) => name.contains(word) || size.contains(word));
-        }).toList();
+        filtered = searchProducts(filtered.toList(), _searchQuery);
       }
 
       _filteredProducts = _sortProducts(filtered);
@@ -575,7 +571,10 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
         });
         break;
     }
-    return sortedList;
+    // A search ranks best matches first; the sort above breaks ties.
+    return _searchQuery.isEmpty
+        ? sortedList
+        : searchProducts(sortedList, _searchQuery);
   }
 
   String _getSortOptionLabel(ProductSortOption option) {
@@ -670,12 +669,7 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
     }
 
     if (_searchQuery.isNotEmpty) {
-      final queryWords = _searchQuery.split(' ').where((w) => w.isNotEmpty);
-      products = products.where((product) {
-        final name = product.name.toLowerCase();
-        final size = product.size.toLowerCase();
-        return queryWords.every((word) => name.contains(word) || size.contains(word));
-      });
+      products = searchProducts(products.toList(), _searchQuery);
     }
 
     return products.toList();
@@ -2136,12 +2130,8 @@ class _EditSaleScreenState extends State<EditSaleScreen> {
 
   List<_CartLine> get _filteredCartLines {
     if (_cartSearchQuery.isEmpty) return _cartLines;
-    final queryWords = _cartSearchQuery.split(' ').where((w) => w.isNotEmpty);
-    return _cartLines.where((line) {
-      final name = line.product.name.toLowerCase();
-      final size = line.product.size.toLowerCase();
-      return queryWords.every((word) => name.contains(word) || size.contains(word));
-    }).toList();
+    return rankBySearch(_cartLines, _cartSearchQuery,
+        name: (l) => l.product.name, size: (l) => l.product.size);
   }
 
   Future<void> _updateSale() async {

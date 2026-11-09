@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/product_model.dart';
 import '../../services/firebase_service.dart';
+import '../../utils/product_search.dart';
 import '../widgets/product_card.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
@@ -121,18 +122,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
     // Filter by search query
     if (_searchQuery.isNotEmpty) {
-      final queryWords = _searchQuery
-          .toLowerCase()
-          .split(' ')
-          .where((w) => w.isNotEmpty);
-
-      filtered = filtered.where((product) {
-        final name = product.name.toLowerCase();
-        final size = product.size.toLowerCase();
-        return queryWords.every(
-              (word) => name.contains(word) || size.contains(word),
-        );
-      }).toList();
+      filtered = searchProducts(filtered.toList(), _searchQuery);
     }
 
     return filtered;
@@ -185,12 +175,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
 
     if (_searchQuery.isNotEmpty) {
-      final queryWords = _searchQuery.split(' ').where((w) => w.isNotEmpty);
-      filtered = filtered.where((product) {
-        final name = product.name.toLowerCase();
-        final size = product.size.toLowerCase();
-        return queryWords.every((word) => name.contains(word) || size.contains(word));
-      });
+      filtered = searchProducts(filtered.toList(), _searchQuery);
     }
 
     return filtered.toList();
@@ -247,7 +232,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
         break;
     }
 
-    return sortedList;
+    // A search ranks best matches first; the sort above breaks ties.
+    return _searchQuery.isEmpty
+        ? sortedList
+        : searchProducts(sortedList, _searchQuery);
   }
 
   Future<void> _navigateToAddProduct() async {
