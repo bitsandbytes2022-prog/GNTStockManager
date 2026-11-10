@@ -29,6 +29,7 @@ import '../widgets/ledger_share_sheet.dart';
 import '../widgets/referrer_widgets.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
+import '../widgets/sale_keyboard.dart';
 import '../../utils/product_search.dart';
 import '../../utils/quantity.dart';
 import '../../utils/tint_cost.dart';
@@ -92,6 +93,9 @@ class _CartLine {
   /// What the tint charge costs the shop (see tintCostFor).
   final double? tintCost;
 
+  /// Units of the Tint product in each bucket (see [_lineTintUnits]).
+  final double? tintUnits;
+
   /// The line's own rate before any cart discount — what its price field
   /// edits.
   double get basePrice => originalPrice ?? price;
@@ -111,6 +115,7 @@ class _CartLine {
     this.colorCode,
     this.tintPrice,
     this.tintCost,
+    this.tintUnits,
   });
 }
 
@@ -125,7 +130,8 @@ class RecordSaleScreen extends StatefulWidget {
   State<RecordSaleScreen> createState() => _RecordSaleScreenState();
 }
 
-class _RecordSaleScreenState extends State<RecordSaleScreen> {
+class _RecordSaleScreenState extends State<RecordSaleScreen>
+    with SaleKeyboardMixin {
   final FirebaseService _firebaseService = FirebaseService();
   final SalesService _salesService = SalesService();
   final SettingsService _settingsService = SettingsService();
@@ -166,6 +172,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   // _customPrices is bucket + tint.
   Map<String, String> _lineColorCode = {};
   Map<String, double> _lineTintPrice = {};
+  // Units of the Tint product mixed into each bucket — what the tint cost
+  // and the Tint stock taken are counted from.
+  Map<String, double> _lineTintUnits = {};
 
   // Pipe lines sold by the foot instead of by whole unit (see
   // Product.feetPerPipe) — keyed by lineKey, same as _customPrices. Stock
@@ -311,10 +320,16 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     setState(() {
       _isWholesale = value;
       _discountPercent = 0;
+      final tintProduct = findTintProduct(_allProducts);
       for (final line in _cartLines) {
+        // Tint counted in units goes to the new rate too.
+        var tint = line.tintPrice ?? 0;
+        if (tintProduct != null && (line.tintUnits ?? 0) > 0) {
+          tint = line.tintUnits! * _listPriceOf(tintProduct);
+          _lineTintPrice[line.lineKey] = tint;
+        }
         _customPrices[line.lineKey] =
-            _effectiveListPrice(line.product, line.isPerFoot) +
-                (line.tintPrice ?? 0);
+            _effectiveListPrice(line.product, line.isPerFoot) + tint;
       }
     });
   }
@@ -326,6 +341,15 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       if (_lineProductId[key] == productId) return _lineTintPrice[key] ?? 0;
     }
     return 0;
+  }
+
+  /// Same idea as [_lastTintForProduct] but for the tint units (null when
+  /// the last line had none).
+  double? _lastTintUnitsForProduct(String productId) {
+    for (final key in _cartItemOrder.reversed) {
+      if (_lineProductId[key] == productId) return _lineTintUnits[key];
+    }
+    return null;
   }
 
   /// Same idea as [_lastPriceForProduct] but for the per-foot toggle.
@@ -354,7 +378,72 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _cartSearchQuery = _cartSearchController.text.toLowerCase();
       });
     });
+    initSaleKeyboard();
   }
+
+  // Keyboard control (see SaleKeyboardMixin).
+  final FocusNode _discountFocus = FocusNode(debugLabel: 'Sale discount');
+
+  @override
+  List<Product> get keyboardProducts =>
+      _quickCategory != null ? _quickFilteredProducts() : _filteredProducts;
+
+  @override
+  List<String> get keyboardCartLines =>
+      [for (final l in _filteredCartLines) l.lineKey];
+
+  @override
+  TextEditingController get keyboardSearchController => _searchController;
+
+  @override
+  Future<void> openProductFromKeyboard(Product product) =>
+      _showQuantityDialog(product);
+
+  @override
+  Future<void> editCartLineFromKeyboard(String lineKey) =>
+      _showEditLineDialog(lineKey);
+
+  @override
+  void removeCartLineFromKeyboard(String lineKey) => _removeFromCart(lineKey);
+
+  void _focusDiscount() {
+    if (_selectedQuantities.isEmpty) return;
+    _discountFocus.requestFocus();
+    _discountController.selection = TextSelection(
+        baseOffset: 0, extentOffset: _discountController.text.length);
+  }
+
+  void _showShortcutsHelp() => showSaleShortcutsHelp(context, const [
+        ...SaleKeyboardMixin.commonHelp,
+        ('F3', 'Shopkeeper ledger'),
+        ('F4', 'Add a custom item'),
+        ('F6', 'Wholesale rates on / off'),
+        ('F7', 'Discount'),
+        ('F8 / Ctrl+P', 'Preview bill'),
+        ('F9 / Ctrl+S', 'Complete sale'),
+        ('F1', 'This list'),
+      ]);
+
+  Map<ShortcutActivator, VoidCallback> get _screenShortcuts =>
+      shortcutBindings({
+        ...cartLineBindings,
+        [const SingleActivator(LogicalKeyboardKey.f1)]: _showShortcutsHelp,
+        [const SingleActivator(LogicalKeyboardKey.f3)]: () => _pickParty(),
+        [const SingleActivator(LogicalKeyboardKey.f4)]: _showAddCustomItemDialog,
+        [const SingleActivator(LogicalKeyboardKey.f6)]: () =>
+            _setWholesale(!_isWholesale),
+        [const SingleActivator(LogicalKeyboardKey.f7)]: _focusDiscount,
+        [
+          const SingleActivator(LogicalKeyboardKey.f8),
+          ...ctrlOrCmd(LogicalKeyboardKey.keyP),
+        ]: _showPreviewChoice,
+        [
+          const SingleActivator(LogicalKeyboardKey.f9),
+          ...ctrlOrCmd(LogicalKeyboardKey.keyS),
+        ]: () {
+          if (!_isSaving) _completeSale();
+        },
+      });
 
   Future<void> _loadRecentSearches() async {
     final searches = await _settingsService.getRecentSearches();
@@ -452,7 +541,9 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   void _filterProducts() {
     setState(() {
-      _searchQuery = _searchController.text.toLowerCase();
+      final query = _searchController.text.toLowerCase();
+      if (query != _searchQuery) resetHighlight();
+      _searchQuery = query;
       var filtered = _allProducts;
 
       // Filter by category
@@ -811,14 +902,73 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     final TextEditingController tintController = TextEditingController(
       text: initialTint > 0 ? initialTint.toStringAsFixed(2) : '',
     );
+
+    final double? initialTintUnits = isEditingExisting
+        ? _lineTintUnits[editingLineKey]
+        : _lastTintUnitsForProduct(product.id);
+    final TextEditingController tintUnitsController = TextEditingController(
+      text: initialTintUnits != null ? formatQty(initialTintUnits) : '',
+    );
+    // Tint is charged at the Tint product's rate (wholesale on a wholesale
+    // sale) and costs its purchase price per unit.
+    final Product? tintProduct = findTintProduct(_allProducts);
     final TextEditingController nameController = TextEditingController(
       text: isEditingExisting
           ? (_lineNameOverride[editingLineKey] ?? product.name)
           : product.name,
     );
 
-    // Focus node for auto-focus
-    final FocusNode qtyFocusNode = FocusNode();
+    // Keyboard: quantity starts focused and selected so typing replaces
+
+    // it, ↑/↓ step it, Tab goes on to price, Enter adds from any field.
+
+    void Function(int delta)? stepQty; // set once the dialog has built
+
+    final FocusNode qtyFocusNode = FocusNode(
+
+      onKeyEvent: (node, event) {
+
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+
+          return KeyEventResult.ignored;
+
+        }
+
+        final key = event.logicalKey;
+
+        if (key != LogicalKeyboardKey.arrowUp &&
+
+            key != LogicalKeyboardKey.arrowDown) {
+
+          return KeyEventResult.ignored;
+
+        }
+
+        stepQty?.call(key == LogicalKeyboardKey.arrowUp ? 1 : -1);
+
+        return KeyEventResult.handled;
+
+      },
+
+    );
+
+    qtyController.selection =
+
+        TextSelection(baseOffset: 0, extentOffset: qtyController.text.length);
+
+    final FocusNode priceFocusNode = FocusNode();
+
+    priceFocusNode.addListener(() {
+
+      if (priceFocusNode.hasFocus) {
+
+        priceController.selection = TextSelection(
+
+            baseOffset: 0, extentOffset: priceController.text.length);
+
+      }
+
+    });
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -830,6 +980,25 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             // the same product have already committed.
             final double remainingStock = roundQty(
                 (product.stock - alreadyElsewhere).clamp(0, double.infinity));
+
+            stepQty = (delta) {
+
+              final current = parseQty(qtyController.text) ?? 0;
+
+              final next = current + delta;
+
+              if (delta < 0 && current <= 1) return;
+
+              if (delta > 0 && !sellPerFoot && next > remainingStock) return;
+
+              qtyController.text = formatQty(next);
+
+              qtyController.selection = TextSelection(
+
+                  baseOffset: 0, extentOffset: qtyController.text.length);
+
+            };
+
 
             Future<void> submit() async {
               final double? qty = byWeight && !sellPerFoot
@@ -879,6 +1048,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 }
                 tint = parsed;
               }
+              final tintUnits = tintable ? parseQty(tintUnitsController.text) : null;
               final colorCode = colorCodeController.text.trim().toUpperCase();
 
               Navigator.of(context).pop({
@@ -888,10 +1058,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 'name': nameController.text.trim(),
                 'colorCode': colorCode.isEmpty ? null : colorCode,
                 'tintPrice': tint > 0 ? tint : null,
+                'tintUnits': tintUnits != null && tintUnits > 0 ? tintUnits : null,
               });
             }
 
-            return AlertDialog(
+            return CallbackShortcuts(
+              // Esc cancels (the dialog isn't barrier-dismissible, so it
+              // wouldn't otherwise).
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.escape): () =>
+                    Navigator.of(context).pop(null),
+              },
+              child: AlertDialog(
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1055,7 +1233,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     Row(
                       children: [
                         // Decrease button
-                        IconButton(
+                        ExcludeFocus(child: IconButton(
                           onPressed: () {
                             final currentVal = parseQty(qtyController.text) ?? 1;
                             if (currentVal > 1) {
@@ -1068,13 +1246,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           icon: const Icon(Icons.remove_circle_outline),
                           iconSize: 32,
                           color: AppColors.blue,
-                        ),
+                        )),
 
                         // Quantity input field
                         Expanded(
                           child: TextField(
                             controller: qtyController,
                             focusNode: qtyFocusNode,
+                            autofocus: true,
                             textAlign: TextAlign.center,
                             keyboardType: qtyKeyboard(byWeight && !sellPerFoot),
                             style: const TextStyle(
@@ -1100,7 +1279,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         ),
 
                         // Increase button
-                        IconButton(
+                        ExcludeFocus(child: IconButton(
                           onPressed: () {
                             final currentVal = parseQty(qtyController.text) ?? 0;
                             if (sellPerFoot || currentVal + 1 <= remainingStock) {
@@ -1113,7 +1292,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           icon: const Icon(Icons.add_circle_outline),
                           iconSize: 32,
                           color: AppColors.blue,
-                        ),
+                        )),
                       ],
                     ),
 
@@ -1129,7 +1308,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         if (!sellPerFoot && qty > remainingStock) {
                           return const SizedBox.shrink();
                         }
-                        return ActionChip(
+                        return ExcludeFocus(child: ActionChip(
                           label: Text(formatQty(qty)),
                           onPressed: () {
                             qtyController.text = formatQty(qty);
@@ -1137,7 +1316,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                               TextPosition(offset: qtyController.text.length),
                             );
                           },
-                        );
+                        ));
                       }).toList(),
                     ),
 
@@ -1174,6 +1353,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         const SizedBox(height: 8),
                         TextField(
                           controller: priceController,
+                          focusNode: priceFocusNode,
+                          onSubmitted: (_) => submit(),
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           onChanged: tintable ? (_) => setDialogState(() {}) : null,
                           decoration: InputDecoration(
@@ -1215,10 +1396,14 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                     if (tintable)
                       TintingFields(
                         colorCodeController: colorCodeController,
+                        unitsController: tintUnitsController,
                         tintController: tintController,
                         bucketPrice: double.tryParse(priceController.text) ?? 0,
                         onChanged: () => setDialogState(() {}),
-                        tintCostOf: (t) => tintCostFor(t, _allProducts),
+                        ratePerUnit: tintProduct == null ? null : _listPriceOf(tintProduct),
+                        costPerUnit: tintProduct?.purchasePrice,
+                        tintCostOf: (t, units) => tintCostFor(t, _allProducts, units: units),
+                        onSubmitted: submit,
                       ),
                   ],
                 ),
@@ -1250,20 +1435,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   label: Text(isEditingExisting ? 'Update' : 'Add to Cart'),
                 ),
               ],
-            );
+            ));
           },
         );
       },
     );
 
-    // Auto-focus and select all text when dialog opens
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      qtyFocusNode.requestFocus();
-      qtyController.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: qtyController.text.length,
-      );
-    });
 
     // Handle the result
     if (result != null) {
@@ -1281,6 +1458,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           nameOverride: result['name'] as String?,
           colorCode: result['colorCode'] as String?,
           tintPrice: result['tintPrice'] as double?,
+          tintUnits: result['tintUnits'] as double?,
         );
       }
     }
@@ -1298,6 +1476,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
     String? nameOverride,
     String? colorCode,
     double? tintPrice,
+    double? tintUnits,
   }) {
     setState(() {
       final lineKey = editLineKey ?? _newLineKey(product.id);
@@ -1310,6 +1489,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _lineTintPrice[lineKey] = tintPrice;
       } else {
         _lineTintPrice.remove(lineKey);
+      }
+      if (tintPrice != null && tintUnits != null) {
+        _lineTintUnits[lineKey] = tintUnits;
+      } else {
+        _lineTintUnits.remove(lineKey);
       }
       if (editLineKey == null) {
         _cartItemOrder.add(lineKey);
@@ -1352,6 +1536,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       _perFootItems.remove(lineKey);
       _lineColorCode.remove(lineKey);
       _lineTintPrice.remove(lineKey);
+      _lineTintUnits.remove(lineKey);
       _lineProductId.remove(lineKey);
       _lineNameOverride.remove(lineKey);
       _cartItemOrder.remove(lineKey);
@@ -1368,7 +1553,54 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
-        return AlertDialog(
+        void submit() {
+          final name = nameController.text.trim();
+          final amount = double.tryParse(amountController.text);
+          final quantity = int.tryParse(quantityController.text) ?? 1;
+
+          if (name.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please enter item name'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+            return;
+          }
+
+          if (amount == null || amount <= 0) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please enter a valid amount'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+            return;
+          }
+
+          if (quantity <= 0) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please enter a valid quantity'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+            return;
+          }
+
+          Navigator.of(context).pop({
+            'name': name,
+            'amount': amount,
+            'quantity': quantity,
+          });
+        }
+
+        return CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                Navigator.of(context).pop(null),
+          },
+          child: AlertDialog(
           title: const Text('Add Custom Item'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1384,10 +1616,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   ),
                 ),
                 textCapitalization: TextCapitalization.words,
+                onSubmitted: (_) => submit(),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: quantityController,
+                onSubmitted: (_) => submit(),
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: 'Quantity',
@@ -1403,6 +1637,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: amountController,
+                onSubmitted: (_) => submit(),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Amount',
@@ -1421,52 +1656,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton.icon(
-              onPressed: () {
-                final name = nameController.text.trim();
-                final amount = double.tryParse(amountController.text);
-                final quantity = int.tryParse(quantityController.text) ?? 1;
-
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter item name'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                  return;
-                }
-
-                if (amount == null || amount <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter a valid amount'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                  return;
-                }
-
-                if (quantity <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter a valid quantity'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                  return;
-                }
-
-                Navigator.of(context).pop({
-                  'name': name,
-                  'amount': amount,
-                  'quantity': quantity,
-                });
-              },
+              onPressed: submit,
               icon: const Icon(Icons.add),
               label: const Text('Add'),
             ),
           ],
-        );
+        ));
       },
     );
 
@@ -2249,9 +2444,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         nameOverride: _lineNameOverride[key],
         colorCode: _lineColorCode[key],
         tintPrice: _lineTintPrice[key],
+        tintUnits: _lineTintUnits[key],
         tintCost: _lineTintPrice[key] == null
             ? null
-            : tintCostFor(_lineTintPrice[key]!, _allProducts),
+            : tintCostFor(_lineTintPrice[key]!, _allProducts,
+                units: _lineTintUnits[key]),
       ));
     }
     if (_discountAmount <= 0) return lines;
@@ -2277,6 +2474,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 colorCode: lines[i].colorCode,
                 tintPrice: lines[i].tintPrice,
                 tintCost: lines[i].tintCost,
+                tintUnits: lines[i].tintUnits,
               ),
     ];
   }
@@ -2332,6 +2530,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                 width: 120,
                 child: TextField(
                   controller: _discountController,
+                  focusNode: _discountFocus,
+                  onSubmitted: (_) => focusSearch(),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
@@ -2461,6 +2661,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           colorCode: line.colorCode,
           tintPrice: line.tintPrice,
           tintCost: line.tintCost,
+          tintUnits: line.tintUnits,
+          tintProductId: line.tintUnits == null
+              ? null
+              : findTintProduct(_allProducts)?.id,
           purchasePrice: _lineUnitCost(line),
           // No photo copy on the sale — it made every sale ~100 KB and
           // loading the sales list ran phones out of memory. Screens look
@@ -2552,6 +2756,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           _perFootItems.clear();
         _lineColorCode.clear();
         _lineTintPrice.clear();
+        _lineTintUnits.clear();
           _cartItemOrder.clear();
           _lineProductId.clear();
           _lineNameOverride.clear();
@@ -2624,7 +2829,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           Navigator.of(context).pop();
         }
       },
-      child: layout,
+      // A FocusScope of its own so the shortcuts still work after a click
+      // takes focus off a field (focus then lands on this scope).
+      child: CallbackShortcuts(
+        bindings: _screenShortcuts,
+        child: FocusScope(child: layout),
+      ),
     );
   }
 
@@ -2667,6 +2877,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             icon: const Icon(Icons.add_box_outlined),
             tooltip: 'Add missing product',
           ),
+          if (keyboardFirst)
+            IconButton(
+              onPressed: _showShortcutsHelp,
+              icon: const Icon(Icons.keyboard_outlined),
+              tooltip: 'Keyboard shortcuts (F1)',
+            ),
         ],
       ),
       body: Row(
@@ -2718,6 +2934,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             icon: const Icon(Icons.add_box_outlined),
             tooltip: 'Add missing product',
           ),
+          if (keyboardFirst)
+            IconButton(
+              onPressed: _showShortcutsHelp,
+              icon: const Icon(Icons.keyboard_outlined),
+              tooltip: 'Keyboard shortcuts (F1)',
+            ),
           IconButton(
             onPressed: () {
               showModalBottomSheet(
@@ -2767,6 +2989,12 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             icon: const Icon(Icons.add_box_outlined),
             tooltip: 'Add missing product',
           ),
+          if (keyboardFirst)
+            IconButton(
+              onPressed: _showShortcutsHelp,
+              icon: const Icon(Icons.keyboard_outlined),
+              tooltip: 'Keyboard shortcuts (F1)',
+            ),
         ],
       ),
       body: Column(
@@ -2812,11 +3040,26 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                   constraints: BoxConstraints(
                     maxWidth: isDesktop ? 500 : double.infinity,
                   ),
-                  child: TextField(
+                  child: CallbackShortcuts(
+                    bindings: searchFieldBindings,
+                    child: TextField(
                     controller: _searchController,
-                    onSubmitted: _commitSearch,
+                    focusNode: searchFocus,
+                    // Keep focus in search on Enter (wide screens), so ↑/↓
+                    // and the next search work straight after.
+                    onEditingComplete: keyboardFirst ? () {} : null,
+                    onSubmitted: (term) {
+                      _commitSearch(term);
+                      // Alt+Enter edits a cart line instead (on web the
+                      // field still sees that Enter).
+                      if (keyboardFirst && !HardwareKeyboard.instance.isAltPressed) {
+                        addHighlightedProduct();
+                      }
+                    },
                     decoration: InputDecoration(
-                      hintText: 'Search products...',
+                      hintText: keyboardFirst
+                          ? 'Search products…  (↑↓ choose · Enter add · F1 shortcuts)'
+                          : 'Search products...',
                       prefixIcon: const Icon(Icons.search, size: 22),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
@@ -2835,6 +3078,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                         vertical: 14,
                       ),
                     ),
+                  ),
                   ),
                 ),
               ),
@@ -3225,6 +3469,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
   Widget _buildQuickGrid() {
     final sizes = _quickAvailableSizes();
     final products = _quickFilteredProducts();
+    final highlighted = highlightIndexFor(products.length);
     final color = _getCategoryColor(_quickCategory!);
     final label = _quickCategory == 'GI' && _quickGiType != null
         ? '$_quickCategory $_quickGiType'
@@ -3306,12 +3551,18 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       itemCount: products.length,
                       itemBuilder: (context, index) {
                         final product = products[index];
-                        return _QuickProductCell(
-                          product: product,
-                          isInCart: _isProductInCart(product.id),
-                          quantity: _cartQuantityForProduct(product.id),
-                          price: _listPriceOf(product),
-                          onTap: () => _showQuantityDialog(product),
+                        final on = index == highlighted;
+                        return keyboardHighlight(
+                          key: on ? highlightKey : null,
+                          on: on,
+                          radius: 10,
+                          child: _QuickProductCell(
+                            product: product,
+                            isInCart: _isProductInCart(product.id),
+                            quantity: _cartQuantityForProduct(product.id),
+                            price: _listPriceOf(product),
+                            onTap: () => _showQuantityDialog(product),
+                          ),
                         );
                       },
                     ),
@@ -3354,6 +3605,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
       );
     }
 
+    final highlighted = highlightIndexFor(_filteredProducts.length);
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -3368,7 +3620,11 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         final isSelected = _isProductInCart(product.id);
         final quantity = _cartQuantityForProduct(product.id);
 
-        return _ProductCard(
+        final on = index == highlighted;
+        return keyboardHighlight(
+          key: on ? highlightKey : null,
+          on: on,
+          child: _ProductCard(
           product: product,
           isSelected: isSelected,
           quantity: quantity,
@@ -3376,6 +3632,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
           onTap: () => _showQuantityDialog(product),
           showPurchasePrice: showPurchasePrices,
           showSalesInfo: _currentSortOption == ProductSortOption.highSelling,
+          ),
         );
       },
     );
@@ -3415,6 +3672,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       _perFootItems.clear();
                       _lineColorCode.clear();
                       _lineTintPrice.clear();
+                      _lineTintUnits.clear();
                       _cartItemOrder.clear();
                       _lineProductId.clear();
                       _lineNameOverride.clear();
@@ -3527,7 +3785,13 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                       // the same product bought in more than one line (e.g.
                       // topped up later) shows as separate cards.
                       for (int i = 0; i < _filteredCartLines.length; i++)
-                        _CartItem(
+                        keyboardHighlight(
+                          key: isCartPicked(_filteredCartLines[i].lineKey)
+                              ? cartPickKey
+                              : null,
+                          on: isCartPicked(_filteredCartLines[i].lineKey),
+                          radius: 12,
+                          child: _CartItem(
                           product: _filteredCartLines[i].product,
                           quantity: _filteredCartLines[i].quantity,
                           price: _filteredCartLines[i].basePrice,
@@ -3548,6 +3812,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
                           itemNumber: i + 1,
                           nameOverride: _filteredCartLines[i].nameOverride,
                           colorCode: _filteredCartLines[i].colorCode,
+                        ),
                         ),
                       // Custom items
                       for (int i = 0; i < _customItemOrder.length; i++)
@@ -4133,6 +4398,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
+                autofocus: true,
                 leading: const Icon(Icons.receipt_long_outlined),
                 title: const Text('Preview Bill'),
                 subtitle: const Text('Can be completed as a sale'),
@@ -4205,6 +4471,10 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
               colorCode: line.colorCode,
               tintPrice: line.tintPrice,
               tintCost: line.tintCost,
+              tintUnits: line.tintUnits,
+              tintProductId: line.tintUnits == null
+                  ? null
+                  : findTintProduct(_allProducts)?.id,
               // A renamed line only ever shows on the Estimate — a real
               // Bill/Invoice always prints the product's actual name.
               displayName: isEstimate ? line.nameOverride : null,
@@ -4257,6 +4527,7 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
         _perFootItems.clear();
         _lineColorCode.clear();
         _lineTintPrice.clear();
+        _lineTintUnits.clear();
         _cartItemOrder.clear();
         _lineProductId.clear();
         _lineNameOverride.clear();
@@ -4294,6 +4565,8 @@ class _RecordSaleScreenState extends State<RecordSaleScreen> {
 
   @override
   void dispose() {
+    disposeSaleKeyboard();
+    _discountFocus.dispose();
     _searchController.dispose();
     _discountController.dispose();
     _notesController.dispose();
@@ -5993,6 +6266,9 @@ class _PartyPickerSheetState extends State<_PartyPickerSheet> {
       LedgerService().getParties(PartyType.customer);
   String _query = '';
 
+  /// The list as last shown, so Enter can pick its first entry.
+  List<Party> _shown = const [];
+
   Future<void> _addNew() async {
     final party = await showPartyFormDialog(context,
         type: PartyType.customer, initialName: _query.trim());
@@ -6020,6 +6296,9 @@ class _PartyPickerSheetState extends State<_PartyPickerSheet> {
                     isDense: true,
                   ),
                   onChanged: (v) => setState(() => _query = v),
+                  onSubmitted: (_) {
+                    if (_shown.isNotEmpty) Navigator.pop(context, _shown.first);
+                  },
                 ),
               ),
               ListTile(
@@ -6045,6 +6324,7 @@ class _PartyPickerSheetState extends State<_PartyPickerSheet> {
                             p.name.toLowerCase().contains(q) ||
                             (p.phone ?? '').contains(q))
                         .toList();
+                    _shown = parties;
                     if (parties.isEmpty) {
                       return const Center(child: Text('No shopkeepers found'));
                     }

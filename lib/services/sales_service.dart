@@ -109,6 +109,18 @@ class SalesService {
           'lastSoldAt': FieldValue.serverTimestamp(),
           ...?wholesaleUpdates[item.productId],
         });
+
+        // A tinted bucket also uses up units of the Tint product.
+        if (item.tintStockUnits > 0) {
+          batch.update(
+            _firestore.collection(_productsCollection).doc(item.tintProductId),
+            {
+              'stock': FieldValue.increment(storeQty(-item.tintStockUnits)),
+              'totalSold': FieldValue.increment(storeQty(item.tintStockUnits)),
+              'lastSoldAt': FieldValue.serverTimestamp(),
+            },
+          );
+        }
       }
 
       // 3. Update global revenue counter (for analytics optimization)
@@ -266,6 +278,21 @@ class SalesService {
               'stock': FieldValue.increment(storeQty(restoreUnits)), // Restore stock
               'totalSold': FieldValue.increment(storeQty(-returnQty)), // Decrease sold count
             });
+          }
+          // Returned tinted buckets give their share of tint back.
+          final tintBack = item.quantity <= 0
+              ? 0.0
+              : roundQty(item.tintStockUnits * returnQty / item.quantity);
+          if (tintBack > 0) {
+            final tintRef = _firestore
+                .collection(_productsCollection)
+                .doc(item.tintProductId);
+            if ((await tintRef.get()).exists) {
+              batch.update(tintRef, {
+                'stock': FieldValue.increment(storeQty(tintBack)),
+                'totalSold': FieldValue.increment(storeQty(-tintBack)),
+              });
+            }
           }
         }
 
@@ -547,6 +574,10 @@ class SalesService {
           if (item.productId.startsWith('custom_')) continue;
           totals[item.productId] =
               (totals[item.productId] ?? 0) + item.effectiveStockUnits;
+          if (item.tintStockUnits > 0) {
+            totals[item.tintProductId!] =
+                (totals[item.tintProductId!] ?? 0) + item.tintStockUnits;
+          }
         }
         return totals;
       }
@@ -774,6 +805,18 @@ class SalesService {
           'stock': FieldValue.increment(storeQty(item.effectiveStockUnits)),
           'totalSold': FieldValue.increment(storeQty(-item.quantity)),
           'saleCount': FieldValue.increment(-1),
+        });
+      }
+
+      // Give back the tint used by tinted buckets.
+      for (final item in items) {
+        if (item.tintStockUnits <= 0) continue;
+        final tintRef =
+            _firestore.collection(_productsCollection).doc(item.tintProductId);
+        if (!(await tintRef.get()).exists) continue;
+        batch.update(tintRef, {
+          'stock': FieldValue.increment(storeQty(item.tintStockUnits)),
+          'totalSold': FieldValue.increment(storeQty(-item.tintStockUnits)),
         });
       }
 

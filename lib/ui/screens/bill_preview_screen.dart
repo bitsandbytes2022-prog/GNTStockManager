@@ -57,6 +57,10 @@ class BillLineItem {
   /// What the tint charge cost the shop; already included in [unitCost].
   final double? tintCost;
 
+  /// Units of the Tint product ([tintProductId]) in each bucket.
+  final double? tintUnits;
+  final String? tintProductId;
+
   const BillLineItem({
     required this.product,
     required this.quantity,
@@ -69,6 +73,8 @@ class BillLineItem {
     this.colorCode,
     this.tintPrice,
     this.tintCost,
+    this.tintUnits,
+    this.tintProductId,
   });
 
   /// The name saved on the sale: the product's, with a tinted bucket's
@@ -322,6 +328,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
           colorCode: line.colorCode,
           tintPrice: line.tintPrice,
           tintCost: line.tintCost,
+          tintUnits: line.tintUnits,
+          tintProductId: line.tintProductId,
           purchasePrice: line.unitCost,
           isPerFoot: line.isPerFoot,
           stockUnits: line.stockUnits,

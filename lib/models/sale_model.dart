@@ -97,9 +97,15 @@ class SaleItem {
   /// bucket's own price). Null when the line wasn't tinted.
   final double? tintPrice;
 
-  /// What [tintPrice] cost the shop (from the Tint product's cost ratio),
-  /// included in [purchasePrice].
+  /// What [tintPrice] cost the shop — [tintUnits] at the Tint product's
+  /// purchase price — included in [purchasePrice].
   final double? tintCost;
+
+  /// Units of the shop's Tint product ([tintProductId]) mixed into each
+  /// bucket. Taken off the Tint product's stock along with the bucket.
+  /// Null on lines tinted before tint was counted in units.
+  final double? tintUnits;
+  final String? tintProductId;
 
   SaleItem({
     required this.productId,
@@ -116,6 +122,8 @@ class SaleItem {
     this.colorCode,
     this.tintPrice,
     this.tintCost,
+    this.tintUnits,
+    this.tintProductId,
   }) : total = salePrice * quantity;
 
   /// [name] with a tinted line's colour code appended: "Bucket (CODE)".
@@ -136,6 +144,11 @@ class SaleItem {
   /// sales never touched stock until stockUnits was introduced).
   double get effectiveStockUnits => stockUnits ?? (isPerFoot ? 0 : quantity);
 
+  /// Tint units this line takes from the Tint product: per bucket, times
+  /// the buckets sold. 0 when untinted.
+  double get tintStockUnits =>
+      tintProductId == null ? 0 : roundQty((tintUnits ?? 0) * quantity);
+
   Map<String, dynamic> toMap() => {
     'productId': productId,
     'productName': productName,
@@ -152,6 +165,8 @@ class SaleItem {
     if (colorCode != null) 'colorCode': colorCode,
     if (tintPrice != null) 'tintPrice': tintPrice,
     if (tintCost != null) 'tintCost': tintCost,
+    if (tintUnits != null) 'tintUnits': storeQty(tintUnits!),
+    if (tintProductId != null) 'tintProductId': tintProductId,
   };
 
   factory SaleItem.fromMap(Map<String, dynamic> map) {
@@ -170,6 +185,8 @@ class SaleItem {
       colorCode: map['colorCode'] as String?,
       tintPrice: (map['tintPrice'] as num?)?.toDouble(),
       tintCost: (map['tintCost'] as num?)?.toDouble(),
+      tintUnits: (map['tintUnits'] as num?)?.toDouble(),
+      tintProductId: map['tintProductId'] as String?,
     );
   }
 
@@ -195,6 +212,8 @@ class SaleItem {
       colorCode: colorCode,
       tintPrice: tintPrice,
       tintCost: tintCost,
+      tintUnits: tintUnits,
+      tintProductId: tintProductId,
       productId: productId ?? this.productId,
       productName: productName ?? this.productName,
       productSize: productSize ?? this.productSize,

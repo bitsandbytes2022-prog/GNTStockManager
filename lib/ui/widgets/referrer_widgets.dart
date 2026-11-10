@@ -141,6 +141,9 @@ class _ReferrerPickerSheetState extends State<_ReferrerPickerSheet> {
   /// Null shows both trades.
   ReferrerType? _type;
 
+  /// The list as last shown, so Enter can pick its first entry.
+  List<Referrer> _shown = const [];
+
   Future<void> _addNew() async {
     final referrer = await showReferrerFormDialog(context,
         type: _type, initialName: _query.trim());
@@ -168,6 +171,9 @@ class _ReferrerPickerSheetState extends State<_ReferrerPickerSheet> {
                     isDense: true,
                   ),
                   onChanged: (v) => setState(() => _query = v),
+                  onSubmitted: (_) {
+                    if (_shown.isNotEmpty) Navigator.pop(context, _shown.first);
+                  },
                 ),
               ),
               Padding(
@@ -210,6 +216,7 @@ class _ReferrerPickerSheetState extends State<_ReferrerPickerSheet> {
                                 r.name.toLowerCase().contains(q) ||
                                 (r.phone ?? '').contains(q)))
                         .toList();
+                    _shown = referrers;
                     if (referrers.isEmpty) {
                       return const Center(child: Text('No one found'));
                     }
